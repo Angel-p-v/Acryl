@@ -122,6 +122,9 @@ jobs:
             librsvg2-dev \
             libmpv-dev
 
+      - name: Instalar tauri-cli
+        run: cargo install tauri-cli
+
       - name: Construir instaladores con Tauri
         run: cargo tauri build
         working-directory: src-tauri
@@ -171,6 +174,9 @@ jobs:
             librsvg2-dev \
             libmpv-dev \
             xvfb
+
+      - name: Instalar tauri-cli
+        run: cargo install tauri-cli
 
       - name: Compilar la aplicación Tauri
         run: cargo tauri build
