@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { getMediaDetails, toggleFavorite, toggleWatched, playerOpen } from '../services/tauri';
+import { useLanguage } from '../contexts/LanguageContext';
 import type { MediaDetails } from '../types/media';
 import type { JSX } from 'react';
 
@@ -18,6 +19,7 @@ export function MediaDetails({
   readonly mediaId: number;
   readonly onBack: () => void;
 }): JSX.Element {
+  const { t } = useLanguage();
   const [details, setDetails] = useState<MediaDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,11 +29,11 @@ export function MediaDetails({
       const d = await getMediaDetails('media-manager.db', mediaId);
       setDetails(d);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'no se pudieron cargar los detalles');
+      setError(e instanceof Error ? e.message : t('details.error'));
     } finally {
       setLoading(false);
     }
-  }, [mediaId]);
+  }, [mediaId, t]);
 
   useEffect(() => {
     // Carga de datos al montar (o al cambiar mediaId). El setState ocurre tras
@@ -47,9 +49,9 @@ export function MediaDetails({
       const next = await toggleFavorite('media-manager.db', mediaId);
       setDetails((d) => (d ? { ...d, media: { ...d.media, is_favorite: next } } : d));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'no se pudo actualizar favorito');
+      setError(e instanceof Error ? e.message : t('details.favorite.error'));
     }
-  }, [details, mediaId]);
+  }, [details, mediaId, t]);
 
   const handleToggleWatched = useCallback(async (): Promise<void> => {
     if (!details) return;
@@ -57,22 +59,25 @@ export function MediaDetails({
       const next = await toggleWatched('media-manager.db', mediaId);
       setDetails((d) => (d ? { ...d, media: { ...d.media, is_watched: next } } : d));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'no se pudo actualizar visto');
+      setError(e instanceof Error ? e.message : t('details.watched.error'));
     }
-  }, [details, mediaId]);
+  }, [details, mediaId, t]);
 
-  const handlePlayFile = useCallback(async (filePath: string): Promise<void> => {
-    try {
-      await playerOpen(filePath);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'no se pudo abrir el archivo');
-    }
-  }, []);
+  const handlePlayFile = useCallback(
+    async (filePath: string): Promise<void> => {
+      try {
+        await playerOpen(filePath);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : t('details.openFile'));
+      }
+    },
+    [t]
+  );
 
   if (loading) {
     return (
       <div className="details-page">
-        <p className="loading">Cargando detalles…</p>
+        <p className="loading">{t('details.loading')}</p>
       </div>
     );
   }
@@ -82,7 +87,7 @@ export function MediaDetails({
       <div className="details-page">
         <p className="error">{error}</p>
         <button className="back-btn" onClick={onBack}>
-          ← Volver
+          {t('details.back')}
         </button>
       </div>
     );
@@ -91,9 +96,9 @@ export function MediaDetails({
   if (!details) {
     return (
       <div className="details-page">
-        <p className="empty">No se encontró el medio.</p>
+        <p className="empty">{t('details.notFound')}</p>
         <button className="back-btn" onClick={onBack}>
-          ← Volver
+          {t('details.back')}
         </button>
       </div>
     );
@@ -106,7 +111,7 @@ export function MediaDetails({
     <div className="details-page">
       <header className="details-header">
         <button className="back-btn" onClick={onBack}>
-          ← Volver
+          {t('details.back')}
         </button>
         <h1 className="details-title">{media.title}</h1>
         <div className="details-meta">
@@ -118,14 +123,14 @@ export function MediaDetails({
           <button
             className={`status-btn favorite ${media.is_favorite ? 'active' : ''}`}
             onClick={handleToggleFavorite}
-            title={media.is_favorite ? 'Quitar favorito' : 'Marcar favorito'}
+            title={media.is_favorite ? t('details.favorite.remove') : t('details.favorite.add')}
           >
             {media.is_favorite ? '★' : '☆'}
           </button>
           <button
             className={`status-btn watched ${media.is_watched ? 'active' : ''}`}
             onClick={handleToggleWatched}
-            title={media.is_watched ? 'Marcar como no visto' : 'Marcar visto'}
+            title={media.is_watched ? t('details.watched.remove') : t('details.watched.add')}
           >
             {media.is_watched ? '✓' : '○'}
           </button>
@@ -142,22 +147,25 @@ export function MediaDetails({
         </div>
 
         <div className="details-files">
-          <h2 className="details-files-title">Archivos ({files.length})</h2>
+          <h2 className="details-files-title">{t('details.files', { count: files.length })}</h2>
           <ul className="details-files-list">
             {files.map((file) => (
               <li key={file.id} className="details-file-item">
                 <span className="details-file-episode">
                   {file.season !== null && file.episode !== null
-                    ? `S${String(file.season).padStart(2, '0')}E${String(file.episode).padStart(2, '0')}`
+                    ? t('details.episode', {
+                        season: file.season,
+                        episode: file.episode,
+                      })
                     : '—'}
                 </span>
-                <span className="details-file-title">{file.title ?? 'Sin título'}</span>
+                <span className="details-file-title">{file.title ?? t('details.noTitle')}</span>
                 <button
                   className="details-file-play"
                   onClick={() => {
                     void handlePlayFile(file.file_path);
                   }}
-                  title="Reproducir"
+                  title={t('details.play')}
                 >
                   ▶
                 </button>

@@ -163,14 +163,14 @@ src-tauri/                ← Rust
 | Hito 3 | Reproductor integrado (libmpv) | ✅ completado |
 | Hito 4 | UI completa (detalles, favoritos, visto, navegación) | ✅ completado |
 | Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ✅ completado |
-| Hito 6 | Configuración YAML en el backend | ⏳ pendiente |
-| Hito 7 | Internacionalización (i18n) de la UI | ⏳ pendiente |
+| Hito 6 | Configuración YAML en el backend | ✅ completado |
+| Hito 7 | Internacionalización (i18n) de la UI | ✅ completado |
 | Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ⏳ pendiente |
 | Hito 9 | Publicación automática en GitHub Releases | ⏳ pendiente |
 
 ## 9. Próximo paso inmediato
 
-El siguiente hito a implementar es el **Hito 6 — Configuración YAML en el backend**, seguido del Hito 7 (i18n), Hito 8 (metadatos automáticos e historial) y Hito 9 (publicación en releases).
+El siguiente hito a implementar es el **Hito 8 — Metadatos automáticos TMDB/TVDB + historial de reproducción**, seguido del Hito 9 (publicación en releases).
 
 ---
 

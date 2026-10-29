@@ -86,6 +86,8 @@ Después de instalar con `.deb` o `.rpm`, el comando `media-manager` estará dis
 | 🔍 Búsqueda de medios desde el frontend | ✅ Hito 1 completado |
 | 🖼️ Pósteres de medios en alta resolución | ✅ Hito 1 completado |
 | ▶️ Reproductor integrado (`libmpv` / GStreamer) | ✅ Hito 3 completado |
+| ⚙️ Configuración YAML en el backend | ✅ Hito 6 completado |
+| 🌐 Internacionalización (i18n) de la UI | ✅ Hito 7 completado |
 | 📦 Instaladores nativos Linux (`.deb`, AppImage, `.rpm`) | ✅ Hito 5 completado |
 
 ---
@@ -211,6 +213,8 @@ Antes de pushear, ambos deben pasar:
 | Hito 3 | Reproductor integrado (`libmpv` / GStreamer) | ✅ completado |
 | Hito 4 | UI completa (detalles, favoritos, historial) | ✅ completado |
 | Hito 5 | Empaquetado Linux (`.deb`, AppImage, `.rpm`) | ✅ completado |
+| Hito 6 | Configuración YAML en el backend | ✅ completado |
+| Hito 7 | Internacionalización (i18n) de la UI | ✅ completado |
 
 Ver [`PLAN_DESKTOP.md`](./PLAN_DESKTOP.md) para el plan detallado.
 

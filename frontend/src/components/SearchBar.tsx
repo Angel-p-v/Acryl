@@ -3,6 +3,7 @@ import { useCallback, useState, useEffect } from 'react';
 import { MediaList } from './MediaList';
 import { MediaDetails } from './MediaDetails';
 import { listMedia, searchMedia } from '../services/tauri';
+import { useLanguage } from '../contexts/LanguageContext';
 
 import type { Media } from '../types/media';
 import type { JSX } from 'react';
@@ -12,6 +13,7 @@ type SearchBarProps = {
 };
 
 export function SearchBar({ dbPath }: SearchBarProps): JSX.Element {
+  const { t } = useLanguage();
   const [query, setQuery] = useState('');
   const [media, setMedia] = useState<readonly Media[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,11 +55,11 @@ export function SearchBar({ dbPath }: SearchBarProps): JSX.Element {
   return (
     <section className="search-bar">
       <label htmlFor="media-search">
-        <span className="visually-hidden">Buscar medios</span>
+        <span className="visually-hidden">{t('search.label')}</span>
         <input
           id="media-search"
           type="search"
-          placeholder="Buscar por título…"
+          placeholder={t('search.placeholder')}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -71,7 +73,7 @@ export function SearchBar({ dbPath }: SearchBarProps): JSX.Element {
           disabled={loading}
         />
       </label>
-      {loading && <p className="loading">Buscando…</p>}
+      {loading && <p className="loading">{t('search.loading')}</p>}
       {selectedMediaId !== null ? (
         <MediaDetails mediaId={selectedMediaId} onBack={handleBack} />
       ) : (

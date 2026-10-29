@@ -9,6 +9,7 @@ import {
   playerStatus,
   playerVolume,
 } from '../services/tauri';
+import { useLanguage } from '../contexts/LanguageContext';
 
 import type { PlayerStatus } from '../types/media';
 import type { JSX } from 'react';
@@ -27,6 +28,7 @@ const UPDATE_INTERVAL_MS = 1000;
  * integración con los comandos Tauri.
  */
 export function VideoPlayer(): JSX.Element {
+  const { t } = useLanguage();
   const containerRef = useRef<HTMLDivElement>(null);
   const [filePath, setFilePath] = useState<string>('');
   const [status, setStatus] = useState<PlayerStatus | null>(null);
@@ -60,9 +62,9 @@ export function VideoPlayer(): JSX.Element {
       await playerPlay();
       await updateStatus();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'no se pudo reproducir');
+      setError(e instanceof Error ? e.message : t('player.errorPlay'));
     }
-  }, [updateStatus]);
+  }, [updateStatus, t]);
 
   const handlePause = useCallback(async (): Promise<void> => {
     setError(null);
@@ -70,9 +72,9 @@ export function VideoPlayer(): JSX.Element {
       await playerPause();
       await updateStatus();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'no se pudo pausar');
+      setError(e instanceof Error ? e.message : t('player.errorPause'));
     }
-  }, [updateStatus]);
+  }, [updateStatus, t]);
 
   const handleStop = useCallback(async (): Promise<void> => {
     setError(null);
@@ -80,9 +82,9 @@ export function VideoPlayer(): JSX.Element {
       await playerStop();
       await updateStatus();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'no se pudo detener');
+      setError(e instanceof Error ? e.message : t('player.errorStop'));
     }
-  }, [updateStatus]);
+  }, [updateStatus, t]);
 
   const handleSeek = useCallback(
     async (seconds: number): Promise<void> => {
@@ -91,10 +93,10 @@ export function VideoPlayer(): JSX.Element {
         await playerSeek(seconds);
         await updateStatus();
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'no se pudo buscar');
+        setError(e instanceof Error ? e.message : t('player.errorSeek'));
       }
     },
-    [updateStatus]
+    [updateStatus, t]
   );
 
   const handleVolume = useCallback(
@@ -104,10 +106,10 @@ export function VideoPlayer(): JSX.Element {
         await playerVolume(volume);
         await updateStatus();
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'no se pudo ajustar volumen');
+        setError(e instanceof Error ? e.message : t('player.errorVolume'));
       }
     },
-    [updateStatus]
+    [updateStatus, t]
   );
 
   const handleOpenFile = useCallback(
@@ -119,12 +121,12 @@ export function VideoPlayer(): JSX.Element {
         setFilePath(path);
         await updateStatus();
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'no se pudo abrir el archivo');
+        setError(e instanceof Error ? e.message : t('player.errorOpen'));
       } finally {
         setIsLoading(false);
       }
     },
-    [updateStatus]
+    [updateStatus, t]
   );
 
   const handleOpenInput = useCallback(async (): Promise<void> => {
@@ -169,7 +171,7 @@ export function VideoPlayer(): JSX.Element {
       <div className="video-open-row">
         <input
           type="text"
-          placeholder="Ruta del archivo de vídeo"
+          placeholder={t('player.openFileLabel')}
           value={inputPath}
           onChange={(e) => setInputPath(e.target.value)}
           onKeyPress={onOpenInputKeyPress}
@@ -179,9 +181,9 @@ export function VideoPlayer(): JSX.Element {
           className="control-btn"
           onClick={onOpenInput}
           disabled={isLoading || !inputPath}
-          title="Abrir archivo"
+          title={t('player.openButtonTitle')}
         >
-          Abrir
+          {t('player.openButton')}
         </button>
       </div>
 
@@ -202,7 +204,7 @@ export function VideoPlayer(): JSX.Element {
           </>
         ) : (
           <div className="video-placeholder">
-            <p>Escribe una ruta de archivo y pulsa Abrir</p>
+            <p>{t('player.placeholder')}</p>
           </div>
         )}
       </div>
@@ -210,14 +212,19 @@ export function VideoPlayer(): JSX.Element {
       {filePath && (
         <div className="video-controls">
           <div className="control-row">
-            <button className="control-btn" onClick={onStop} disabled={isLoading} title="Detener">
+            <button
+              className="control-btn"
+              onClick={onStop}
+              disabled={isLoading}
+              title={t('player.stop')}
+            >
               ⏹
             </button>
             <button
               className="control-btn"
               onClick={onPlayPause}
               disabled={isLoading}
-              title={status?.paused ? 'Reproducir' : 'Pausar'}
+              title={status?.paused ? t('player.play') : t('player.pause')}
             >
               {status?.paused ? '▶' : '⏸'}
             </button>
@@ -238,7 +245,7 @@ export function VideoPlayer(): JSX.Element {
           </div>
 
           <div className="control-row control-volume">
-            <span className="control-label">Volumen</span>
+            <span className="control-label">{t('player.volume')}</span>
             <input
               type="range"
               min="0"
