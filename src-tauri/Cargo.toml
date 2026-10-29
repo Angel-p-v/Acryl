@@ -18,9 +18,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.7.4" }
 pkg-config = "0.3"
 
+[dev-dependencies]
+tempfile = "3.0"
+
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
 log = "0.4"
 tauri = { version = "2.12.5" }
 tauri-plugin-log = "2"
