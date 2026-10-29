@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from './mockInvoke';
 
 import type { Media } from '../../src/types/media';
 
@@ -28,10 +28,9 @@ describe('Flujo de la aplicación media-manager (E2E)', () => {
   });
 
   it('debe listar medios desde la base de datos', async () => {
-    const result = await invoke<{ media: Media[]; total: number }>(
-      'list_media_cmd',
-      { db_path: DEFAULT_DB_PATH }
-    );
+    const result = await invoke<{ media: Media[]; total: number }>('list_media_cmd', {
+      db_path: DEFAULT_DB_PATH,
+    });
 
     expect(result.media).toBeInstanceOf(Array);
     expect(result.total).toBeGreaterThanOrEqual(0);

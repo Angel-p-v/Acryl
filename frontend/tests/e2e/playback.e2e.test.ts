@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from './mockInvoke';
+import { writeFileSync, existsSync } from 'node:fs';
 
 import type { PlayerStatus } from '../../src/types/media';
 
@@ -22,13 +23,11 @@ const DEFAULT_DB_PATH = 'media-manager.db';
 const TEST_VIDEO_PATH = '/tmp/media-manager-e2e-test-video.mkv';
 
 /**
- * Crea un archivo de vídeo de prueba válido (frame vacío) si no existe.
+ * Crea un archivo de vídeo de prueba vacío si no existe.
  */
 function ensureTestVideo(): void {
-  try {
-    require('node:fs').writeFileSync(TEST_VIDEO_PATH, '');
-  } catch {
-    // Si no se puede crear, las pruebas de reproducción fallarán controladamente
+  if (!existsSync(TEST_VIDEO_PATH)) {
+    writeFileSync(TEST_VIDEO_PATH, '');
   }
 }
 
@@ -38,20 +37,14 @@ describe('Reproductor integrado (E2E)', () => {
   });
 
   it('debe abrir un archivo de vídeo en el reproductor', async () => {
-    // Crear un archivo de prueba si no existe
-    const fs = require('node:fs');
-    if (!fs.existsSync(TEST_VIDEO_PATH)) {
-      fs.writeFileSync(TEST_VIDEO_PATH, '');
-    }
+    ensureTestVideo();
 
-    // Intentar abrir el archivo (puede fallar si no hay servidor de display)
     try {
       await invoke<void>('player_open_cmd', {
         db_path: DEFAULT_DB_PATH,
         file_path: TEST_VIDEO_PATH,
       });
     } catch (error) {
-      // Si la aplicación no está en ejecución, el error es esperado
       console.warn(
         'player_open_cmd falló (posiblemente la app no está corriendo):',
         (error as Error).message

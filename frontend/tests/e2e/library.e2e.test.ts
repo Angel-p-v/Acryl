@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from './mockInvoke';
 
 import type { Media, MediaDetails } from '../../src/types/media';
 
@@ -71,13 +71,10 @@ describe('Biblioteca de medios (E2E)', () => {
     }
 
     if (testMediaId) {
-      const details = await invoke<MediaDetails | null>(
-        'get_media_details_cmd',
-        {
-          db_path: DEFAULT_DB_PATH,
-          media_id: testMediaId,
-        }
-      );
+      const details = await invoke<MediaDetails | null>('get_media_details_cmd', {
+        db_path: DEFAULT_DB_PATH,
+        media_id: testMediaId,
+      });
 
       expect(details).not.toBeNull();
       if (details) {
@@ -86,13 +83,10 @@ describe('Biblioteca de medios (E2E)', () => {
       }
     } else {
       // Si no hay medios, el comando debe devolver null o manejarse
-      const details = await invoke<MediaDetails | null>(
-        'get_media_details_cmd',
-        {
-          db_path: DEFAULT_DB_PATH,
-          media_id: 999999,
-        }
-      );
+      const details = await invoke<MediaDetails | null>('get_media_details_cmd', {
+        db_path: DEFAULT_DB_PATH,
+        media_id: 999999,
+      });
       expect(details).toBeNull();
     }
   });
@@ -111,13 +105,10 @@ describe('Biblioteca de medios (E2E)', () => {
 
     if (testMediaId) {
       // Obtener estado actual
-      const detailsBefore = await invoke<MediaDetails | null>(
-        'get_media_details_cmd',
-        {
-          db_path: DEFAULT_DB_PATH,
-          media_id: testMediaId,
-        }
-      );
+      const detailsBefore = await invoke<MediaDetails | null>('get_media_details_cmd', {
+        db_path: DEFAULT_DB_PATH,
+        media_id: testMediaId,
+      });
       const initialFavorite = detailsBefore?.media.is_favorite ?? false;
 
       // Alternar favorito
@@ -151,13 +142,10 @@ describe('Biblioteca de medios (E2E)', () => {
 
     if (testMediaId) {
       // Obtener estado actual
-      const detailsBefore = await invoke<MediaDetails | null>(
-        'get_media_details_cmd',
-        {
-          db_path: DEFAULT_DB_PATH,
-          media_id: testMediaId,
-        }
-      );
+      const detailsBefore = await invoke<MediaDetails | null>('get_media_details_cmd', {
+        db_path: DEFAULT_DB_PATH,
+        media_id: testMediaId,
+      });
       const initialWatched = detailsBefore?.media.is_watched ?? false;
 
       // Alternar visto
