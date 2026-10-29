@@ -36,7 +36,11 @@ pub struct MpvPlayer {
 impl MpvPlayer {
     /// Crea un nuevo reproductor mpv con opciones básicas (sin terminal,
     /// sin bloqueo de consola).
-    pub fn new() -> Result<Self, PlayerError> {
+    ///
+    /// Si se proporciona `wid` (window ID nativo, X11 en Linux), mpv
+    /// renderizará directamente dentro de esa ventana en lugar de crear
+    /// una ventana propia.
+    pub fn new(wid: Option<u64>) -> Result<Self, PlayerError> {
         let handle = unsafe { mpv_create() };
         if handle.is_null() {
             return Err(PlayerError::CreateFailed);
@@ -48,6 +52,12 @@ impl MpvPlayer {
         set_option_string(handle, "vo", "gpu")?;
         // Permitir aceleración por hardware.
         set_option_string(handle, "hwdec", "auto")?;
+
+        // Si se proporciona un window ID, indicarle a mpv que renderice
+        // dentro de esa ventana en lugar de crear una propia.
+        if let Some(wid) = wid {
+            set_option_string(handle, "wid", &wid.to_string())?;
+        }
 
         // Helper privado para establecer opciones como string.
         fn set_option_string(ctx: MpvHandle, name: &str, value: &str) -> Result<(), PlayerError> {
@@ -227,7 +237,7 @@ mod tests {
     /// automáticamente al salir del scope).
     #[test]
     fn crear_y_destruir_reproductor_sin_fugas() {
-        let player = MpvPlayer::new().expect("debe crear reproductor mpv");
+        let player = MpvPlayer::new(None).expect("debe crear reproductor mpv");
         // Solo verificar que el handle es no nulo mientras vive.
         assert!(!player.handle.is_null());
         // Al finalizar el scope, Drop llama a mpv_terminate_destroy.
@@ -237,7 +247,7 @@ mod tests {
     /// (no panic) en lugar de fallar silenciosamente.
     #[test]
     fn load_file_ruta_inexistente_devuelve_error() {
-        let player = MpvPlayer::new().expect("debe crear reproductor mpv");
+        let player = MpvPlayer::new(None).expect("debe crear reproductor mpv");
         let resultado = player.load_file("/ruta/que/no/existe.mkv");
         // mpv puede aceptar la ruta y fallar al reproducir, o rechazarla;
         // lo importante es que no haga panic y devuelva un Result.

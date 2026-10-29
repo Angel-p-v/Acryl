@@ -21,6 +21,9 @@ pub struct PlayerStatus {
 }
 
 /// Comando: crea (si no existe) y carga un archivo de vídeo en el reproductor.
+///
+/// mpv creará su propia ventana nativa (X11 en Linux) para renderizar el
+/// vídeo, integrada en el proceso de la app (sin `spawn` de mpv externo).
 #[command]
 pub fn player_open_cmd(
     state: State<'_, PlayerState>,
@@ -28,9 +31,10 @@ pub fn player_open_cmd(
 ) -> Result<(), String> {
     let mut player_guard = state.player.lock().map_err(|e| e.to_string())?;
 
-    // Si no hay reproductor, crear uno nuevo.
+    // Si no hay reproductor, crear uno nuevo (sin window ID: mpv crea su
+    // propia ventana nativa).
     if player_guard.is_none() {
-        let player = MpvPlayer::new().map_err(|e| e.to_string())?;
+        let player = MpvPlayer::new(None).map_err(|e| e.to_string())?;
         *player_guard = Some(player);
     }
 
