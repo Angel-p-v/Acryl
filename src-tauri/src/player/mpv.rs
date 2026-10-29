@@ -207,6 +207,9 @@ impl MpvPlayer {
     }
 }
 
+unsafe impl Send for MpvPlayer {}
+unsafe impl Sync for MpvPlayer {}
+
 impl Drop for MpvPlayer {
     fn drop(&mut self) {
         // mpv_terminate_destroy es idempotente con respecto a la liberación de

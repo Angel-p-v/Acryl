@@ -5,10 +5,13 @@ mod commands;
 mod db;
 mod player;
 
+use crate::player::PlayerState;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default().build())
+        .manage(PlayerState::new())
         .invoke_handler(tauri::generate_handler![
             commands::list_media_cmd,
             commands::search_media_cmd,
@@ -17,6 +20,13 @@ pub fn run() {
             commands::count_media_cmd,
             commands::list_folders_cmd,
             commands::list_files_by_media_cmd,
+            commands::player_open_cmd,
+            commands::player_play_cmd,
+            commands::player_pause_cmd,
+            commands::player_stop_cmd,
+            commands::player_seek_cmd,
+            commands::player_volume_cmd,
+            commands::player_status_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");

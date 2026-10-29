@@ -4,11 +4,114 @@
 //! de los repositorios de `db::` y cierra la conexión. No hay estado global.
 
 use serde::Serialize;
-use tauri::command;
+use tauri::{command, State};
 
 use crate::db::{
     FileRepository, ListMediaOptions, MediaRepository, SearchMediaOptions, close_db, open_db,
 };
+use crate::player::{MpvPlayer, PlayerState};
+
+/// Respuesta de estado del reproductor.
+#[derive(Debug, Serialize)]
+pub struct PlayerStatus {
+    pub time_position: f64,
+    pub duration: f64,
+    pub paused: bool,
+    pub volume: f64,
+}
+
+/// Comando: crea (si no existe) y carga un archivo de vídeo en el reproductor.
+#[command]
+pub fn player_open_cmd(
+    state: State<'_, PlayerState>,
+    file_path: String,
+) -> Result<(), String> {
+    let mut player_guard = state.player.lock().map_err(|e| e.to_string())?;
+
+    // Si no hay reproductor, crear uno nuevo.
+    if player_guard.is_none() {
+        let player = MpvPlayer::new().map_err(|e| e.to_string())?;
+        *player_guard = Some(player);
+    }
+
+    let player = player_guard
+        .as_mut()
+        .ok_or_else(|| "reproductor no disponible".to_string())?;
+
+    player.load_file(&file_path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Comando: reanuda o inicia la reproducción.
+#[command]
+pub fn player_play_cmd(state: State<'_, PlayerState>) -> Result<(), String> {
+    let mut player_guard = state.player.lock().map_err(|e| e.to_string())?;
+    let player = player_guard
+        .as_mut()
+        .ok_or_else(|| "no hay reproductor activo".to_string())?;
+    player.play().map_err(|e| e.to_string())
+}
+
+/// Comando: pausa la reproducción.
+#[command]
+pub fn player_pause_cmd(state: State<'_, PlayerState>) -> Result<(), String> {
+    let mut player_guard = state.player.lock().map_err(|e| e.to_string())?;
+    let player = player_guard
+        .as_mut()
+        .ok_or_else(|| "no hay reproductor activo".to_string())?;
+    player.pause().map_err(|e| e.to_string())
+}
+
+/// Comando: detiene la reproducción y cierra el archivo actual.
+#[command]
+pub fn player_stop_cmd(state: State<'_, PlayerState>) -> Result<(), String> {
+    let mut player_guard = state.player.lock().map_err(|e| e.to_string())?;
+    let player = player_guard
+        .as_mut()
+        .ok_or_else(|| "no hay reproductor activo".to_string())?;
+    player.stop().map_err(|e| e.to_string())
+}
+
+/// Comando: busca a una posición (segundos).
+#[command]
+pub fn player_seek_cmd(
+    state: State<'_, PlayerState>,
+    seconds: f64,
+) -> Result<(), String> {
+    let mut player_guard = state.player.lock().map_err(|e| e.to_string())?;
+    let player = player_guard
+        .as_mut()
+        .ok_or_else(|| "no hay reproductor activo".to_string())?;
+    player.seek(seconds).map_err(|e| e.to_string())
+}
+
+/// Comando: establece el volumen (0.0 a 100.0).
+#[command]
+pub fn player_volume_cmd(
+    state: State<'_, PlayerState>,
+    volume: f64,
+) -> Result<(), String> {
+    let mut player_guard = state.player.lock().map_err(|e| e.to_string())?;
+    let player = player_guard
+        .as_mut()
+        .ok_or_else(|| "no hay reproductor activo".to_string())?;
+    player.set_volume(volume).map_err(|e| e.to_string())
+}
+
+/// Comando: obtiene el estado actual del reproductor.
+#[command]
+pub fn player_status_cmd(state: State<'_, PlayerState>) -> Result<PlayerStatus, String> {
+    let mut player_guard = state.player.lock().map_err(|e| e.to_string())?;
+    let player = player_guard
+        .as_mut()
+        .ok_or_else(|| "no hay reproductor activo".to_string())?;
+    Ok(PlayerStatus {
+        time_position: player.time_position().map_err(|e| e.to_string())?,
+        duration: player.duration().map_err(|e| e.to_string())?,
+        paused: player.is_paused().map_err(|e| e.to_string())?,
+        volume: player.volume().map_err(|e| e.to_string())?,
+    })
+}
 /// Respuesta de listado de medios (envuelve el vector para poder añadir
 /// metadatos de paginación en el futuro sin romper el contrato).
 #[derive(Debug, Serialize)]

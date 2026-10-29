@@ -5,5 +5,7 @@
 
 pub mod ffi;
 pub mod mpv;
+pub mod state;
 
 pub use mpv::{MpvPlayer, PlayerError};
+pub use state::PlayerState;
