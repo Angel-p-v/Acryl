@@ -13,7 +13,7 @@ use crate::db::migrations::{MIGRATIONS, Migration};
 /// El llamador es responsable de cerrar la conexión con `close_db` cuando
 /// termine de usarla.
 pub fn open_db(db_path: &str) -> RusqliteResult<Connection> {
-    let conn = Connection::open(db_path)?;
+    let mut conn = Connection::open(db_path)?;
 
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;\n
@@ -21,7 +21,7 @@ pub fn open_db(db_path: &str) -> RusqliteResult<Connection> {
          PRAGMA busy_timeout = 5000;\n",
     )?;
 
-    run_migrations(&conn, MIGRATIONS, db_path)?;
+    run_migrations(&mut conn, MIGRATIONS, db_path)?;
 
     Ok(conn)
 }
@@ -39,7 +39,11 @@ pub fn close_db(conn: Connection) {
 /// Aplica las migraciones pendientes de forma idempotente.
 /// Antes de migrar una base con esquema previo se guarda una copia de seguridad
 /// (`<db_path>.bak-v<version>-<timestamp>`).
-pub fn run_migrations(conn: &Connection, pending: &[Migration], db_path: &str) -> RusqliteResult<()> {
+pub fn run_migrations(
+    conn: &mut Connection,
+    pending: &[Migration],
+    db_path: &str,
+) -> RusqliteResult<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
             version    INTEGER PRIMARY KEY,
@@ -58,7 +62,7 @@ pub fn run_migrations(conn: &Connection, pending: &[Migration], db_path: &str) -
     let from_version = applied.iter().max().copied().unwrap_or(0);
 
     if from_version > 0 {
-        let _ = backup_db(conn, db_path, from_version);
+        backup_db(conn, db_path, from_version);
     }
 
     for migration in pending {
@@ -67,11 +71,9 @@ pub fn run_migrations(conn: &Connection, pending: &[Migration], db_path: &str) -
         }
 
         let tx = conn.transaction()?;
-        tx.execute_batch(&migration.sql)?;
-        tx.prepare(
-            "INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)",
-        )?
-        .execute(rusqlite::params![migration.version, migration.name])?;
+        tx.execute_batch(migration.sql)?;
+        tx.prepare("INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)")?
+            .execute(rusqlite::params![migration.version, migration.name])?;
         tx.commit()?;
     }
 

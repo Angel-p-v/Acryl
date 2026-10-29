@@ -4,8 +4,7 @@
 //! Recibe la conexión SQLite como parámetro (inyección de dependencias), sin
 //! estado global.
 
-use crate::db::Connection;
-use rusqlite::{params, Result as RusqliteResult};
+use rusqlite::{Connection, Result as RusqliteResult, params};
 
 /// Entidad de dominio: un título de la biblioteca (película, serie o anime).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -22,6 +21,7 @@ pub struct Media {
 
 /// Datos de entrada para insertar o actualizar un título.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct MediaInput {
     pub r#type: String,
     pub title: String,
@@ -48,26 +48,26 @@ pub struct SearchMediaOptions {
 
 /// Repositorio de títulos sobre una conexión SQLite dada.
 pub struct MediaRepository<'a> {
-    conn: &'a Connection,
+    conn: &'a mut Connection,
 }
 
 impl<'a> MediaRepository<'a> {
+    #[allow(dead_code)]
     /// Crea el repositorio sobre la conexión dada.
-    pub fn new(conn: &'a Connection) -> Self {
+    pub fn new(conn: &'a mut Connection) -> Self {
         Self { conn }
     }
 
+    #[allow(dead_code)]
     /// Inserta o actualiza un título y devuelve la fila guardada.
-    pub fn upsert(&self, input: &MediaInput) -> RusqliteResult<Media> {
+    pub fn upsert(&mut self, input: &MediaInput) -> RusqliteResult<Media> {
         let sort_title = input.sort_title.clone();
 
         // `INSERT ... ON CONFLICT ... RETURNING id` devuelve el id ya sea de
         // la inserción o del conflicto, así obtenemos el id real sin depender
         // de last_insert_rowid (que no se actualiza en el camino de UPDATE).
-        let id: i64 = self
-            .conn
-            .query_row(
-                "INSERT INTO media (type, title, sort_title, year, folder_path)
+        let id: i64 = self.conn.query_row(
+            "INSERT INTO media (type, title, sort_title, year, folder_path)
                  VALUES (?1, ?2, ?3, ?4, ?5)
                  ON CONFLICT(folder_path) DO UPDATE SET
                    type = excluded.type,
@@ -76,27 +76,27 @@ impl<'a> MediaRepository<'a> {
                    year = excluded.year,
                    updated_at = datetime('now')
                  RETURNING id",
-                params![
-                    input.r#type,
-                    input.title,
-                    sort_title,
-                    input.year,
-                    input.folder_path
-                ],
-                |row| row.get(0),
-            )?;
+            params![
+                input.r#type,
+                input.title,
+                sort_title,
+                input.year,
+                input.folder_path
+            ],
+            |row| row.get(0),
+        )?;
 
         self.find_by_id(id)?
             .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)
     }
 
     /// Busca un título por su id.
-    pub fn find_by_id(&self, id: i64) -> RusqliteResult<Option<Media>> {
+    pub fn find_by_id(&mut self, id: i64) -> RusqliteResult<Option<Media>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at
              FROM media WHERE id = ?1",
         )?;
-        let row = stmt.query_row(params![id], |row| map_media_row(row));
+        let row = stmt.query_row(params![id], map_media_row);
         match row {
             Ok(media) => Ok(Some(media)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -105,12 +105,12 @@ impl<'a> MediaRepository<'a> {
     }
 
     /// Busca un título por ruta de carpeta.
-    pub fn find_by_folder_path(&self, folder_path: &str) -> RusqliteResult<Option<Media>> {
+    pub fn find_by_folder_path(&mut self, folder_path: &str) -> RusqliteResult<Option<Media>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at
              FROM media WHERE folder_path = ?1",
         )?;
-        let row = stmt.query_row(params![folder_path], |row| map_media_row(row));
+        let row = stmt.query_row(params![folder_path], map_media_row);
         match row {
             Ok(media) => Ok(Some(media)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -119,16 +119,16 @@ impl<'a> MediaRepository<'a> {
     }
 
     /// Lista títulos con filtros opcionales (tipo, orden, límite, offset).
-    pub fn list(&self, options: ListMediaOptions) -> RusqliteResult<Vec<Media>> {
+    pub fn list(&mut self, options: ListMediaOptions) -> RusqliteResult<Vec<Media>> {
         let mut sql = String::from(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at
              FROM media",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
-        if options.r#type.is_some() {
+        if let Some(ref t) = options.r#type {
             sql.push_str(" WHERE type = ?");
-            params_vec.push(Box::new(options.r#type.unwrap()));
+            params_vec.push(Box::new(t.clone()));
         }
 
         let order_by = options.order_by.as_deref().unwrap_or("title");
@@ -145,9 +145,11 @@ impl<'a> MediaRepository<'a> {
         sql.push_str(" OFFSET ?");
         params_vec.push(Box::new(options.offset.unwrap_or(0)));
 
+        let params_slice: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
         let mut stmt = self.conn.prepare(&sql)?;
         let rows: Vec<Media> = stmt
-            .query_map(params_vec.iter().map(|p| p.as_ref()), |row| map_media_row(row))?
+            .query_map(params_slice.as_slice(), map_media_row)?
             .filter_map(Result::ok)
             .collect();
 
@@ -155,7 +157,11 @@ impl<'a> MediaRepository<'a> {
     }
 
     /// Busca títulos por texto (FTS5 con fallback LIKE).
-    pub fn search(&self, query: &str, options: SearchMediaOptions) -> RusqliteResult<Vec<Media>> {
+    pub fn search(
+        &mut self,
+        query: &str,
+        options: SearchMediaOptions,
+    ) -> RusqliteResult<Vec<Media>> {
         let trimmed = query.trim();
         if trimmed.is_empty() {
             return self.list(ListMediaOptions {
@@ -187,9 +193,11 @@ impl<'a> MediaRepository<'a> {
             sql.push_str(" LIMIT ?");
             params.push(Box::new(options.limit.unwrap_or(20)));
 
+            let params_slice: Vec<&dyn rusqlite::ToSql> =
+                params.iter().map(|p| p.as_ref()).collect();
             let mut stmt = self.conn.prepare(&sql)?;
             let rows: Vec<Media> = stmt
-                .query_map(params.iter().map(|p| p.as_ref()), |row| map_media_row(row))?
+                .query_map(params_slice.as_slice(), map_media_row)?
                 .filter_map(Result::ok)
                 .collect();
             results.extend(rows);
@@ -214,9 +222,11 @@ impl<'a> MediaRepository<'a> {
             sql.push_str(" LIMIT ?");
             params.push(Box::new(options.limit.unwrap_or(20)));
 
+            let params_slice: Vec<&dyn rusqlite::ToSql> =
+                params.iter().map(|p| p.as_ref()).collect();
             let mut stmt = self.conn.prepare(&sql)?;
             let rows: Vec<Media> = stmt
-                .query_map(params.iter().map(|p| p.as_ref()), |row| map_media_row(row))?
+                .query_map(params_slice.as_slice(), map_media_row)?
                 .filter_map(Result::ok)
                 .collect();
             results.extend(rows);
@@ -225,31 +235,35 @@ impl<'a> MediaRepository<'a> {
         Ok(results)
     }
 
+    #[allow(dead_code)]
     /// Elimina un título por id. Devuelve true si se eliminó.
-    pub fn remove(&self, id: i64) -> RusqliteResult<bool> {
-        let changes = self.conn.execute("DELETE FROM media WHERE id = ?1", params![id])?;
+    pub fn remove(&mut self, id: i64) -> RusqliteResult<bool> {
+        let changes = self
+            .conn
+            .execute("DELETE FROM media WHERE id = ?1", params![id])?;
         Ok(changes > 0)
     }
 
+    #[allow(dead_code)]
     /// Elimina los títulos que se han quedado sin archivos.
-    pub fn remove_empty(&self) -> RusqliteResult<i64> {
+    pub fn remove_empty(&mut self) -> RusqliteResult<i64> {
         let changes = self.conn.execute(
             "DELETE FROM media
              WHERE NOT EXISTS (SELECT 1 FROM media_files WHERE media_files.media_id = media.id)",
             [],
         )?;
-        Ok(changes)
+        Ok(changes as i64)
     }
 
     /// Cuenta títulos, opcionalmente filtrados por tipo.
-    pub fn count(&self, r#type: Option<&str>) -> RusqliteResult<i64> {
+    pub fn count(&mut self, r#type: Option<&str>) -> RusqliteResult<i64> {
         match r#type {
             Some(t) => {
-                let row: i64 = self
-                    .conn
-                    .query_row("SELECT COUNT(*) FROM media WHERE type = ?1", params![t], |row| {
-                        row.get(0)
-                    })?;
+                let row: i64 = self.conn.query_row(
+                    "SELECT COUNT(*) FROM media WHERE type = ?1",
+                    params![t],
+                    |row| row.get(0),
+                )?;
                 Ok(row)
             }
             None => {
@@ -262,7 +276,7 @@ impl<'a> MediaRepository<'a> {
     }
 
     /// Lista todas las rutas de carpeta.
-    pub fn list_folders(&self) -> RusqliteResult<Vec<String>> {
+    pub fn list_folders(&mut self) -> RusqliteResult<Vec<String>> {
         let mut stmt = self
             .conn
             .prepare("SELECT folder_path FROM media ORDER BY sort_title")?;
@@ -273,8 +287,9 @@ impl<'a> MediaRepository<'a> {
         Ok(rows)
     }
 
+    #[allow(dead_code)]
     /// Actualiza la ruta de una carpeta (rename/move). Devuelve true si se actualizó.
-    pub fn update_folder_path(&self, old_path: &str, new_path: &str) -> RusqliteResult<bool> {
+    pub fn update_folder_path(&mut self, old_path: &str, new_path: &str) -> RusqliteResult<bool> {
         let changes = self.conn.execute(
             "UPDATE media SET folder_path = ?1, updated_at = datetime('now') WHERE folder_path = ?2",
             params![new_path, old_path],
@@ -337,13 +352,13 @@ mod tests {
         let conn = open_db(&db_path).expect("debe abrir BD en memoria");
         // `open_db` devuelve una Connection owned; para los tests la envolvemos
         // en un bloque estático usando Box::leak (solo tests).
-        let conn_ref: &'static Connection = Box::leak(Box::new(conn));
+        let conn_ref: &'static mut Connection = Box::leak(Box::new(conn));
         (MediaRepository::new(conn_ref), db_path)
     }
 
     #[test]
     fn upsert_y_find_by_id() {
-        let (repo, _db) = new_repo();
+        let (mut repo, _db) = new_repo();
         let input = MediaInput {
             r#type: "movie".to_string(),
             title: "Interesting".to_string(),
@@ -354,14 +369,17 @@ mod tests {
         let media = repo.upsert(&input).expect("debe insertar");
         assert!(media.id > 0);
 
-        let found = repo.find_by_id(media.id).expect("debe encontrar");
+        let found = repo
+            .find_by_id(media.id)
+            .expect("debe encontrar")
+            .expect("debe ser Some");
         assert_eq!(found.title, "Interesting");
         assert_eq!(found.r#type, "movie");
     }
 
     #[test]
     fn upsert_actualiza_por_folder_path() {
-        let (repo, _db) = new_repo();
+        let (mut repo, _db) = new_repo();
         let input = MediaInput {
             r#type: "movie".to_string(),
             title: "Viejo".to_string(),
@@ -388,7 +406,7 @@ mod tests {
 
     #[test]
     fn list_filtra_por_tipo() {
-        let (repo, _db) = new_repo();
+        let (mut repo, _db) = new_repo();
         repo.upsert(&MediaInput {
             r#type: "movie".to_string(),
             title: "Película A".to_string(),
@@ -418,7 +436,7 @@ mod tests {
 
     #[test]
     fn search_devuelve_resultados() {
-        let (repo, _db) = new_repo();
+        let (mut repo, _db) = new_repo();
         repo.upsert(&MediaInput {
             r#type: "anime".to_string(),
             title: "Cowboy Bebop".to_string(),

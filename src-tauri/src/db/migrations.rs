@@ -5,14 +5,12 @@
 //! igual que el proyecto original las declara en TypeScript para que viajen
 //! en `dist/`.
 
-use serde::Deserialize;
-
 /// Una migración de esquema: número de versión, nombre y SQL aplicable.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Migration {
     pub version: i32,
-    pub name: String,
-    pub sql: String,
+    pub name: &'static str,
+    pub sql: &'static str,
 }
 
 /// v1: esquema inicial. Tablas media, media_files, index_runs, FTS5 y triggers.
@@ -88,12 +86,12 @@ CREATE INDEX IF NOT EXISTS idx_index_runs_started_at ON index_runs(started_at);
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
-        name: "init".to_string(),
-        sql: INIT_SQL.to_string(),
+        name: "init",
+        sql: INIT_SQL,
     },
     Migration {
         version: 2,
-        name: "performance-indexes".to_string(),
-        sql: PERFORMANCE_INDEXES_SQL.to_string(),
+        name: "performance-indexes",
+        sql: PERFORMANCE_INDEXES_SQL,
     },
 ];
