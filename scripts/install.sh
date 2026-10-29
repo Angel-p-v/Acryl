@@ -517,6 +517,7 @@ main() {
   build_and_install "$target_dir"
   create_desktop_entry "$target_dir"
   create_empty_database
+  install_launcher_wrapper
 
   echo
   ok "Instalación completada."
@@ -606,6 +607,34 @@ create_empty_database() {
     ok "Base de datos vacía creada en $db_file"
   else
     info "La base de datos ya existe en $db_file, no se sobrescribe."
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# Instalar lanzador con captura de errores
+# -----------------------------------------------------------------------------
+install_launcher_wrapper() {
+  local project_dir="$1"
+  local real_bin="$HOME/.local/bin/${APP_NAME}-real"
+  local wrapper_bin="$HOME/.local/bin/${APP_NAME}"
+
+  info "Instalando lanzador con captura de errores..."
+
+  # Renombrar el binario real si aún no se ha renombrado
+  if [[ -f "$HOME/.local/bin/${APP_NAME}" && ! -f "$real_bin" ]]; then
+    mv "$HOME/.local/bin/${APP_NAME}" "$real_bin"
+    ok "Binario real renombrado a ${APP_NAME}-real"
+  fi
+
+  # Instalar el wrapper
+  install -Dm755 "$project_dir/scripts/acryl-launcher.sh" "$wrapper_bin"
+  ok "Lanzador instalado en $wrapper_bin"
+
+  # Actualizar el .desktop para usar el wrapper
+  local desktop_file="$DESKTOP_DIR/$APP_NAME.desktop"
+  if [[ -f "$desktop_file" ]]; then
+    sed -i "s|^Exec=.*|Exec=$wrapper_bin %F|" "$desktop_file"
+    ok "Entrada .desktop actualizada para usar el lanzador"
   fi
 }
 
