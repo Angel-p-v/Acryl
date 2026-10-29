@@ -62,7 +62,7 @@ export function VideoPlayer(): JSX.Element {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'no se pudo reproducir');
     }
-  }, []);
+  }, [updateStatus]);
 
   const handlePause = useCallback(async (): Promise<void> => {
     setError(null);
@@ -72,7 +72,7 @@ export function VideoPlayer(): JSX.Element {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'no se pudo pausar');
     }
-  }, []);
+  }, [updateStatus]);
 
   const handleStop = useCallback(async (): Promise<void> => {
     setError(null);
@@ -82,41 +82,50 @@ export function VideoPlayer(): JSX.Element {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'no se pudo detener');
     }
-  }, []);
+  }, [updateStatus]);
 
-  const handleSeek = useCallback(async (seconds: number): Promise<void> => {
-    setError(null);
-    try {
-      await playerSeek(seconds);
-      await updateStatus();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'no se pudo buscar');
-    }
-  }, []);
+  const handleSeek = useCallback(
+    async (seconds: number): Promise<void> => {
+      setError(null);
+      try {
+        await playerSeek(seconds);
+        await updateStatus();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'no se pudo buscar');
+      }
+    },
+    [updateStatus]
+  );
 
-  const handleVolume = useCallback(async (volume: number): Promise<void> => {
-    setError(null);
-    try {
-      await playerVolume(volume);
-      await updateStatus();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'no se pudo ajustar volumen');
-    }
-  }, []);
+  const handleVolume = useCallback(
+    async (volume: number): Promise<void> => {
+      setError(null);
+      try {
+        await playerVolume(volume);
+        await updateStatus();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'no se pudo ajustar volumen');
+      }
+    },
+    [updateStatus]
+  );
 
-  const handleOpenFile = useCallback(async (path: string): Promise<void> => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      await playerOpen(path);
-      setFilePath(path);
-      await updateStatus();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'no se pudo abrir el archivo');
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+  const handleOpenFile = useCallback(
+    async (path: string): Promise<void> => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        await playerOpen(path);
+        setFilePath(path);
+        await updateStatus();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'no se pudo abrir el archivo');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [updateStatus]
+  );
 
   const handleOpenInput = useCallback(async (): Promise<void> => {
     await handleOpenFile(inputPath);
@@ -147,7 +156,7 @@ export function VideoPlayer(): JSX.Element {
         void handleOpenInput();
       }
     },
-    [handleOpenInput],
+    [handleOpenInput]
   );
 
   const duration = status?.duration ?? 0;

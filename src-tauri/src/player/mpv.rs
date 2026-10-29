@@ -72,7 +72,9 @@ impl MpvPlayer {
 
         let rc = unsafe { mpv_initialize(handle) };
         if rc != 0 {
-            unsafe { mpv_terminate_destroy(handle); }
+            unsafe {
+                mpv_terminate_destroy(handle);
+            }
             return Err(PlayerError::InitFailed(rc));
         }
 
@@ -82,8 +84,7 @@ impl MpvPlayer {
     /// Carga y comienza a reproducir un archivo de vídeo.
     pub fn load_file(&self, path: &str) -> Result<(), PlayerError> {
         let command = format!("loadfile {}", path);
-        let c_command = CString::new(command.clone())
-            .map_err(PlayerError::CStringFailed)?;
+        let c_command = CString::new(command.clone()).map_err(PlayerError::CStringFailed)?;
         let rc = unsafe { mpv_command_string(self.handle, c_command.as_ptr()) };
         if rc != 0 {
             return Err(PlayerError::CommandFailed(command, rc));
@@ -113,8 +114,7 @@ impl MpvPlayer {
     /// Busca a una posición (segundos). Positivo = adelante, negativo = atrás.
     pub fn seek(&self, seconds: f64) -> Result<(), PlayerError> {
         let command = format!("seek {}", seconds);
-        let c_command = CString::new(command.clone())
-            .map_err(PlayerError::CStringFailed)?;
+        let c_command = CString::new(command.clone()).map_err(PlayerError::CStringFailed)?;
         let rc = unsafe { mpv_command_string(self.handle, c_command.as_ptr()) };
         if rc != 0 {
             return Err(PlayerError::CommandFailed(command, rc));
@@ -224,7 +224,9 @@ impl Drop for MpvPlayer {
     fn drop(&mut self) {
         // mpv_terminate_destroy es idempotente con respecto a la liberación de
         // recursos: llama a mpv_terminate y luego a mpv_destroy internamente.
-        unsafe { mpv_terminate_destroy(self.handle); }
+        unsafe {
+            mpv_terminate_destroy(self.handle);
+        }
     }
 }
 

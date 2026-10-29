@@ -4,7 +4,7 @@
 //! de los repositorios de `db::` y cierra la conexión. No hay estado global.
 
 use serde::Serialize;
-use tauri::{command, State};
+use tauri::{State, command};
 
 use crate::db::{
     FileRepository, ListMediaOptions, MediaRepository, SearchMediaOptions, close_db, open_db,
@@ -25,10 +25,7 @@ pub struct PlayerStatus {
 /// mpv creará su propia ventana nativa (X11 en Linux) para renderizar el
 /// vídeo, integrada en el proceso de la app (sin `spawn` de mpv externo).
 #[command]
-pub fn player_open_cmd(
-    state: State<'_, PlayerState>,
-    file_path: String,
-) -> Result<(), String> {
+pub fn player_open_cmd(state: State<'_, PlayerState>, file_path: String) -> Result<(), String> {
     let mut player_guard = state.player.lock().map_err(|e| e.to_string())?;
 
     // Si no hay reproductor, crear uno nuevo (sin window ID: mpv crea su
@@ -78,10 +75,7 @@ pub fn player_stop_cmd(state: State<'_, PlayerState>) -> Result<(), String> {
 
 /// Comando: busca a una posición (segundos).
 #[command]
-pub fn player_seek_cmd(
-    state: State<'_, PlayerState>,
-    seconds: f64,
-) -> Result<(), String> {
+pub fn player_seek_cmd(state: State<'_, PlayerState>, seconds: f64) -> Result<(), String> {
     let mut player_guard = state.player.lock().map_err(|e| e.to_string())?;
     let player = player_guard
         .as_mut()
@@ -91,10 +85,7 @@ pub fn player_seek_cmd(
 
 /// Comando: establece el volumen (0.0 a 100.0).
 #[command]
-pub fn player_volume_cmd(
-    state: State<'_, PlayerState>,
-    volume: f64,
-) -> Result<(), String> {
+pub fn player_volume_cmd(state: State<'_, PlayerState>, volume: f64) -> Result<(), String> {
     let mut player_guard = state.player.lock().map_err(|e| e.to_string())?;
     let player = player_guard
         .as_mut()
