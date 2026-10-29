@@ -4,8 +4,35 @@
 //! singletons. `open_db` aplica las migraciones pendientes de forma idempotente.
 
 use rusqlite::{Connection, Result as RusqliteResult};
+use std::path::{Path, PathBuf};
 
 use crate::db::migrations::{MIGRATIONS, Migration};
+
+/// Directorio de datos de la aplicación (respeta XDG_DATA_HOME).
+fn app_data_dir() -> PathBuf {
+    if let Ok(env) = std::env::var("XDG_DATA_HOME") {
+        return PathBuf::from(env).join("acryl");
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home).join(".local/share/acryl");
+    }
+    PathBuf::from("acryl-data")
+}
+
+/// Resuelve una ruta de base de datos. Si es relativa, se interpreta respecto
+/// al directorio de datos del usuario (~/.local/share/acryl/), no al
+/// directorio de trabajo actual. Esto permite que el frontend pase
+/// simplemente "acryl.db" y funcione correctamente tanto en desarrollo como
+/// en producción (AppImage, paquete .deb, etc.).
+fn resolve_db_path(db_path: &str) -> PathBuf {
+    let path = Path::new(db_path);
+    // :memory: es una base de datos temporal en memoria, no una ruta de archivo.
+    if path.is_relative() && db_path != ":memory:" {
+        app_data_dir().join(db_path)
+    } else {
+        path.to_path_buf()
+    }
+}
 
 /// Abre (o crea) la base de datos SQLite en `db_path` y aplica las migraciones
 /// pendientes. Devuelve la conexión lista para usar.
@@ -13,7 +40,8 @@ use crate::db::migrations::{MIGRATIONS, Migration};
 /// El llamador es responsable de cerrar la conexión con `close_db` cuando
 /// termine de usarla.
 pub fn open_db(db_path: &str) -> RusqliteResult<Connection> {
-    let mut conn = Connection::open(db_path)?;
+    let resolved_path = resolve_db_path(db_path);
+    let mut conn = Connection::open(&resolved_path)?;
 
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;\n
@@ -21,7 +49,7 @@ pub fn open_db(db_path: &str) -> RusqliteResult<Connection> {
          PRAGMA busy_timeout = 5000;\n",
     )?;
 
-    run_migrations(&mut conn, MIGRATIONS, db_path)?;
+    run_migrations(&mut conn, MIGRATIONS, &resolved_path.to_string_lossy())?;
 
     Ok(conn)
 }
