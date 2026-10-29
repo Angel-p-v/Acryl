@@ -166,11 +166,11 @@ src-tauri/                ← Rust
 | Hito 6 | Configuración YAML en el backend | ✅ completado |
 | Hito 7 | Internacionalización (i18n) de la UI | ✅ completado |
 | Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ✅ completado |
-| Hito 9 | Publicación automática en GitHub Releases | ⏳ pendiente |
+| Hito 9 | Publicación automática en GitHub Releases | ✅ completado |
 
 ## 9. Próximo paso inmediato
 
-El siguiente hito a implementar es el **Hito 9 — Publicación automática en GitHub Releases**.
+Todos los hitos del plan están completados.
 
 ---
 
