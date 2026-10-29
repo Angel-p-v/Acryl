@@ -110,7 +110,7 @@ export function VideoPlayer(): JSX.Element {
         await updateStatus();
         // Registrar reproducción en el historial (posición 0 al abrir;
         // la duración real se actualiza al cambiar el estado del reproductor)
-        await recordPlayback('media-manager.db', 0, 0, 0).catch(() => {
+        await recordPlayback('acryl.db', 0, 0, 0).catch(() => {
           // No fallar si no se puede registrar el historial
         });
       } catch (e) {

@@ -58,7 +58,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            db_path: "media-manager.db".to_string(),
+            db_path: "acryl.db".to_string(),
             language: "es".to_string(),
             auto_sync_metadata: false,
             default_player: "mpv".to_string(),

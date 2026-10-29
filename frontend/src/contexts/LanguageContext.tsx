@@ -19,7 +19,7 @@ const translations: Record<Locale, Translations> = {
 };
 
 const DEFAULT_LOCALE: Locale = 'es';
-const STORAGE_KEY = 'media-manager-language';
+const STORAGE_KEY = 'acryl-language';
 
 /**
  * Contexto de internacionalización.

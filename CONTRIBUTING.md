@@ -1,4 +1,4 @@
-# Contribuir a media-manager
+# Contribuir a Acryl
 
 Gracias por querer mejorar el proyecto. Esta guía resume el flujo de trabajo y las
 reglas que mantienen `main` siempre desplegable.
@@ -11,8 +11,8 @@ reglas que mantienen `main` siempre desplegable.
   empaquetado portable se prueban en Linux.
 
 ```bash
-git clone https://github.com/Angel-p-v/media-manager.git
-cd media-manager
+git clone https://github.com/Angel-p-v/app-media-manager.git
+cd app-media-manager
 npm install
 npm run verify
 ```
@@ -23,15 +23,20 @@ ficheros staged; el de pre-push ejecuta `npm run verify`.
 ## Arquitectura
 
 ```
-ui/  commands/  ──▶  core/  ──▶  shared/
-                     └──▶ core/db/
+frontend/  (React + TypeScript, WebView de Tauri)
+   │  servicios (invoke a comandos Tauri) ──▶  src-tauri/  (Rust)
+   │                                             ├── core/        lógica de negocio
+   │                                             ├── db/          rusqlite, migraciones, FTS5
+   │                                             ├── player/      bindings a libmpv
+   │                                             ├── commands/    comandos Tauri expuestos
+   │                                             └── config/      serde + YAML
 ```
 
-- `core/**` no importa de `ui/**` ni de `commands/**`.
-- `ui/**` y `commands/**` no escriben SQL; usan repositorios.
-- Solo `core/db/` importa `better-sqlite3`.
-- `shared/**` no depende del resto del proyecto.
-- La conexión y los repositorios se inyectan; no hay singletons globales.
+- `src-tauri/src/**` no importa desde `frontend/`.
+- `frontend/` no escribe SQL: accede a datos mediante comandos Tauri (`invoke`).
+- `src-tauri/src/db/` habla con SQLite; nadie más importa `rusqlite` fuera de `db/`.
+- La conexión y los repositorios se inyectan; no hay singletons globales ni estado
+  mutable global.
 
 Si un cambio cruza estas reglas, probablemente necesite un ADR en `docs/adr/`. Las
 decisiones con más de una opción válida se documentan ahí antes de implementarlas.
@@ -40,7 +45,7 @@ decisiones con más de una opción válida se documentan ahí antes de implement
 
 1. Crea una rama desde `main`: `feat/…`, `fix/…`, `refactor/…`, `chore/…` o `docs/…`.
 2. Haz commits pequeños con [Conventional Commits](https://www.conventionalcommits.org/):
-   `feat(indexer): soporta el patrón 1x02`.
+   `feat(config): añade soporte para idioma inglés`.
 3. Ejecuta `npm run verify` antes de abrir la PR.
 4. Abre la PR contra `main` con una descripción de **qué** y **por qué**, y el checklist
    de verificación.
@@ -54,27 +59,20 @@ Scopes admitidos: `config`, `db`, `indexer`, `parser`, `player`, `ui`, `cli`, `d
 
 | Nivel       | Ubicación            | Objetivo                                              |
 | ----------- | -------------------- | ----------------------------------------------------- |
-| Unitario    | `tests/unit/`        | lógica pura, parsers y configuración                  |
-| Integración | `tests/integration/` | SQLite real, `fs` real y render de Ink                |
-| E2E         | `tests/e2e/`         | binario compilado: argv, stdout, `stderr` y exit code |
+| Unitario    | `src/**/__tests__/`  | lógica pura, parsers y configuración                  |
+| Integración | `src/**/__tests__/`  | SQLite real, `fs` real y render de componentes        |
+| E2E         | `frontend/tests/e2e/`| binario compilado: flujos críticos de la aplicación   |
 
 ```bash
-npm test                 # suite completa
-npm run test:unit
-npm run test:integration
-npm run test:e2e
-npm run coverage
-npm run bench            # benchmarks de rendimiento
+npm test                 # suite completa de vitest
+npm run test:e2e         # pruebas E2E de la aplicación integrada
 ```
 
 Reglas:
 
 - Se prueba comportamiento público, no detalles de implementación.
-- Cada test es independiente: su propio `mkdtemp`, su propia base.
+- Cada test es independiente: su propio entorno, su propia base de datos temporal.
 - Nombres `describe > it` en Given/When/Then.
-- Los umbrales de cobertura viven en `vitest.config.ts` (85/85/80/85).
-- Si tocas escáner, indexador, parser o consultas, adjunta el resultado de
-  `npm run bench` en la PR. El presupuesto está en `docs/guides/performance.md`.
 
 ## Estilo
 
@@ -104,7 +102,7 @@ en el mismo PR.
 
 ## Publicación
 
-El binario es `mm` y la distribución oficial son las GitHub Releases: bundles portables,
+El binario es `acryl` y la distribución oficial son las GitHub Releases: bundles portables,
 checksums SHA-256, SBOM y atestaciones de procedencia. No se publica en npm. Los pasos
 completos están en [`docs/guides/release.md`](./docs/guides/release.md); no muevas un tag
 ni subas assets manualmente desde una rama de desarrollo.

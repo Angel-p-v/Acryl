@@ -86,7 +86,7 @@ impl TvMazeClient {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::builder()
-                .user_agent("media-manager/0.1.0")
+                .user_agent("acryl/0.1.0")
                 .build()
                 .unwrap_or_default(),
             base_url: "https://api.tvmaze.com".to_string(),

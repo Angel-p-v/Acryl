@@ -19,8 +19,8 @@ import type { PlayerStatus } from '../../src/types/media';
  * y que libmpv esté disponible en el sistema.
  */
 
-const DEFAULT_DB_PATH = 'media-manager.db';
-const TEST_VIDEO_PATH = '/tmp/media-manager-e2e-test-video.mkv';
+const DEFAULT_DB_PATH = 'acryl.db';
+const TEST_VIDEO_PATH = '/tmp/acryl-e2e-test-video.mkv';
 
 /**
  * Crea un archivo de vídeo de prueba vacío si no existe.

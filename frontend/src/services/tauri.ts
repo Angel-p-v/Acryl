@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 import type { Media, MediaDetails, PlayerStatus } from '../types/media';
 
-const DEFAULT_DB_PATH = 'media-manager.db';
+const DEFAULT_DB_PATH = 'acryl.db';
 
 /**
  * Lista medios desde la base de datos SQLite a través del comando Tauri

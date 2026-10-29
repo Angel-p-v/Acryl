@@ -32,7 +32,7 @@ describe('listMedia', () => {
     await listMedia();
 
     expect(mockInvoke).toHaveBeenCalledWith('list_media_cmd', {
-      db_path: 'media-manager.db',
+      db_path: 'acryl.db',
       type: undefined,
       limit: undefined,
       offset: undefined,

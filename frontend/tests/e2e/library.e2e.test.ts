@@ -13,7 +13,7 @@ import type { Media, MediaDetails } from '../../src/types/media';
  *   - Toggle de visto
  */
 
-const DEFAULT_DB_PATH = 'media-manager.db';
+const DEFAULT_DB_PATH = 'acryl.db';
 
 describe('Biblioteca de medios (E2E)', () => {
   let testMediaId: number | null = null;

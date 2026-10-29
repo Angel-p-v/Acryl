@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "media-manager",
+  "productName": "acryl",
   "version": "0.1.0",
-  "identifier": "com.angelpv.media-manager",
+  "identifier": "com.angelpv.acryl",
   "build": {
     "frontendDist": "../build",
     "devUrl": "http://localhost:3000",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "media-manager",
+        "title": "acryl",
         "width": 800,
         "height": 600,
         "resizable": true,
@@ -33,7 +33,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["resources/media-manager.desktop"],
+    "resources": ["resources/acryl.desktop"],
     "externalBin": []
   }
 }

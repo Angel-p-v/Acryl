@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/docs/assets/logo.svg" alt="media-manager" width="200"/>
+  <img src="https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/docs/assets/logo.svg" alt="Acryl" width="200"/>
 </p>
 
-<h1 align="center">media-manager</h1>
+<h1 align="center">Acryl</h1>
 
 <p align="center">
   <strong>Gestor de contenido multimedia de escritorio para Linux</strong><br/>
@@ -30,11 +30,11 @@
 
 ---
 
-## 🎯 ¿Qué es media-manager?
+## 🎯 ¿Qué es Acryl?
 
-**media-manager** es una aplicación de escritorio nativa para Linux que te permite indexar, buscar y reproducir tu colección local de contenido multimedia sin depender de reproductores externos ni servicios en la nube.
+**Acryl** es una aplicación de escritorio nativa para Linux que te permite indexar, buscar y reproducir tu colección local de películas, series y anime —todo dentro de la propia aplicación, sin depender de reproductores externos ni servicios en la nube.
 
-Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice de búsqueda de texto completo y la reproducción de vídeo integrada mediante libmpv.
+Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice de búsqueda de texto completo (FTS5) y la reproducción de vídeo integrada mediante libmpv.
 
 ---
 
@@ -42,7 +42,7 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 
 | Capacidad | Descripción |
 |-----------|-------------|
-| 📚 **Biblioteca local** | Indexa películas, series y anime en una base de datos SQLite con búsqueda FTS5 (full-text search) |
+| 📚 **Biblioteca local** | Indexa películas, series y anime en una base de datos SQLite con búsqueda FTS5 |
 | 🔍 **Búsqueda rápida** | Busca por título con filtrado por tipo y paginación |
 | 🖼️ **Pósteres y metadatos** | Visualiza pósteres, sinopsis, año y tipo de cada medio |
 | ⭐ **Favoritos y visto** | Marca contenido como favorito o visto con un solo clic |
@@ -55,45 +55,48 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 
 ## 🏗️ Arquitectura
 
-media-manager sigue una arquitectura de capas separadas que garantiza mantenibilidad y pruebas:
+media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza mantenibilidad, pruebas y seguridad:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Frontend (React + TypeScript)            │
-│  ┌─────────────┐  ┌─────────────┐  ┌───────────────────┐   │
-│  │   SearchBar │  │  MediaList  │  │   MediaDetails    │   │
-│  │   VideoPlayer│  │   Poster    │  │   (metadatos)     │   │
-│  └─────────────┘  └─────────────┘  └───────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-                           │
-                    Tauri IPC (invoke)
-                           │
-┌─────────────────────────────────────────────────────────────┐
-│                      Backend (Rust + Tauri)                 │
-│  ┌─────────────┐  ┌─────────────┐  ┌───────────────────┐   │
-│  │ Commands    │  │  Config     │  │   Metadata        │   │
-│  │ (adaptador) │  │  (YAML)     │  │   (TVmaze API)    │   │
-│  └─────────────┘  └─────────────┘  └───────────────────┘   │
-│  ┌─────────────┐  ┌─────────────┐  ┌───────────────────┐   │
-│  │   DB Repo   │  │   Player    │  │   Playback        │   │
-│  │  (SQLite)   │  │  (libmpv)   │  │   History         │   │
-│  └─────────────┘  └─────────────┘  └───────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-                           │
-                    SQLite (WAL + FTS5)
-                           │
-                    ┌──────┴──────┐
-                    │ media.db    │
-                    └─────────────┘
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         FRONTEND (React + TypeScript)                       │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
+│  │   SearchBar  │  │  MediaList   │  │ MediaDetails │  │  VideoPlayer │   │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘   │
+│           │                  │                  │                  │         │
+│           └──────────────────┴──────────────────┴────────────────┘         │
+│                               │ invoke (Tauri IPC)                          │
+│                               ▼                                             │
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         BACKEND (Rust + Tauri v2)                           │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
+│  │   Commands   │  │   Config     │  │   Metadata   │  │   Player     │   │
+│  │  (adaptador) │  │   (YAML)     │  │   (TVmaze)   │  │   (libmpv)   │   │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘   │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                      │
+│  │   MediaRepo  │  │   FileRepo   │  │   Playback   │                      │
+│  │   (SQLite)   │  │   (SQLite)   │  │   History    │                      │
+│  └──────────────┘  └──────────────┘  └──────────────┘                      │
+│                               │                                             │
+│                               ▼                                             │
+│                    SQLite (WAL + FTS5)  ──▶  acryl.db                       │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Flujo de datos
 
-1. El usuario busca o navega por medios en el frontend (React).
+1. El usuario busca o navega por medios en el frontend (React + TypeScript).
 2. El frontend invoca un comando Tauri que llega al backend Rust.
 3. El backend consulta SQLite y devuelve los resultados al frontend.
-4. Para la reproducción, el backend utiliza libmpv vía FFI para abrir y controlar el archivo de vídeo.
-5. Los metadatos pueden sincronizarse con TVmaze para obtener pósteres y sinopsis automáticamente.
+4. Para la reproducción, el backend utiliza libmpv vía FFI para abrir y controlar el archivo de vídeo dentro de la misma ventana.
+5. Los metadatos pueden sincronizarse con TVmaze (API pública, sin API key) para obtener pósteres y sinopsis automáticamente.
+
+### Principios de diseño
+
+- **Separación de responsabilidades**: el dominio no depende del frontend ni del WebView; el frontend no ejecuta SQL ni accede directamente al sistema de archivos.
+- **Inyección de dependencias**: dependencias explícitas, sin singletons globales ni estado mutable innecesario.
+- **Contratos tipados**: Serde para serialización Rust ↔ TypeScript, con validación en el límite de entrada.
+- **Seguridad por diseño**: mínimo privilegio, sin acceso general al sistema de archivos, sin ejecución de procesos externos arbitrarios.
 
 ---
 
@@ -101,30 +104,16 @@ media-manager sigue una arquitectura de capas separadas que garantiza mantenibil
 
 ### Dependencias de sistema (Linux)
 
-La aplicación requiere las siguientes bibliotecas del sistema para compilar y ejecutar:
+| Paquete | Propósito | Distribución |
+|---------|-----------|--------------|
+| `libwebkit2gtk-4.0-dev` | WebView del sistema (Tauri) | Todas |
+| `libgtk-3-dev` | Interfaz gráfica (Tauri) | Todas |
+| `librsvg2-dev` | Renderizado de SVG (Tauri) | Todas |
+| `libayatana-appindicator3-dev` | Indicadores de bandeja (opcional) | Todas |
+| `libmpv-dev` | Reproducción de vídeo integrado | Todas |
+| `xvfb` | Servidor virtual X11 (solo pruebas E2E) | Todas |
 
-| Paquete | Propósito |
-|---------|-----------|
-| `libwebkit2gtk-4.0-dev` | WebView del sistema (Tauri) |
-| `libgtk-3-dev` | Interfaz gráfica (Tauri) |
-| `librsvg2-dev` | Renderizado de SVG (Tauri) |
-| `libayatana-appindicator3-dev` | Indicadores de bandeja (opcional) |
-| `libmpv-dev` | Reproducción de vídeo integrado |
-| `xvfb` | Servidor virtual X11 (solo para pruebas E2E) |
-
-### Instalación de dependencias (Debian/Ubuntu)
-
-```bash
-sudo apt-get update
-sudo apt-get install -y \
-  libwebkit2gtk-4.0-dev \
-  libgtk-3-dev \
-  librsvg2-dev \
-  libayatana-appindicator3-dev \
-  libmpv-dev
-```
-
-### Requisitos de desarrollo
+### Herramientas de desarrollo
 
 | Herramienta | Versión mínima |
 |-------------|---------------|
@@ -135,38 +124,58 @@ sudo apt-get install -y \
 
 ---
 
-## 🚀 Instalación
+## 📦 Instalación
 
-La única forma soportada de instalar media-manager es clonando el repositorio y compilando desde el código fuente. No se distribuyen instaladores precompilados públicamente; generas los instaladores tú mismo localmente.
+### Instalación completa (un solo bloque)
 
-### Paso 1: Clonar el repositorio
-
-```bash
-git clone https://github.com/Angel-p-v/app-media-manager.git
-cd app-media-manager
-```
-
-### Paso 2: Instalar dependencias del frontend
+Copia y pega este bloque en tu terminal. Instala las dependencias del sistema, clona el repositorio, instala dependencias de Node.js y compila la aplicación en modo desarrollo:
 
 ```bash
+# Detectar distribución e instalar dependencias del sistema
+if command -v apt-get &>/dev/null; then
+  # Debian / Ubuntu / Mint / Pop!_OS
+  sudo apt-get update && sudo apt-get install -y \
+    libwebkit2gtk-4.0-dev libgtk-3-dev librsvg2-dev \
+    libayatana-appindicator3-dev libmpv-dev
+elif command -v dnf &>/dev/null; then
+  # Fedora / RHEL / CentOS / AlmaLinux / Rocky Linux
+  sudo dnf install -y \
+    webkit2gtk3-devel gtk3-devel librsvg2-devel \
+    libayatana-appindicator3-devel libmpv-devel
+elif command -v pacman &>/dev/null; then
+  # Arch Linux / Manjaro / EndeavourOS
+  sudo pacman -Sy --needed \
+    webkit2gtk gtk3 librsvg libayatana-appindicator libmpv
+elif command -v zypper &>/dev/null; then
+  # openSUSE
+  sudo zypper install -y \
+    libwebkit2gtk-4_0-devel gtk3-devel librsvg2-devel \
+    libayatana-appindicator3-devel libmpv-devel
+elif command -v apk &>/dev/null; then
+  # Alpine Linux
+  sudo apk add \
+    webkit2gtk-dev gtk+3-dev librsvg-dev \
+    libayatana-appindicator3-dev libmpv-dev
+else
+  echo "Distribución no reconocida. Instala manualmente: libwebkit2gtk, libgtk-3, librsvg2, libayatana-appindicator3, libmpv"
+  exit 1
+fi
+
+# Clonar repositorio
+git clone https://github.com/Angel-p-v/app-media-manager.git acryl
+cd acryl
+
+# Instalar dependencias de Node.js y compilar
 npm install
-```
-
-### Paso 3: Ejecutar en modo desarrollo
-
-```bash
 npm run tauri:dev
 ```
 
-Esto iniciará el servidor de desarrollo de Vite (puerto 3000) y la aplicación de escritorio Tauri simultáneamente.
+> **Nota:** Si prefieres no instalar dependencias globalmente, puedes usar `npx` o un contenedor Docker. Los instaladores nativos (`.deb`, AppImage, `.rpm`) se generan con `npm run tauri:build`.
 
-### Paso 4: Generar instaladores de producción
+### Instaladores nativos
 
-```bash
-npm run tauri:build
-```
+Una vez compilado, los instaladores se generan en:
 
-Los instaladores se generan en:
 ```
 src-tauri/target/release/bundle/
 ```
@@ -179,7 +188,7 @@ Formatos disponibles: `.deb`, AppImage, `.rpm`.
 
 Una vez iniciada la aplicación:
 
-1. **Indexar medios**: La aplicación carga automáticamente los medios desde la base de datos SQLite configurada (`media-manager.db` por defecto).
+1. **Indexar medios**: Acryl carga automáticamente los medios desde la base de datos SQLite configurada (`acryl.db` por defecto).
 2. **Buscar**: Escribe un título en el campo de búsqueda para filtrar resultados.
 3. **Ver detalles**: Haz clic en cualquier medio para ver su póster, sinopsis, año y archivos indexados.
 4. **Marcar favorito/visto**: Usa los botones de estado en la vista de detalles.
@@ -220,6 +229,7 @@ app-media-manager/
 ├── AGENTS.md                 Instrucciones para el desarrollo
 ├── CONTRIBUTING.md           Flujo de trabajo y Pull Requests
 ├── SECURITY.md               Política de seguridad
+├── LICENSE                   Licencia MIT
 ├── README.md                 Este archivo
 └── package.json              Scripts raíz que delegan a frontend/
 ```
@@ -255,29 +265,65 @@ app-media-manager/
 
 ---
 
-## 🏗️ Arquitectura y decisiones técnicas
+## 📄 Dependencias y reconocimientos
 
-### Separación de responsabilidades
+Acryl utiliza las siguientes dependencias principales. Todas son de código abierto y sus licencias se respetan íntegramente.
 
-- El **dominio** no depende del frontend ni del WebView.
-- El **frontend** no ejecuta SQL ni accede directamente al sistema de archivos.
-- El acceso a SQLite se concentra en la capa de persistencia (`src-tauri/src/db/`).
-- Los **comandos de Tauri** actúan como adaptadores de entrada: validan, delegan y devuelven resultados serializables.
-- La lógica de negocio no se duplica entre React y Rust.
+### Backend (Rust)
 
-### Base de datos
+| Crate | Propósito | Licencia |
+|-------|-----------|----------|
+| `tauri` | Framework de escritorio | MIT / Apache-2.0 |
+| `rusqlite` | Bindings a SQLite | MIT |
+| `serde` / `serde_json` / `serde_yaml` | Serialización | MIT |
+| `reqwest` | Cliente HTTP (TVmaze) | MIT / Apache-2.0 |
+| `libc` | Tipos C para FFI | MIT / Apache-2.0 |
+| `thiserror` | Errores tipados | MIT |
+| `log` | Facade de logging | MIT |
+| `tauri-plugin-log` | Plugin de logs para Tauri | MIT / Apache-2.0 |
+| `pkg-config` | Detección de librerías | MIT |
 
-Se utiliza **SQLite** con `rusqlite` (modo WAL y búsqueda FTS5). Las migraciones son versionadas y transaccionales. El esquema incluye tablas para medios, archivos indexados, historial de reproducción y metadatos sincronizados.
+### Frontend (TypeScript / React)
 
-### Reproducción
+| Paquete | Propósito | Licencia |
+|---------|-----------|----------|
+| `react` / `react-dom` | Interfaz de usuario | MIT |
+| `@tauri-apps/api` | API de comandos Tauri | MIT / Apache-2.0 |
+| `vite` | Herramienta de construcción | MIT |
+| `vitest` | Tests unitarios | MIT |
+| `eslint` | Linter | MIT |
+| `prettier` | Formateador | MIT |
+| `typescript` | Tipado estricto | Apache-2.0 |
+| `better-sqlite3` | SQLite (desarrollo) | ISC |
 
-La aplicación utiliza **libmpv** vía FFI para reproducir archivos de vídeo dentro de la propia ventana de la aplicación, sin lanzar procesos externos.
+### Sistema
+
+| Paquete | Propósito | Licencia |
+|---------|-----------|----------|
+| `libmpv` | Reproducción de vídeo | GPLv2+ / LGPL |
+| `libwebkit2gtk` | WebView del sistema | LGPL |
+| `libgtk-3` | Interfaz gráfica | LGPL |
+| `librsvg2` | Renderizado SVG | LGPL |
+
+> Todas las dependencias de terceros conservan sus licencias originales. Este proyecto se distribuye bajo la licencia **MIT**. Consulta `LICENSE` para más detalles.
 
 ---
 
 ## 📄 Licencia
 
-[MIT](./LICENSE) © 2026 media-manager contributors
+[MIT](./LICENSE) © 2026 Angel-p-v
+
+---
+
+## 🤝 Contribución
+
+Consulta [`CONTRIBUTING.md`](./CONTRIBUTING.md) para el flujo de trabajo, convenciones de commits y reglas de calidad.
+
+---
+
+## 🔒 Seguridad
+
+Consulta [`SECURITY.md`](./SECURITY.md) para la política de seguridad y cómo reportar vulnerabilidades.
 
 ---
 

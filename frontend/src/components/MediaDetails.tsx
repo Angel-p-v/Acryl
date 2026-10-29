@@ -26,7 +26,7 @@ export function MediaDetails({
 
   const loadDetails = useCallback(async (): Promise<void> => {
     try {
-      const d = await getMediaDetails('media-manager.db', mediaId);
+      const d = await getMediaDetails('acryl.db', mediaId);
       setDetails(d);
     } catch (e) {
       setError(e instanceof Error ? e.message : t('details.error'));
@@ -43,7 +43,7 @@ export function MediaDetails({
   const handleToggleFavorite = useCallback(async (): Promise<void> => {
     if (!details) return;
     try {
-      const next = await toggleFavorite('media-manager.db', mediaId);
+      const next = await toggleFavorite('acryl.db', mediaId);
       setDetails((d) => (d ? { ...d, media: { ...d.media, is_favorite: next } } : d));
     } catch (e) {
       setError(e instanceof Error ? e.message : t('details.favorite.error'));
@@ -53,7 +53,7 @@ export function MediaDetails({
   const handleToggleWatched = useCallback(async (): Promise<void> => {
     if (!details) return;
     try {
-      const next = await toggleWatched('media-manager.db', mediaId);
+      const next = await toggleWatched('acryl.db', mediaId);
       setDetails((d) => (d ? { ...d, media: { ...d.media, is_watched: next } } : d));
     } catch (e) {
       setError(e instanceof Error ? e.message : t('details.watched.error'));
@@ -75,7 +75,7 @@ export function MediaDetails({
     setSyncing(true);
     setError(null);
     try {
-      const result = await syncMetadata('media-manager.db', mediaId);
+      const result = await syncMetadata('acryl.db', mediaId);
       setDetails((d) =>
         d
           ? {

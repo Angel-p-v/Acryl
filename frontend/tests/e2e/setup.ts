@@ -11,7 +11,7 @@ import { join } from 'node:path';
  * las pruebas E2E puedan ejecutarse de forma aislada y determinística.
  */
 
-export const E2E_DB_PATH = join(mkdtempSync(join(tmpdir(), 'media-manager-e2e-')), 'library.db');
+export const E2E_DB_PATH = join(mkdtempSync(join(tmpdir(), 'acryl-e2e-')), 'library.db');
 
 /**
  * Inserta medios de prueba en la base de datos SQLite temporal.

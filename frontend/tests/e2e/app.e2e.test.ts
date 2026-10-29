@@ -4,7 +4,7 @@ import { invoke } from './mockInvoke';
 import type { Media } from '../../src/types/media';
 
 /**
- * Pruebas E2E del flujo de la aplicación media-manager.
+ * Pruebas E2E del flujo de la aplicación Acryl.
  *
  * Estas pruebas verifican que la aplicación compilada funcione correctamente
  * en los flujos críticos:
@@ -19,9 +19,9 @@ import type { Media } from '../../src/types/media';
  * se pueden ejecutar con xvfb.
  */
 
-const DEFAULT_DB_PATH = 'media-manager.db';
+const DEFAULT_DB_PATH = 'acryl.db';
 
-describe('Flujo de la aplicación media-manager (E2E)', () => {
+describe('Flujo de la aplicación Acryl (E2E)', () => {
   beforeAll(() => {
     // Verificar que la aplicación esté disponible
     // En CI con xvfb, la aplicación debería estar iniciada
