@@ -20,8 +20,11 @@
   <a href="https://github.com/Angel-p-v/app-media-manager/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="License"/>
   </a>
-  <a href="https://nodejs.org/">
-    <img src="https://img.shields.io/badge/node-%3E%3D22-5FA04E?style=for-the-badge" alt="Node.js"/>
+  <a href="https://www.rust-lang.org/">
+    <img src="https://img.shields.io/badge/rust-%3E%3D1.90-000000?style=for-the-badge" alt="Rust"/>
+  </a>
+  <a href="https://gtk.org/">
+    <img src="https://img.shields.io/badge/gtk-4.x-497975?style=for-the-badge" alt="GTK4"/>
   </a>
   <a href="https://github.com/Angel-p-v/app-media-manager/releases">
     <img src="https://img.shields.io/github/downloads/Angel-p-v/app-media-manager/total?style=for-the-badge" alt="Downloads"/>
@@ -60,52 +63,52 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 ```mermaid
 graph TD
     Usuario[[Usuario]]
-    Frontend[Frontend<br/>React + TS]
-    Commands[Commands<br/>Rust + Tauri]
+    UI[UI<br/>GTK4 / Libadwaita (Rust)]
+    Logic[Lógica<br/>Rust puro]
     Decision{¿Consulta<br/>o reproduce?}
     SQLite[(SQLite<br/>acryl.db)]
     MPV[[libmpv<br/>FFI]]
     TVmaze[TVmaze<br/>API pública]
 
-    Usuario -->|busca| Frontend
-    Frontend -->|invoke| Commands
-    Commands --> Decision
+    Usuario -->|busca| UI
+    UI -->|llama| Logic
+    Logic --> Decision
     Decision -->|consulta| SQLite
     Decision -->|reproduce| MPV
-    SQLite -->|datos| Frontend
-    MPV -->|frames| Frontend
-    Commands -.->|sincroniza| TVmaze
-    TVmaze -.->|metadatos| Decision
-    Frontend -->|resultado| Usuario
+    SQLite -->|datos| UI
+    MPV -->|frames| UI
+    Logic -.->|sincroniza| TVmaze
+    TVmaze -.->|metadatos| Logic
+    UI -->|resultado| Usuario
 
     classDef usuario fill:#e0e7ff,stroke:#6366f1,stroke-width:1px
-    classDef frontend fill:#f0fdf4,stroke:#10b981,stroke-width:1px
-    classDef backend fill:#fffbeb,stroke:#f59e0b,stroke-width:1px
+    classDef ui fill:#f0fdf4,stroke:#497975,stroke-width:1px
+    classDef logic fill:#fffbeb,stroke:#f59e0b,stroke-width:1px
     classDef db fill:#fce7f3,stroke:#ec4899,stroke-width:1px
     classDef ext fill:#f3f4f6,stroke:#9ca3af,stroke-width:1px,stroke-dasharray: 3 3
 
     class Usuario usuario
-    class Frontend frontend
-    class Commands backend
+    class UI ui
+    class Logic logic
     class SQLite db
-    class MPV backend
+    class MPV logic
     class TVmaze ext
 ```
 
 ### Flujo de datos
 
-1. El usuario busca o navega por medios en el frontend (React + TypeScript).
-2. El frontend invoca un comando Tauri que llega al backend Rust.
-3. El backend consulta **una única base de datos SQLite** (`acryl.db`) y devuelve los resultados al frontend.
-4. Para la reproducción, el backend utiliza libmpv vía FFI para abrir y controlar el archivo de vídeo dentro de la misma ventana.
+1. El usuario busca o navega por medios en la UI (GTK4 / Libadwaita, Rust).
+2. La UI llama directamente a funciones Rust del backend.
+3. El backend consulta **una única base de datos SQLite** (`acryl.db`) y devuelve los resultados a la UI.
+4. Para la reproducción, el backend utiliza libmpv vía FFI para abrir y controlar el archivo de vídeo dentro de la misma ventana GTK4.
 5. Los metadatos pueden sincronizarse con TVmaze (API pública, sin API key) para obtener pósteres y sinopsis automáticamente.
 
 ### Principios de diseño
 
-- **Separación de responsabilidades**: el dominio no depende del frontend ni del WebView; el frontend no ejecuta SQL ni accede directamente al sistema de archivos.
+- **Separación de responsabilidades**: el dominio no depende de la UI; la UI no ejecuta SQL ni accede directamente al sistema de archivos.
 - **Inyección de dependencias**: dependencias explícitas, sin singletons globales ni estado mutable innecesario.
-- **Contratos tipados**: Serde para serialización Rust ↔ TypeScript, con validación en el límite de entrada.
-- **Seguridad por diseño**: mínimo privilegio, sin acceso general al sistema de archivos, sin ejecución de procesos externos arbitrarios.
+- **Contratos tipados**: Serde para serialización interna de Rust, con validación en el límite de entrada.
+- **Seguridad por diseño**: mínimo privilegio, sin acceso general al sistema de archivos, sin ejecución de procesos externos arbitrarios, sin WebView.
 
 ---
 
@@ -115,21 +118,19 @@ graph TD
 
 | Paquete | Propósito | Distribución |
 |---------|-----------|--------------|
-| `libwebkit2gtk-4.0-dev` | WebView del sistema (Tauri) | Todas |
-| `libgtk-3-dev` | Interfaz gráfica (Tauri) | Todas |
-| `librsvg2-dev` | Renderizado de SVG (Tauri) | Todas |
+| `libgtk-4-dev` | Interfaz gráfica (GTK4) | Todas |
+| `libadwaita-1-dev` | Componentes de UI (Libadwaita) | Todas |
+| `librsvg2-dev` | Renderizado de SVG | Todas |
 | `libayatana-appindicator3-dev` | Indicadores de bandeja (opcional) | Todas |
 | `libmpv-dev` | Reproducción de vídeo integrado | Todas |
-| `xvfb` | Servidor virtual X11 (solo pruebas E2E) | Todas |
+| `libgdk-pixbuf2.0-dev` | Decodificación de imágenes (pósters) | Todas |
 
 ### Herramientas de desarrollo
 
 | Herramienta | Versión mínima |
 |-------------|---------------|
-| Node.js | ≥ 22 |
-| npm | ≥ 10 |
 | Rust / Cargo | ≥ 1.90 |
-| Tauri CLI | Instalado automáticamente |
+| `pkg-config` | Detección de librerías |
 
 ---
 
@@ -161,16 +162,16 @@ cd acryl
 El script hace lo siguiente:
 
 1. Detecta el gestor de paquetes (`apt`, `pacman`, `dnf`, `zypper` o `apk`).
-2. Instala las dependencias de sistema (`libwebkit2gtk`, `libgtk-3`, `librsvg2`, `libmpv`, etc.).
-3. Instala Node.js (≥ 22) y Rust/Cargo (≥ 1.90) si faltan o están desactualizados.
+2. Instala las dependencias de sistema (`libgtk-4`, `libadwaita-1`, `librsvg2`, `libmpv`, `gdk-pixbuf2`, etc.).
+3. Instala Rust/Cargo (≥ 1.90) si falta o está desactualizado.
 4. Clona el repositorio (o lo actualiza si ya existe).
-5. Instala dependencias de Node.js y compila con Tauri (`.deb`, AppImage o `.rpm`).
-6. Instala el paquete generado y crea el archivo `.desktop` en
+5. Compila la aplicación con `cargo build --release`.
+6. Instala el binario generado y crea el archivo `.desktop` en
    `~/.local/share/applications`.
 
 Al terminar, busca **Acryl** en el menú de aplicaciones o ejecuta `acryl`.
 
-> **Nota:** el script usa `sudo` para instalar dependencias de sistema y el paquete generado. La entrada `.desktop` y el icono se instalan a nivel de usuario (`~/.local`), sin necesidad de root.
+> **Nota:** el script usa `sudo` para instalar dependencias de sistema y el paquete generado. La entrada `.desktop` y el icono se instalan a nivel de usuario (`~/.local`), sin necesidad de root. **No requiere Node.js ni npm.**
 
 ---
 
@@ -248,8 +249,7 @@ Si quieres ejecutar la aplicación en modo desarrollo (sin instalar):
 ```bash
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
 cd acryl
-npm install
-npm run tauri:dev
+cargo run
 ```
 
 ---
@@ -271,42 +271,37 @@ Una vez iniciada la aplicación:
 
 ```
 app-media-manager/
-├── frontend/                 ← React + TypeScript (Vite), WebView de Tauri
-│   ├── src/
-│   │   ├── components/       Poster, MediaList, SearchBar, MediaDetails, VideoPlayer
-│   │   ├── services/         Llamadas a comandos Tauri (invoke)
-│   │   ├── contexts/         Contexto de idioma (i18n)
-│   │   ├── locales/          Archivos de traducción (es.json, en.json)
-│   │   ├── types/            Contratos TypeScript compartidos con Rust
-│   │   ├── App.tsx, main.tsx, index.css
-│   │   └── __tests__/        Pruebas de Vitest
-│   ├── package.json
-│   └── vite.config.ts
-├── src-tauri/                ← Backend Rust (Tauri v2)
-│   ├── src/
-│   │   ├── main.rs           Punto de entrada de la aplicación
-│   │   ├── lib.rs            Registro de comandos Tauri y estado gestionado
-│   │   ├── commands.rs       Comandos expuestos al frontend
-│   │   ├── config/           Gestión de configuración YAML
-│   │   ├── db/               SQLite, repositorios, migraciones, FTS5
-│   │   ├── metadata/         Cliente TVmaze y sincronización de metadatos
-│   │   └── player/           Bindings a libmpv (reproducción integrada)
+├── src/                      ← Rust puro (sin Tauri, sin WebView)
+│   ├── main.rs               Punto de entrada de la aplicación GTK4
+│   ├── core/                 ← Lógica de negocio (library, metadata, db)
+│   ├── db/                   SQLite, repositorios, migraciones, FTS5
+│   ├── player/               Bindings a libmpv (reproducción integrada)
+│   ├── config/               Gestión de configuración YAML
+│   ├── ui/                   Interfaz GTK4 / Libadwaita
+│   │   ├── main_window.rs    Ventana principal
+│   │   ├── search_bar.rs     Barra de búsqueda
+│   │   ├── media_list.rs     Lista de medios
+│   │   ├── media_details.rs  Vista de detalles
+│   │   ├── video_player.rs   Reproductor embebido
+│   │   └── poster.rs         Renderizado de pósters con gdk-pixbuf
 │   ├── Cargo.toml
-│   ├── Cargo.lock
-│   ├── build.rs              Configuración de compilación (enlaza libmpv)
-│   ├── tauri.conf.json       Configuración de Tauri (ventana, seguridad, bundle)
-│   └── resources/
-│       └── acryl.desktop     Entrada .desktop para Linux
+│   └── Cargo.lock
+├── scripts/                  Scripts de instalación y desinstalación
+│   ├── install.sh            Instalador automático (sin Node.js)
+│   ├── uninstall.sh          Desinstalador
+│   ├── diagnose-deep.sh      Diagnóstico profundo Wayland/Hyprland
+│   ├── diagnose-final.sh     Diagnóstico final de renderizado
+│   ├── fix-blank-screen.sh   Script de solución para pantalla en blanco
+│   ├── fix-blank-screen-final.sh Script final de solución
+│   └── acryl-launcher.sh     Lanzador con captura de errores
 ├── PLAN_DESKTOP.md           Plan de migración y hitos del proyecto
 ├── AGENTS.md                 Instrucciones para el desarrollo
 ├── CONTRIBUTING.md           Flujo de trabajo y Pull Requests
 ├── SECURITY.md               Política de seguridad
 ├── LICENSE                   Licencia MIT
 ├── README.md                 Este archivo
-└── package.json              Scripts raíz que delegan a frontend/
-├── scripts/                  Scripts de instalación y desinstalación
-│   ├── install.sh            Instalador automático
-│   └── uninstall.sh          Desinstalador
+└── docs/                     Documentación y ADRs
+    └── adr/                  Decisiones de arquitectura
 ```
 
 ---
@@ -317,26 +312,13 @@ app-media-manager/
 
 | Comando | Descripción |
 |---------|-------------|
-| `npm install` | Instala dependencias del frontend (Node.js ≥ 22) |
-| `npm run dev` | Inicia el servidor de desarrollo Vite (puerto 3000) |
-| `npm run build` | Compila el frontend hacia `../build` |
-| `npm run test` | Ejecuta las pruebas de Vitest (frontend) |
-| `npm run lint` | Ejecuta ESLint del frontend |
-| `npm run format` | Aplica Prettier al código fuente |
-| `npm run format:check` | Verifica el formato de Prettier |
-| `npm run typecheck` | Ejecuta `tsc --noEmit` del frontend |
-| `npm run verify` | Ejecuta lint + format:check + typecheck + test |
-| `npm run tauri:dev` | Inicia la aplicación de escritorio en modo desarrollo |
-| `npm run tauri:build` | Genera instaladores nativos Linux (`.deb`, AppImage, `.rpm`) |
-
-### Desde `src-tauri/`
-
-| Comando | Descripción |
-|---------|-------------|
-| `cargo build` | Compila el backend Rust |
-| `cargo clippy` | Ejecuta el linter de Rust |
+| `cargo build` | Compila la aplicación Rust + GTK4 |
+| `cargo run` | Ejecuta la aplicación en modo desarrollo |
 | `cargo test` | Ejecuta las pruebas de Rust |
+| `cargo clippy` | Ejecuta el linter de Rust |
 | `cargo fmt` | Aplica formato de Rust |
+| `cargo tauri build` | Genera instaladores nativos Linux (`.deb`, AppImage, `.rpm`) |
+
 
 ---
 
@@ -348,36 +330,30 @@ Acryl utiliza las siguientes dependencias principales. Todas son de código abie
 
 | Crate | Propósito | Licencia |
 |-------|-----------|----------|
-| `tauri` | Framework de escritorio | MIT / Apache-2.0 |
 | `rusqlite` | Bindings a SQLite | MIT |
 | `serde` / `serde_json` / `serde_yaml` | Serialización | MIT |
 | `reqwest` | Cliente HTTP (TVmaze) | MIT / Apache-2.0 |
 | `libc` | Tipos C para FFI | MIT / Apache-2.0 |
 | `thiserror` | Errores tipados | MIT |
 | `log` | Facade de logging | MIT |
-| `tauri-plugin-log` | Plugin de logs para Tauri | MIT / Apache-2.0 |
 | `pkg-config` | Detección de librerías | MIT |
 
-### Frontend (TypeScript / React)
+### UI (GTK4 / Libadwaita)
 
-| Paquete | Propósito | Licencia |
-|---------|-----------|----------|
-| `react` / `react-dom` | Interfaz de usuario | MIT |
-| `@tauri-apps/api` | API de comandos Tauri | MIT / Apache-2.0 |
-| `vite` | Herramienta de construcción | MIT |
-| `vitest` | Tests unitarios | MIT |
-| `eslint` | Linter | MIT |
-| `prettier` | Formateador | MIT |
-| `typescript` | Tipado estricto | Apache-2.0 |
-| `better-sqlite3` | SQLite (desarrollo) | ISC |
+| Crate | Propósito | Licencia |
+|-------|-----------|----------|
+| `gtk4` | Interfaz gráfica | LGPL |
+| `libadwaita` | Componentes de UI (Libadwaita) | LGPL |
+| `gdk-pixbuf` | Renderizado de imágenes (pósters) | LGPL |
+| `cairo` | Gráficos 2D | LGPL / MPL |
 
 ### Sistema
 
 | Paquete | Propósito | Licencia |
 |---------|-----------|----------|
 | `libmpv` | Reproducción de vídeo | GPLv2+ / LGPL |
-| `libwebkit2gtk` | WebView del sistema | LGPL |
-| `libgtk-3` | Interfaz gráfica | LGPL |
+| `libgtk-4` | Interfaz gráfica | LGPL |
+| `libadwaita-1` | Componentes de UI | LGPL |
 | `librsvg2` | Renderizado SVG | LGPL |
 
 > Todas las dependencias de terceros conservan sus licencias originales. Este proyecto se distribuye bajo la licencia **MIT**. Consulta `LICENSE` para más detalles.
