@@ -15,7 +15,7 @@ export async function listMedia(
     readonly limit?: number;
     readonly offset?: number;
     readonly orderBy?: 'title' | 'added' | 'recent';
-  } = {},
+  } = {}
 ): Promise<{ readonly media: readonly Media[]; readonly total: number }> {
   const result = await invoke<{ media: Media[]; total: number }>('list_media_cmd', {
     db_path: dbPath,
@@ -37,7 +37,7 @@ export async function searchMedia(
   opts: {
     readonly type?: string;
     readonly limit?: number;
-  } = {},
+  } = {}
 ): Promise<readonly Media[]> {
   const result = await invoke<Media[]>('search_media_cmd', {
     db_path: dbPath,

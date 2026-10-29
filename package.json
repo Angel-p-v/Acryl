@@ -18,91 +18,16 @@
     "build": "cd frontend && npm run build",
     "preview": "cd frontend && npm run preview",
     "test": "cd frontend && npm test",
-    "lint": "eslint frontend/src",
-    "format": "prettier --write frontend/",
-    "format:check": "prettier --check frontend/",
-    "smoke": "cd frontend && npm test",
-    "coverage": "cd frontend && npm test",
+    "lint": "cd frontend && npm run lint",
+    "format": "cd frontend && npm run format",
+    "format:check": "cd frontend && npm run format:check",
     "typecheck": "cd frontend && npm run typecheck",
+    "verify": "npm run lint && npm run format:check && npm run typecheck && npm run test",
     "tauri": "tauri",
     "tauri:dev": "cd frontend && npm run dev & cargo tauri dev",
-    "tauri:build": "cargo tauri build",
-    "verify": "npm run lint && npm run format:check && npm run typecheck && npm run test"
+    "tauri:build": "cargo tauri build"
   },
-  "bin": {
-    "mm": "./dist/cli.js"
-  },
-  "files": [
-    "dist",
-    "config",
-    "docs",
-    "installers/linux/install.sh",
-    "installers/linux/uninstall.sh",
-    "installers/windows/install.ps1",
-    "installers/windows/uninstall.ps1",
-    "README.md",
-    "PLAN.md",
-    "CHANGELOG.md",
-    "CONTRIBUTING.md",
-    "SECURITY.md",
-    "LICENSE"
-  ],
   "engines": {
     "node": ">=22"
-  },
-  "keywords": [
-    "cli",
-    "tui",
-    "media",
-    "anime",
-    "series",
-    "movies",
-    "sqlite",
-    "mpv",
-    "terminal"
-  ],
-  "dependencies": {
-    "@inkjs/ui": "^2.0.0",
-    "better-sqlite3": "^13.0.3",
-    "chokidar": "^6.0.0",
-    "commander": "^15.0.0",
-    "ink": "^8.0.0",
-    "picocolors": "^1.1.1",
-    "react": "^19.3.1",
-    "sharp": "^0.35.5",
-    "tinyglobby": "^0.2.17",
-    "yaml": "^2.9.1",
-    "zod": "^4.6.7"
-  },
-  "devDependencies": {
-    "@commitlint/cli": "^21.2.4",
-    "@commitlint/config-conventional": "^21.2.4",
-    "@eslint/js": "^10.0.1",
-    "@types/better-sqlite3": "^9.6.0",
-    "@types/node": "^26.6.5",
-    "@types/react": "^19.3.0",
-    "@vitest/coverage-v8": "^5.0.5",
-    "eslint": "^10.13.0",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-import-x": "^4.17.1",
-    "husky": "^9.1.7",
-    "ink-testing-library": "^4.0.0",
-    "lint-staged": "^17.6.0",
-    "node-addon-api": "^8.0.0",
-    "node-gyp": "^12.0.0",
-    "node-pty": "^1.1.0",
-    "prettier": "^3.9.10",
-    "prettier-plugin-sort-package-json": "^1.1.0",
-    "tsx": "^4.23.15",
-    "typescript": "~6.0.3",
-    "typescript-eslint": "^8.72.0",
-    "vitest": "^5.0.5"
-  },
-  "allowScripts": {
-    "better-sqlite3": true,
-    "esbuild": true,
-    "sharp": true,
-    "unrs-resolver": true,
-    "node-pty@1.1.0": true
   }
 }
