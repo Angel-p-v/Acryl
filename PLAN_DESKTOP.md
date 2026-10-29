@@ -174,4 +174,234 @@ Todos los hitos del plan están completados.
 
 ---
 
+## 10. Migración E: Arquitectura nativa GTK4 / Libadwaita (sin motor Web)
+
+> **Motivo:** WebKit2GTK (usado por Tauri v2) no renderiza correctamente en Wayland/Hyprland. Se han agotado todas las configuraciones de entorno (`GDK_BACKEND=x11`, `WEBKIT_DISABLE_DMABUF_RENDERER=1`, `WEBKIT_DISABLE_COMPOSITING_MODE=1`, `LIBGL_ALWAYS_SOFTWARE=1`, `XDG_SESSION_TYPE=x11`, etc.). La única solución robusta a largo plazo es eliminar el WebView y usar GTK4/Libadwaita nativo.
+
+### 10.1. Stack objetivo
+
+| Capa | Tecnología actual | Tecnología objetivo | Motivo |
+|------|-------------------|---------------------|--------|
+| **Backend** | Rust + Tauri | Rust puro | Mantener lógica de negocio, SQLite, libmpv |
+| **Frontend** | React + TypeScript (WebView) | Rust + GTK4 / Libadwaita | Renderizado nativo GTK, sin WebView |
+| **Framework desktop** | Tauri v2 | gtk4-rs / libadwaita-rs | Ventana nativa, sin WebView, sin problemas Wayland |
+| **Comunicación** | Tauri IPC (invoke) | Llamadas directas Rust → Rust | Sin serialización JSON innecesaria |
+| **Base de datos** | SQLite (`rusqlite`) | SQLite (`rusqlite`) | Sin cambios |
+| **Reproductor** | libmpv vía FFI | libmpv vía FFI | Sin cambios |
+| **Imágenes / pósters** | HTML `` en WebView | `gdk-pixbuf` / `cairo` / `gtk4::Picture` | Renderizado nativo |
+| **Configuración** | YAML + `serde` | YAML + `serde` | Sin cambios |
+| **Instaladores** | Tauri bundle (.deb, AppImage, .rpm) | `cargo-deb` / `cargo-rpm` / AppImage manual | Empaquetado nativo sin Tauri |
+
+### 10.2. Qué se conserva y qué se reescribe
+
+#### Conservar (casi sin cambios)
+
+| Componente | Qué hace | Destino |
+|------------|----------|---------|
+| `core/db/` | Migraciones, repositorios, FTS5 | Mantener (`rusqlite`) |
+| `core/library/` | LibraryService, escaneo, indexado | Mantener |
+| `core/player/` | Lanzador de mpv, tracker IPC | Mantener (bindings a `libmpv`) |
+| `core/metadata/` | TMDB/TVDB, rate limiter, caché TTL | Mantener (`reqwest` + `serde_json`) |
+| `config/` | YAML + `serde` | Mantener |
+| `shared/` | Utilidades, `imageToAnsi` | Lógica sí, render ANSI no |
+
+#### Reescribir por completo
+
+| Componente | Implementación actual | Nueva implementación |
+|------------|---------------------|---------------------|
+| `ui/` (React + TypeScript + WebView) | React + TypeScript dentro de WebView de Tauri | Rust + GTK4 / Libadwaita (código o GtkBuilder XML) |
+| `commands/` (Comandos Tauri) | Comandos Tauri expuestos al frontend | Funciones Rust internas llamadas directamente |
+| `PosterImage` | HTML `` en WebView | `gdk-pixbuf` / `cairo` dentro de contenedor GTK4 |
+| Reproductor vía `spawn` | `libmpv` integrado | `libmpv` integrado (sin cambios) |
+| Tests de UI | Vitest + Tauri | `gtk4-rs` tests + pruebas de integración |
+| Instaladores | Tauri bundle | `cargo-deb`, `cargo-rpm`, AppImage manual |
+| Scripts de instalación | `install.sh` con detectar Node.js + Tauri | `install.sh` sin Node.js, solo Rust + GTK dependencias |
+
+### 10.3. Arquitectura propuesta
+
+```
+frontend/                 ← React + TypeScript (WebView de Tauri)  → ELIMINAR
+src-tauri/                ← Rust + Tauri                          → REEMPLAZAR
+```
+
+Se convierte en:
+
+```
+src/                      ← Rust puro (binario único)
+  ├── core/               ← Lógica de negocio (library, metadata, db)
+  ├── db/                 ← rusqlite, migraciones, FTS5
+  ├── player/             ← bindings a libmpv
+  ├── config/             ← serde + YAML
+  ├── ui/                 ← GTK4 / Libadwaita (ventana, widgets, vistas)
+  │   ├── main_window.rs  ← Ventana principal
+  │   ├── search_bar.rs   ← Barra de búsqueda
+  │   ├── media_list.rs   ← Lista de medios
+  │   ├── media_details.rs│ Vista de detalles
+  │   ├── video_player.rs ← Reproductor embebido
+  │   └── poster.rs       ← Renderizado de pósters con gdk-pixbuf
+  └── main.rs             ← Punto de entrada GTK4
+```
+
+### 10.4. Hitos del plan (Migración E)
+
+#### Hito E.1 — Prototipo mínimo GTK4 (Semanas 1–2)
+- Ventana GTK4 con `libadwaita`
+- Lista de medios leída desde SQLite
+- Un póster renderizado con `gdk-pixbuf`
+- Barra de búsqueda básica
+- **Criterio de aceptación:** la ventana se abre en Wayland/Hyprland y muestra la lista de medios
+
+#### Hito E.2 — UI completa con GTK4 (Semanas 3–6)
+- Vista de detalles con póster grande, metadatos, sinopsis
+- Favoritos, en curso, vistos/no vistos
+- Historial de reproducción
+- **Criterio de aceptación:** flujo completo: indexar → buscar → ver detalles → reproducir
+
+#### Hito E.3 — Reproductor integrado con libmpv (Semanas 7–8)
+- Bindings a `libmpv` dentro de ventana GTK4
+- Controles: play, pause, stop, next, prev, seek, volumen
+- **Criterio de aceptación:** se reproduce un archivo de video dentro de la ventana GTK4
+
+#### Hito E.4 — Empaquetado nativo Linux (Semanas 9–10)
+- Instalador nativo (`.deb`, `.rpm`, AppImage) sin Tauri
+- Icono de aplicación, entrada de menú, archivo `.desktop`
+- **Criterio de aceptación:** se instala y ejecuta en Linux sin dependencias de Node.js/Rust/Node
+
+#### Hito E.5 — Limpieza y documentación (Semana 11)
+- Eliminar código de frontend (React, TypeScript, Vite)
+- Eliminar dependencias de Node.js
+- Actualizar README, AGENTS.md, PLAN_DESKTOP.md
+- **Criterio de aceptación:** el repositorio no contiene referencias a Tauri, Node.js o WebView
+
+---
+
+## 11. Tecnologías a eliminar (descontinuar)
+
+| Tecnología | Motivo de eliminación | Reemplazo |
+|------------|----------------------|-----------|
+| **Tauri v2** | Depende de WebView del sistema (WebKit2GTK) que no funciona en Wayland | Eliminado (se usa Rust puro + GTK4) |
+| **WebView / WebKit2GTK** | No renderiza en Wayland/Hyprland | Eliminado |
+| **Node.js** | Solo se usaba para el frontend React | Eliminado |
+| **npm / pnpm** | Solo para dependencias del frontend | Eliminado |
+| **Vite** | Herramienta de construcción del frontend | Eliminado |
+| **React** | Framework de UI web | Eliminado |
+| **TypeScript** | Lenguaje del frontend | Eliminado |
+| **@tauri-apps/api** | API de comandos Tauri | Eliminado (llamadas directas Rust) |
+| **better-sqlite3** | SQLite para desarrollo frontend | Eliminado |
+| **Tauri CLI** | Herramienta de construcción Tauri | Eliminado |
+
+### Archivos a eliminar
+
+```
+frontend/                 ← Carpeta completa (React + TypeScript + Vite)
+src-tauri/                ← Carpeta completa (Tauri + Rust bindings a WebView)
+scripts/install.sh        ← Se reescribe (sin Node.js, solo Rust + GTK)
+scripts/uninstall.sh      ← Se actualiza si es necesario
+package.json (raíz)       ← Se reescribe (sin scripts de Tauri/Node)
+```
+
+### Archivos a conservar
+
+```
+src/                      ← Nueva carpeta Rust pura (db, library, player, config, ui, main.rs)
+src-tauri/Cargo.toml      ← Se reescribe como Cargo.toml de proyecto Rust puro
+Cargo.toml (raíz)         ← Se actualiza (workspace o proyecto único)
+Cargo.lock                ← Se regenera
+scripts/                  ← Se mantienen (install.sh, uninstall.sh, diagnose-*.sh)
+docs/                     ← Se mantienen (ADRs, etc.)
+README.md                 ← Se reescribe completamente
+PLAN_DESKTOP.md           ← Se actualiza (este documento)
+AGENTS.md                 ← Se actualiza (referencias a tecnologías)
+CONTRIBUTING.md           ← Se actualiza (instrucciones de contribución)
+SECURITY.md               ← Se revisa (permisos de Tauri ya no aplican)
+LICENSE                   ← Se mantiene
+```
+
+---
+
+## 12. Cambios en documentación y scripts
+
+### README.md
+
+| Sección | Cambio |
+|---------|--------|
+| Badges | Eliminar Node.js, Tauri, WebView; agregar GTK4, Rust, Libadwaita |
+| Arquitectura | Reemplazar diagrama de Tauri por diagrama de GTK4 + Rust |
+| Requisitos del sistema | Eliminar Node.js, npm, Tauri CLI; agregar libgtk-4-dev, libadwaita-1-dev, libwebkit2gtk (opcional) |
+| Instalación | `install.sh` ya no instala Node.js; solo dependencias de sistema GTK + Rust |
+| Estructura del repositorio | Eliminar `frontend/` y `src-tauri/`; agregar `src/` |
+| Comandos disponibles | Eliminar comandos de Tauri; agregar comandos de Rust/Cargo |
+
+### Scripts
+
+| Archivo | Cambio |
+|---------|--------|
+| `install.sh` | Eliminar instalación de Node.js/npm; instalar `libgtk-4-dev`, `libadwaita-1-dev`, `libwebkit2gtk-4.0-dev` (opcional para webview), `rust-cargo`; compilar con `cargo build --release` |
+| `uninstall.sh` | No requiere cambios significativos |
+| `diagnose-blank.sh` | Eliminar referencias a WebView/Tauri; enfocar en GTK4 |
+
+### Otros archivos
+
+| Archivo | Cambio |
+|---------|--------|
+| `AGENTS.md` | Actualizar referencias a Tauri, WebView, frontend React |
+| `CONTRIBUTING.md` | Actualizar instrucciones de desarrollo (Rust + GTK4 en lugar de React + Tauri) |
+| `SECURITY.md` | Revisar permisos (ya no hay WebView ni comandos Tauri) |
+| `docs/adr/` | Agregar ADR para la decisión de migrar a GTK4/Libadwaita |
+
+---
+
+## 13. Estimación de tiempo adicional
+
+| Fase | Tiempo estimado |
+|------|-----------------|
+| Análisis y ADR | 1 semana |
+| Prototipo GTK4 | 2 semanas |
+| Migración completa UI | 4-6 semanas |
+| Pruebas y ajuste | 2 semanas |
+| Empaquetado y documentación | 1 semana |
+| **Total adicional** | **10-12 semanas** |
+
+---
+
+## 14. Decisiones pendientes
+
+| Pregunta | Opciones | Decisión pendiente |
+|----------|----------|-------------------|
+| Toolkit GTK | GTK3 vs GTK4 | Pendiente (recomendado GTK4) |
+| Librería de UI | Libadwaita vs GTK puro | Pendiente (recomendado Libadwaita) |
+| Definición UI | Código Rust vs GtkBuilder XML | Pendiente (recomendado GtkBuilder para separar lógica/vista) |
+| Empaquetado | `cargo-deb` / `cargo-rpm` vs `cargo-appimage` | Pendiente |
+
+---
+
+## 15. Estado de hitos
+
+| Hito | Contenido | Estado |
+|------|-----------|--------|
+| Hito 1 | Prototipo mínimo: ventana Tauri, lista desde SQLite, póster, búsqueda | ✅ completado |
+| Hito 2 | Capa de dominio en Rust (db, library, metadata) | ✅ completado |
+| Hito 3 | Reproductor integrado (libmpv) | ✅ completado |
+| Hito 4 | UI completa (detalles, favoritos, visto, navegación) | ✅ completado |
+| Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ✅ completado |
+| Hito 6 | Configuración YAML en el backend | ✅ completado |
+| Hito 7 | Internacionalización (i18n) de la UI | ✅ completado |
+| Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ✅ completado |
+| Hito 9 | Publicación automática en GitHub Releases | ✅ completado |
+| **Hito E.1** | Prototipo mínimo GTK4 (ventana, lista, póster, búsqueda) | ⏳ pendiente |
+| **Hito E.2** | UI completa GTK4 (detalles, favoritos, visto, navegación) | ⏳ pendiente |
+| **Hito E.3** | Reproductor integrado con libmpv en GTK4 | ⏳ pendiente |
+| **Hito E.4** | Empaquetado nativo Linux sin Tauri | ⏳ pendiente |
+| **Hito E.5** | Limpieza y documentación (eliminar frontend/Tauri) | ⏳ pendiente |
+
+---
+
+## 16. Próximo paso inmediato
+
+Crear el **ADR (Architecture Decision Record)** documentando la decisión de migrar de Tauri/WebView a GTK4/Libadwaita, y crear una rama `refactor/gtk4-migration` para el trabajo.
+
+---
+
+---
+
 *Nota: Este plan es un borrador inicial. A medida que se avanza en la implementación, se deben actualizar los hitos y criterios de aceptación.*
