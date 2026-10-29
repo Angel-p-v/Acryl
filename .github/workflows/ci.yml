@@ -156,7 +156,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: cd frontend && npm ci
 
-      - uses: actions/download-artifact@649575e1e5b9e71ab93592de98095c12763e13b3 # v4
+      - uses: actions/download-artifact@v4
         with:
           name: tauri-bundles
           path: src-tauri/target/release/bundle/
