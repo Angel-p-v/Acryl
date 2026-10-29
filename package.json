@@ -22,7 +22,7 @@
     "format": "prettier --write frontend/",
     "format:check": "prettier --check frontend/",
     "smoke": "cd frontend && npm test",
-    "coverage": "cd frontend && npm run coverage",
+    "coverage": "cd frontend && npm test",
     "typecheck": "cd frontend && npm run typecheck",
     "tauri": "tauri",
     "tauri:dev": "cd frontend && npm run dev & cargo tauri dev",
