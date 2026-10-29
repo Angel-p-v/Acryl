@@ -1,0 +1,25 @@
+[package]
+name = "media-manager"
+version = "0.1.0"
+description = "Gestor de contenido multimedia de escritorio (Linux): índice SQLite local y reproducción integrada."
+authors = ["Angel-p-v <angelpuertas500@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/Angel-p-v/app-media-manager"
+edition = "2024"
+rust-version = "1.90"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4" }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.12.5" }
+tauri-plugin-log = "2"
