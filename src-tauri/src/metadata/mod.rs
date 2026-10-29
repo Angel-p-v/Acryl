@@ -152,11 +152,8 @@ pub async fn sync_metadata(
     title: &str,
     client: &TvMazeClient,
 ) -> Result<FetchedMetadata, String> {
-<<<<<<< HEAD
-=======
     // TVmaze no distingue entre película y serie de forma estricta en la
     // búsqueda; intentamos con el título directamente.
->>>>>>> f33b269 (feat(hito-8): metadatos automáticos con TVmaze (sin API key))
     let show = client
         .search_and_get_show(title)
         .await?
@@ -168,13 +165,7 @@ pub async fn sync_metadata(
     Ok(FetchedMetadata {
         title: show.name,
         synopsis,
-<<<<<<< HEAD
         poster_path: show.image.and_then(|img| img.original.or(img.medium)),
-=======
-        poster_path: show
-            .image
-            .and_then(|img| img.original.or(img.medium)),
->>>>>>> f33b269 (feat(hito-8): metadatos automáticos con TVmaze (sin API key))
         release_date: show.premiered,
         vote_average: show.rating.and_then(|r| r.average),
     })
@@ -212,17 +203,15 @@ mod tests {
 
     #[test]
     fn poster_path_uses_original_when_available() {
-<<<<<<< HEAD
-=======
-        // Este test verifica la lógica de selección de poster_path.
-        // En producción se usa image.original o image.medium.
->>>>>>> f33b269 (feat(hito-8): metadatos automáticos con TVmaze (sin API key))
         let img = TvMazeImage {
             medium: Some("https://example.com/medium.jpg".to_string()),
             original: Some("https://example.com/original.jpg".to_string()),
         };
         let poster_path = img.original.or(img.medium);
-        assert_eq!(poster_path, Some("https://example.com/original.jpg".to_string()));
+        assert_eq!(
+            poster_path,
+            Some("https://example.com/original.jpg".to_string())
+        );
     }
 
     #[test]
@@ -232,7 +221,10 @@ mod tests {
             original: None,
         };
         let poster_path = img.original.or(img.medium);
-        assert_eq!(poster_path, Some("https://example.com/medium.jpg".to_string()));
+        assert_eq!(
+            poster_path,
+            Some("https://example.com/medium.jpg".to_string())
+        );
     }
 
     #[test]
@@ -246,10 +238,6 @@ mod tests {
     fn strip_html_handles_entities() {
         let html = "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;";
         let text = strip_html_tags(html);
-<<<<<<< HEAD
-=======
-        // Las entidades HTML se decodifican, pero las etiquetas quedan como texto plano.
->>>>>>> f33b269 (feat(hito-8): metadatos automáticos con TVmaze (sin API key))
         assert!(!text.contains("&lt;"));
         assert!(!text.contains("&quot;"));
         assert_eq!(text, "<script>alert(\"x\")</script>");

@@ -88,7 +88,7 @@ export function MediaDetails({
               },
             }
           : d
-          );
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : t('details.error'));
     } finally {
@@ -188,9 +188,7 @@ export function MediaDetails({
         </div>
 
         <div className="details-files">
-          <h2 className="details-files-title">
-            {t('details.files', { count: files.length })}
-          </h2>
+          <h2 className="details-files-title">{t('details.files', { count: files.length })}</h2>
           <ul className="details-files-list">
             {files.map((file) => (
               <li key={file.id} className="details-file-item">
@@ -202,9 +200,7 @@ export function MediaDetails({
                       })
                     : '—'}
                 </span>
-                <span className="details-file-title">
-                  {file.title ?? t('details.noTitle')}
-                </span>
+                <span className="details-file-title">{file.title ?? t('details.noTitle')}</span>
                 <button
                   className="details-file-play"
                   onClick={() => {
