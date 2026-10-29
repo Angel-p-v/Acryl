@@ -32,6 +32,7 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - run: cd frontend && npm ci
       - run: npm run lint
       - run: npm run format:check
       - run: npm run typecheck
