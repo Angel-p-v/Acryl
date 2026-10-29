@@ -9,7 +9,7 @@ export default defineConfig({
   plugins: [react()],
   root: __dirname,
   build: {
-    outDir: path.resolve(__dirname, '..', 'build'),
+    outDir: path.resolve(__dirname, 'build'),
     emptyOutDir: true,
   },
   server: {
