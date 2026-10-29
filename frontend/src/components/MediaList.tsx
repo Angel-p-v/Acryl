@@ -1,4 +1,5 @@
 import { Poster } from './Poster';
+import { useLanguage } from '../contexts/LanguageContext';
 
 import type { Media } from '../types/media';
 import type { JSX } from 'react';
@@ -9,10 +10,12 @@ type MediaListProps = {
 };
 
 export function MediaList({ media, onMediaSelect }: MediaListProps): JSX.Element {
+  const { t } = useLanguage();
+
   if (media.length === 0) {
     return (
       <section className="media-list empty">
-        <p>No se encontraron medios.</p>
+        <p>{t('search.noResults')}</p>
       </section>
     );
   }
