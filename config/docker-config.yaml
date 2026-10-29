@@ -1,0 +1,45 @@
+# Configuración de ejemplo para despliegue con Docker Compose.
+# Copia este archivo a config/config.yaml y ajusta las rutas de `library.roots`
+# a los volúmenes de medios que montes en docker-compose.yml.
+
+version: 1
+library:
+  roots:
+    - path: /media/series
+      type: series
+      label: Series
+    - path: /media/movies
+      type: movie
+      label: Películas
+    - path: /media/anime
+      type: anime
+      label: Anime
+  exclude:
+    - '**/*.sample.*'
+    - '**/sample/**'
+    - '**/.hidden/**'
+    - '**/@eaDir/**'
+  scan:
+    followSymlinks: false
+    maxDepth: 4
+    minSizeBytes: 0
+database:
+  path: /data/library.db
+player:
+  default: mpv
+  onLaunch: detach
+ui:
+  theme: default
+  layout: split
+  sort: title
+  showDetails: true
+  compact: false
+logging:
+  level: info
+  format: text
+playback:
+  tracking: auto
+  resume: true
+  resumeMinSeconds: 30
+  completedThreshold: 0.9
+  completedTailSeconds: 30

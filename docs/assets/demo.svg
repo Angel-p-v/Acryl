@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="542" viewBox="0 0 980 542" role="img" aria-labelledby="title desc">
+  <title id="title">Demo de media-manager-cli</title>
+  <desc id="desc">Índice, búsqueda, detalle y reproducción simulada con el comando mm en la terminal.</desc>
+  <rect width="980" height="542" rx="12" fill="#0d1117"/>
+  <rect x="0.5" y="0.5" width="979" height="541" rx="11.5" fill="none" stroke="#30363d"/>
+  <path d="M0 40v-28a12 12 0 0 1 12-12h956a12 12 0 0 1 12 12v28z" fill="#161b22"/>
+  <circle cx="22" cy="20" r="6" fill="#ff7b72"/>
+  <circle cx="42" cy="20" r="6" fill="#d29922"/>
+  <circle cx="62" cy="20" r="6" fill="#3fb950"/>
+  <text x="490" y="25" text-anchor="middle" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">mm · media-manager-cli</text>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" letter-spacing="0.1">
+    <text x="30" y="78" xml:space="preserve"><tspan fill="#7ee787">$</tspan><tspan fill="#f0f6fc"> mm index</tspan></text>
+    <text x="30" y="103" xml:space="preserve"><tspan fill="#7ee787">✔ </tspan><tspan fill="#e6edf3">Indexación completada en 7 ms</tspan></text>
+    <text x="30" y="128" xml:space="preserve"><tspan fill="#8b949e">  8 ficheros vistos · 5 títulos nuevos · 0 omitidos</tspan></text>
+    <text x="30" y="178" xml:space="preserve"><tspan fill="#7ee787">$</tspan><tspan fill="#f0f6fc"> mm search sever</tspan></text>
+    <text x="30" y="203" xml:space="preserve"><tspan fill="#e6edf3">1 resultado para «sever»</tspan></text>
+    <text x="30" y="228" xml:space="preserve"><tspan fill="#79c0ff">   3  serie    Severance (2022)</tspan></text>
+    <text x="30" y="278" xml:space="preserve"><tspan fill="#7ee787">$</tspan><tspan fill="#f0f6fc"> mm show Severance</tspan></text>
+    <text x="30" y="303" xml:space="preserve"><tspan fill="#f0f6fc">Severance (2022)</tspan></text>
+    <text x="30" y="328" xml:space="preserve"><tspan fill="#8b949e">  #3 · serie · 2 episodios</tspan></text>
+    <text x="30" y="353" xml:space="preserve"><tspan fill="#8b949e">  #5 T01E01  ~/Media/Series/Severance/Season 01/Severance.S01E01.1080p.mkv</tspan></text>
+    <text x="30" y="378" xml:space="preserve"><tspan fill="#8b949e">  #6 T01E02  ~/Media/Series/Severance/Season 01/Severance.S01E02.1080p.mkv</tspan></text>
+    <text x="30" y="428" xml:space="preserve"><tspan fill="#7ee787">$</tspan><tspan fill="#f0f6fc"> mm play Severance --dry-run</tspan></text>
+    <text x="30" y="453" xml:space="preserve"><tspan fill="#e6edf3">Comando de reproducción (detach)</tspan></text>
+    <text x="30" y="478" xml:space="preserve"><tspan fill="#d29922">  mpv --force-window=immediate '~/Media/Series/Severance/Season 01/Severance.S01E01.1080p.mkv'</tspan></text>
+    <text x="30" y="503" xml:space="preserve"><tspan fill="#8b949e">  No se ha lanzado ningún proceso.</tspan></text>
+  </g>
+</svg>

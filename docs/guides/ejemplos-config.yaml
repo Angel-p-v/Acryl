@@ -1,0 +1,217 @@
+# media-manager — Ejemplos de configuración YAML
+#
+# Copia el bloque que necesites a ~/.config/media-manager/config.yaml
+# y ajusta las rutas a tu colección de medios.
+#
+# Todas las opciones son opcionales; las que faltan toman el valor por defecto.
+
+# ============================================================
+# 1. Configuración mínima (solo rutas de medios)
+# ============================================================
+# Úsala si solo quieres indexar y reproducir, sin metadatos externos.
+
+version: 1
+library:
+  roots:
+    - path: /home/usuario/Series
+      type: series
+      label: Series
+    - path: /home/usuario/Películas
+      type: movie
+      label: Películas
+    - path: /home/usuario/Anime
+      type: anime
+      label: Anime
+  exclude:
+    - '**/*.sample.*'
+    - '**/sample/**'
+    - '**/.hidden/**'
+    - '**/@eaDir/**'
+  scan:
+    followSymlinks: false
+    maxDepth: 4
+    minSizeBytes: 0
+database:
+  path: ~/.local/share/media-manager/library.db
+player:
+  default: mpv
+  onLaunch: detach
+ui:
+  theme: default
+  layout: split
+  sort: title
+  showDetails: true
+  compact: false
+logging:
+  level: warn
+  format: text
+playback:
+  tracking: auto
+  resume: true
+  resumeMinSeconds: 30
+  completedThreshold: 0.9
+  completedTailSeconds: 30
+metadata: {}
+
+# ============================================================
+# 2. Configuración con reproductor VLC y modo foreground
+# ============================================================
+# Úsala si prefieres VLC y quieres que la terminal espere a que
+# el reproductor cierre antes de devolver el control.
+
+version: 1
+library:
+  roots:
+    - path: /mnt/media/series
+      type: series
+      label: Series
+    - path: /mnt/media/movies
+      type: movie
+      label: Películas
+database:
+  path: /var/lib/media-manager/library.db
+player:
+  default: vlc
+  onLaunch: foreground
+  players:
+    vlc:
+      command: vlc
+      args:
+        - --started-from-file
+        - '{file}'
+ui:
+  theme: dark
+  layout: list
+  sort: recent
+  compact: true
+logging:
+  level: info
+  format: json
+playback:
+  tracking: auto
+  resume: true
+  resumeMinSeconds: 60
+metadata: {}
+
+# ============================================================
+# 3. Configuración con metadatos externos (TMDB/TVDB)
+# ============================================================
+# Úsala si quieres sinopsis, pósteres y calificaciones de TMDB/TVDB.
+# Necesitas claves API válidas (obténlas en themoviedb.org y thetvdb.com).
+
+version: 1
+library:
+  roots:
+    - path: /home/usuario/Series
+      type: series
+      label: Series
+    - path: /home/usuario/Películas
+      type: movie
+      label: Películas
+    - path: /home/usuario/Anime
+      type: anime
+      label: Anime
+database:
+  path: ~/.local/share/media-manager/library.db
+player:
+  default: mpv
+  onLaunch: detach
+metadata:
+  tmdb_api_key: 'TU_CLAVE_TMDB_AQUI'
+  tvdb_api_key: 'TU_CLAVE_TVDB_AQUI'
+  omdb_api_key: 'TU_CLAVE_OMDB_AQUI' # opcional, proveedor de respaldo
+  anilist_api_key: 'TU_CLAVE_ANILIST_AQUI' # opcional, mejor para anime
+  cacheTtlHours: 24
+logging:
+  level: warn
+  format: text
+
+# ============================================================
+# 4. Configuración para servidor/NAS (sin TUI, solo headless)
+# ============================================================
+# Úsala en un servidor donde solo ejecutas comandos headless
+# (mm index, mm list, mm search, etc.).
+
+version: 1
+library:
+  roots:
+    - path: /mnt/nas/series
+      type: series
+      label: Series
+    - path: /mnt/nas/movies
+      type: movie
+      label: Películas
+    - path: /mnt/nas/anime
+      type: anime
+      label: Anime
+  scan:
+    followSymlinks: true
+    maxDepth: 6
+    minSizeBytes: 1048576 # ignora archivos menores a 1 MB
+database:
+  path: /mnt/nas/media-manager/library.db
+player:
+  default: mpv
+  onLaunch: detach
+ui:
+  theme: default
+  compact: true
+logging:
+  level: error
+  format: json
+  # En un servidor puedes enviar los logs a un archivo:
+  # (se pasa por línea de comando: mm --log-file /var/log/mm/mm.log)
+playback:
+  tracking: auto
+  resume: true
+metadata:
+  cacheTtlHours: 168 # refresca metadatos cada semana
+
+# ============================================================
+# 5. Configuración con temas de color personalizados (T1)
+# ============================================================
+# Úsala si quieres definir tus propios colores en lugar de los
+# temas predeterminados (default, dark, light).
+
+version: 1
+library:
+  roots:
+    - path: /home/usuario/Media
+      type: movie
+      label: Películas
+database:
+  path: ~/.local/share/media-manager/library.db
+player:
+  default: mpv
+  onLaunch: detach
+ui:
+  theme:
+    primary: cyan
+    accent: magenta
+    success: green
+    warning: yellow
+    error: red
+    muted: gray
+    border: gray
+  layout: split
+  sort: title
+  showDetails: true
+  compact: false
+logging:
+  level: warn
+  format: text
+playback:
+  tracking: auto
+metadata: {}
+
+# ============================================================
+# Variables de entorno soportadas (sobrescriben el YAML)
+# ============================================================
+# MM_CONFIG        — ruta al archivo de configuración
+# MM_DATABASE_PATH — ruta a la base de datos SQLite
+# MM_PLAYER        — reproductor por defecto (mpv | vlc)
+# MM_LOG_LEVEL     — silent | error | warn | info | debug
+# MM_LOG_FORMAT    — text | json
+#
+# Ejemplo:
+#   MM_DATABASE_PATH=/mnt/datos/mm/library.db mm index --json

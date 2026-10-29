@@ -1,0 +1,17 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  artifacts:
+    name: build release artifacts
+    uses: ./.github/workflows/release-artifacts.yml
+    with:
+      tag: ${{ github.event.release.tag_name }}

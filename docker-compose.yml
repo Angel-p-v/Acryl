@@ -1,0 +1,40 @@
+# Docker Compose para media-manager.
+#
+# Levanta `mm` con:
+#   - base de datos persistente (volumen mm-data)
+#   - configuración persistente (bind-mount de config/docker-config.yaml)
+#   - volúmenes de medios (montar aquí las carpetas del host)
+#
+# Uso:
+#   docker compose up -d           # índice inicial en segundo plano
+#   docker compose run --rm mm list   # listar la biblioteca
+#   docker compose run --rm mm        # abrir la TUI interactiva
+
+services:
+  mm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: media-manager
+    # La TUI (Ink) necesita una TTY asignada y stdin abierto.
+    tty: true
+    stdin_open: true
+    environment:
+      MM_CONFIG: /config/config.yaml
+      MM_DATABASE_PATH: /data/library.db
+      MM_LOG_LEVEL: ${MM_LOG_LEVEL:-info}
+    volumes:
+      # Configuración: edita config/docker-config.yaml en el host.
+      - ./config/docker-config.yaml:/config/config.yaml:ro
+      # Base de datos persistente (survive a recreaciones del contenedor).
+      - mm-data:/data
+      # Volúmenes de medios: descomentar y apuntar a las carpetas del host.
+      # - ./media/series:/media/series:ro
+      # - ./media/movies:/media/movies:ro
+      # - ./media/anime:/media/anime:ro
+    # Sin comando se abre la TUI; con "index" se ejecuta indexación headless.
+    command: []
+
+volumes:
+  # Datos de la aplicación (base de datos SQLite y backups).
+  mm-data:

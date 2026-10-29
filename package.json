@@ -1,0 +1,114 @@
+{
+  "name": "media-manager-cli",
+  "version": "3.3.0",
+  "description": "Gestor de contenido multimedia 100% terminal: índice SQLite local y reproducción con mpv/vlc",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Angel-p-v/media-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Angel-p-v/media-manager/issues"
+  },
+  "homepage": "https://github.com/Angel-p-v/media-manager#readme",
+  "author": "Angel-p-v",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "bench": "vitest bench --reporter=verbose",
+    "build": "tsc -p tsconfig.build.json",
+    "coverage": "vitest run --coverage",
+    "dev": "tsx watch src/cli.tsx",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "prepack": "npm run build",
+    "prepare": "husky",
+    "smoke": "node scripts/test/smoke-pack.mjs",
+    "standalone": "node scripts/build/standalone.mjs",
+    "start": "node dist/cli.js",
+    "test": "vitest run",
+    "test:e2e": "vitest run --project e2e",
+    "test:integration": "vitest run --project integration",
+    "test:unit": "vitest run --project unit",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run lint && npm run format:check && npm run typecheck && npm run test"
+  },
+  "bin": {
+    "mm": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "config",
+    "docs",
+    "installers/linux/install.sh",
+    "installers/linux/uninstall.sh",
+    "installers/windows/install.ps1",
+    "installers/windows/uninstall.ps1",
+    "README.md",
+    "PLAN.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "cli",
+    "tui",
+    "media",
+    "anime",
+    "series",
+    "movies",
+    "sqlite",
+    "mpv",
+    "terminal"
+  ],
+  "dependencies": {
+    "@inkjs/ui": "^2.0.0",
+    "better-sqlite3": "^13.0.3",
+    "chokidar": "^6.0.0",
+    "commander": "^15.0.0",
+    "ink": "^8.0.0",
+    "picocolors": "^1.1.1",
+    "react": "^19.3.1",
+    "sharp": "^0.35.5",
+    "tinyglobby": "^0.2.17",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
+    "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@vitest/coverage-v8": "^5.0.5",
+    "eslint": "^10.13.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import-x": "^4.17.1",
+    "husky": "^9.1.7",
+    "ink-testing-library": "^4.0.0",
+    "lint-staged": "^17.6.0",
+    "node-addon-api": "^8.0.0",
+    "node-gyp": "^12.0.0",
+    "node-pty": "^1.1.0",
+    "prettier": "^3.9.10",
+    "prettier-plugin-sort-package-json": "^1.1.0",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.0",
+    "vitest": "^5.0.5"
+  },
+  "allowScripts": {
+    "better-sqlite3": true,
+    "esbuild": true,
+    "sharp": true,
+    "unrs-resolver": true,
+    "node-pty@1.1.0": true
+  }
+}

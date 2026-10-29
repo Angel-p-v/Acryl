@@ -1,0 +1,54 @@
+name: Reportar un error
+description: Algo no funciona como debería
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por reportar el error. Cuanta más información, antes lo reproducimos.
+  - type: input
+    id: version
+    attributes:
+      label: Versión
+      description: Versión de media-manager (`mm --version`)
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Versión de Node.js
+      placeholder: v22.14.0
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Descripción
+      description: ¿Qué esperabas y qué ocurrió?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Pasos para reproducir
+      description: Comandos exactos que llevan al error
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Salida o logs
+      description: Salida de `mm --verbose` o el error completo
+      render: shell
+  - type: checkboxes
+    id: env
+    attributes:
+      label: Entorno
+      options:
+        - label: Linux
+          required: true
+        - label: macOS
+        - label: Windows
+        - label: WSL

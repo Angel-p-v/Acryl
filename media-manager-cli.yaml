@@ -1,0 +1,34 @@
+PackageIdentifier: Angel-p-v.MediaManagerCLI
+PackageName: media-manager-cli
+PackageVersion: X.Y.Z
+Publisher: Angel-p-v
+Author: Angel-p-v
+ShortDescription: Gestor de contenido multimedia para terminal (indexador local + reproductor mpv/vlc)
+PackageUrl: https://github.com/Angel-p-v/media-manager
+License: MIT
+Copyright: Copyright © Angel-p-v
+Tags: media, video, movies, series, anime, cli, mpv, vlc, tui
+ReleaseNotes: |
+  - Consulta https://github.com/Angel-p-v/media-manager/releases para las notas de la release vX.Y.Z
+ReleaseNotesUrl: https://github.com/Angel-p-v/media-manager/releases/tag/vX.Y.Z
+Installers:
+  - Arch: x64
+    Url: https://github.com/Angel-p-v/media-manager/releases/download/vX.Y.Z/media-manager-cli-X.Y.Z-windows-x64.zip
+    Sha256: ''
+    InstallerType: zip
+    NestedInstallerType: portable
+    PortableCommandAlias: mm
+    Scope: machine
+    InstallerSwitches:
+      Silent: ''
+      SilentWithProgress: ''
+  - Arch: arm64
+    Url: https://github.com/Angel-p-v/media-manager/releases/download/vX.Y.Z/media-manager-cli-X.Y.Z-windows-arm64.zip
+    Sha256: ''
+    InstallerType: zip
+    NestedInstallerType: portable
+    PortableCommandAlias: mm
+    Scope: machine
+    InstallerSwitches:
+      Silent: ''
+      SilentWithProgress: ''

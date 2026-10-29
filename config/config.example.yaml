@@ -1,0 +1,81 @@
+# Ejemplo de configuración de media-manager.
+#
+# Copia este archivo a ~/.config/media-manager/config.yaml (respeta XDG_CONFIG_HOME)
+# y ajústalo a tu colección. Todos los campos son opcionales: lo que no exista usa
+# los valores por defecto de la aplicación.
+#
+# Precedencia: valores por defecto < este archivo < variables de entorno < flags de la CLI.
+
+version: 1
+
+library:
+  # Carpetas raíz de tu biblioteca. El `type` ayuda a clasificar el contenido.
+  roots:
+    - path: ~/Media/Anime
+      type: anime
+      label: Anime
+    - path: ~/Media/Series
+      type: series
+      label: Series
+    - path: ~/Media/Peliculas
+      type: movie
+      label: Películas
+
+  # Patrones (globs) que se ignoran al indexar.
+  exclude:
+    - '**/*.sample.*'
+    - '**/sample/**'
+    - '**/.hidden/**'
+    - '**/@eaDir/**'
+
+  scan:
+    followSymlinks: false
+    maxDepth: 4
+    minSizeBytes: 0
+
+database:
+  path: ~/.local/share/media-manager/library.db
+
+player:
+  # Reproductor por defecto: debe existir una entrada con ese nombre en `players`.
+  default: mpv
+  # `detach`: la TUI sigue funcionando y el reproductor sobrevive al cierre.
+  # `foreground`: se espera al proceso (útil en scripts). La TUI siempre usa detach.
+  onLaunch: detach
+  # `args` es una lista de argumentos, no una línea de shell. `{file}` es obligatorio
+  # y se sustituye por la ruta del vídeo; las rutas con espacios no se dividen.
+  players:
+    mpv:
+      command: mpv
+      args: ['--force-window=immediate', '--image-display-duration=inf', '{file}']
+    vlc:
+      command: vlc
+      args: ['--started-from-file', '{file}']
+
+ui:
+  theme: default
+  layout: split
+  sort: title
+  showDetails: true
+
+logging:
+  # silent · error · warn · info · debug. Con `--verbose` se fuerza debug.
+  level: warn
+  # text: legible para personas · json: una línea por evento.
+  # Los logs van siempre a stderr; stdout queda para la salida de usuario y --json.
+  format: text
+
+# Atajos de teclado de la interfaz. Cualquier tecla o secuencia puede reasignarse.
+keybindings:
+  quit: q
+  help: '?'
+  search: /
+  play: p
+  refresh: r
+  nextSection: tab
+  up: up
+  down: down
+  left: left
+  right: right
+  enter: return
+  escape: escape
