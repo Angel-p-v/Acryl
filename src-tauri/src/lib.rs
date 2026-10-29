@@ -39,6 +39,7 @@ pub fn run() {
             commands::sync_metadata_cmd,
             commands::record_playback_cmd,
             commands::get_playback_history_cmd,
+            commands::index_folder_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");

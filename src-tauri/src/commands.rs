@@ -4,6 +4,8 @@
 //! de los repositorios de `db::` y cierra la conexión. No hay estado global.
 
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 use tauri::{State, command};
 
 use crate::config::ConfigState;
@@ -423,4 +425,213 @@ pub fn get_playback_history_cmd(
     close_db(conn);
 
     Ok(PlaybackHistoryResponse { history })
+}
+
+/// Respuesta de indexación de carpeta.
+#[derive(Debug, Serialize)]
+pub struct IndexFolderResponse {
+    pub media_added: i64,
+    pub files_added: i64,
+    pub folders_processed: i64,
+}
+
+/// Extensiones de video soportadas.
+const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mkv", "avi", "webm", "mov", "flv", "wmv"];
+
+/// Comando: escanea una carpeta y indexa todos los medios de vídeo encontrados.
+///
+/// Crea una entrada en `media` por cada carpeta que contenga vídeos y una
+/// entrada en `media_files` por cada archivo de vídeo.
+#[command]
+pub fn index_folder_cmd(
+    db_path: String,
+    folder_path: String,
+) -> Result<IndexFolderResponse, String> {
+    let folder = Path::new(&folder_path);
+    if !folder.is_dir() {
+        return Err(format!("La ruta no es una carpeta válida: {}", folder_path));
+    }
+
+    let result = {
+        let mut conn = open_db(&db_path).map_err(|e| e.to_string())?;
+        let mut media_repo = MediaRepository::new(&mut conn);
+
+        let mut media_added = 0i64;
+        let mut files_added = 0i64;
+        let mut folders_processed = 0i64;
+
+        // Recorrer entradas de la carpeta raíz
+        for entry in fs::read_dir(folder).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+
+            // Solo procesar subcarpetas (cada carpeta = una serie/película)
+            if !path.is_dir() {
+                continue;
+            }
+
+            folders_processed += 1;
+
+            // Recopilar archivos de vídeo en esta carpeta
+            let mut video_files: Vec<String> = Vec::new();
+            if let Ok(read_dir) = fs::read_dir(&path) {
+                for file_entry in read_dir.flatten() {
+                    let file_path = file_entry.path();
+                    if file_path.is_file() {
+                        if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
+                            if VIDEO_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
+                                if let Some(path_str) = file_path.to_str() {
+                                    video_files.push(path_str.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if video_files.is_empty() {
+                continue;
+            }
+
+            // Ordenar archivos para tener un orden consistente
+            video_files.sort();
+
+            // Determinar tipo por nombre de carpeta (heurística simple)
+            let folder_name = path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+            let r#type = if folder_name.contains("anime") {
+                "anime"
+            } else if folder_name.contains("serie") || folder_name.contains("series") {
+                "series"
+            } else {
+                "movie"
+            };
+
+            // Título basado en el nombre de la carpeta
+            let title = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let sort_title = title.to_lowercase();
+
+            // Insertar o actualizar el medio (bloque separado para soltar el préstamo)
+            let media_id = {
+                let media = media_repo
+                    .upsert(&crate::db::media_repo::MediaInput {
+                        r#type: r#type.to_string(),
+                        title: title.clone(),
+                        sort_title,
+                        year: None,
+                        folder_path: path.to_string_lossy().to_string(),
+                    })
+                    .map_err(|e| e.to_string())?;
+                media.id
+            };
+            media_added += 1;
+
+            // Insertar archivos de vídeo
+            for (idx, file_path_str) in video_files.iter().enumerate() {
+                let file_name = Path::new(file_path_str)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+
+                // Intentar extraer temporada y episodio (ej: S01E01, s01e01, 1x01)
+                let (season, episode) = extract_season_episode(&file_name);
+
+                let file_size = fs::metadata(file_path_str)
+                    .ok()
+                    .and_then(|m| m.len().try_into().ok())
+                    .or(None);
+
+                let mtime_ms = fs::metadata(file_path_str)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as i64)
+                    .or(None);
+
+                // Abrir una nueva conexión solo para insertar este archivo
+                let mut file_conn = open_db(&db_path).map_err(|e| e.to_string())?;
+                let mut file_repo = FileRepository::new(&mut file_conn);
+                file_repo
+                    .upsert_many(&[crate::db::file_repo::MediaFileInput {
+                        media_id,
+                        season,
+                        episode,
+                        title: Some(file_name),
+                        file_path: file_path_str.clone(),
+                        size_bytes: file_size,
+                        mtime_ms,
+                    }])
+                    .map_err(|e| e.to_string())?;
+                close_db(file_conn);
+
+                files_added += 1;
+
+                // Para películas, solo indexar el primer archivo
+                if r#type == "movie" && idx > 0 {
+                    break;
+                }
+            }
+        }
+
+        IndexFolderResponse {
+            media_added,
+            files_added,
+            folders_processed,
+        }
+    };
+
+    Ok(result)
+}
+
+/// Extrae temporada y episodio del nombre de archivo.
+/// Soporta formatos como: S01E01, s01e01, 1x01, Episodio 01, etc.
+fn extract_season_episode(file_name: &str) -> (Option<i32>, Option<i32>) {
+    let lower = file_name.to_lowercase();
+
+    // Patrón S01E01 o s01e01
+    if let Some(pos) = lower.find("s") {
+        if let Some(rest) = lower.get(pos + 1..) {
+            let season_digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if !season_digits.is_empty() {
+                let season: i32 = season_digits.parse().unwrap_or(0);
+                if let Some(e_pos) = rest.find("e") {
+                    let ep_digits: String = rest[e_pos + 1..]
+                        .chars()
+                        .take_while(|c| c.is_ascii_digit())
+                        .collect();
+                    if !ep_digits.is_empty() {
+                        let episode: i32 = ep_digits.parse().unwrap_or(0);
+                        return (Some(season), Some(episode));
+                    }
+                }
+            }
+        }
+    }
+
+    // Patrón 1x01
+    if let Some(pos) = lower.find('x') {
+        if pos > 0 {
+            let season_digits: String = lower[..pos]
+                .chars()
+                .rev()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
+            if !season_digits.is_empty() {
+                let season: i32 = season_digits.parse().unwrap_or(0);
+                let ep_digits: String = lower[pos + 1..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect();
+                if !ep_digits.is_empty() {
+                    let episode: i32 = ep_digits.parse().unwrap_or(0);
+                    return (Some(season), Some(episode));
+                }
+            }
+        }
+    }
+
+    (None, None)
 }

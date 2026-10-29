@@ -513,15 +513,97 @@ main() {
 
   build_and_install "$target_dir"
   create_desktop_entry "$target_dir"
+  create_empty_database
 
   echo
   ok "Instalación completada."
   echo
-  echo "Puedes buscar 'Acryl' en el menú de aplicaciones o ejecutar:"
-  echo "  $APP_NAME"
+  echo "========================================================================"
+  echo "  Acryl está instalado. Sigue estos pasos para empezar a usarlo:"
+  echo "========================================================================"
+  echo
+  echo "1. EJECUTAR LA APLICACIÓN:"
+  echo "   Si usas Wayland (Hyprland, Sway, etc.), la pantalla puede quedar en"
+  echo "   blanco. En ese caso, ejecuta con X11:"
+  echo ""
+  echo "     GDK_BACKEND=x11 $APP_NAME"
+  echo ""
+  echo "   Si usas X11, ejecuta directamente:"
+  echo ""
+  echo "     $APP_NAME"
+  echo ""
+  echo "2. CONFIGURAR LA RUTA DE TUS MEDIOS:"
+  echo "   Una vez abierta la aplicación, ve a Configuración y establece la"
+  echo "   ruta de tu carpeta de películas/series/anime, o usa el comando:"
+  echo ""
+  echo "     GDK_BACKEND=x11 $APP_NAME --index-folder /ruta/a/tus/medios"
+  echo ""
+  echo "   (o desde la UI: Índicar carpeta)"
+  echo ""
+  echo "3. LA BASE DE DATOS:"
+  echo "   Se ha creado vacía en ~/.local/share/acryl/acryl.db"
+  echo "   Se llenará cuando indexes tus primeros medios."
+  echo ""
+  echo "4. SOLUCIÓN DE PROBLEMAS:"
+  echo "   Si la aplicación no se abre o se queda en blanco, ejecuta el diagnóstico:"
+  echo ""
+  echo "     ./scripts/diagnose-blank.sh"
+  echo ""
+  echo "   O ejecuta directamente para ver errores:"
+  echo "     RUST_BACKTRACE=1 GDK_BACKEND=x11 $APP_NAME"
+  echo ""
+  echo "========================================================================"
   echo
   echo "Código fuente: $target_dir"
   echo "Repositorio:   $REPO_URL"
+}
+
+# -----------------------------------------------------------------------------
+# Crear base de datos vacía
+# -----------------------------------------------------------------------------
+create_empty_database() {
+  local db_dir="$HOME/.local/share/acryl"
+  local db_file="$db_dir/acryl.db"
+
+  info "Creando base de datos vacía en $db_file..."
+  mkdir -p "$db_dir"
+
+  if [[ ! -f "$db_file" ]]; then
+    # Crear una base de datos SQLite vacía con el esquema
+    sqlite3 "$db_file" \
+      "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));" \
+      "CREATE TABLE IF NOT EXISTS media (id INTEGER PRIMARY KEY, type TEXT NOT NULL CHECK (type IN ('series', 'anime', 'movie')), title TEXT NOT NULL, sort_title TEXT NOT NULL, year INTEGER, folder_path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')), poster_path TEXT, synopsis TEXT, metadata_fetched_at TEXT, is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1)), is_watched INTEGER NOT NULL DEFAULT 0 CHECK (is_watched IN (0, 1)));" \
+      "CREATE TABLE IF NOT EXISTS media_files (id INTEGER PRIMARY KEY, media_id INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE, season INTEGER, episode INTEGER, title TEXT, file_path TEXT NOT NULL UNIQUE, size_bytes INTEGER, mtime_ms INTEGER, indexed_at TEXT NOT NULL DEFAULT (datetime('now')));" \
+      "CREATE TABLE IF NOT EXISTS index_runs (id INTEGER PRIMARY KEY, started_at TEXT NOT NULL DEFAULT (datetime('now')), finished_at TEXT, files_seen INTEGER NOT NULL DEFAULT 0, files_added INTEGER NOT NULL DEFAULT 0, files_removed INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'completed', 'failed')));" \
+      "CREATE TABLE IF NOT EXISTS playback_history (id INTEGER PRIMARY KEY, media_id INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE, played_at TEXT NOT NULL DEFAULT (datetime('now')), position REAL NOT NULL DEFAULT 0, duration REAL NOT NULL DEFAULT 0);" \
+      "CREATE INDEX IF NOT EXISTS idx_media_sort_title ON media(sort_title);" \
+      "CREATE INDEX IF NOT EXISTS idx_media_type ON media(type);" \
+      "CREATE INDEX IF NOT EXISTS idx_files_media ON media_files(media_id);" \
+      "CREATE INDEX IF NOT EXISTS idx_files_season_episode ON media_files(media_id, season, episode);" \
+      "CREATE INDEX IF NOT EXISTS idx_media_type_sort_title ON media(type, sort_title);" \
+      "CREATE INDEX IF NOT EXISTS idx_media_created_at ON media(created_at);" \
+      "CREATE INDEX IF NOT EXISTS idx_media_updated_at ON media(updated_at);" \
+      "CREATE INDEX IF NOT EXISTS idx_index_runs_started_at ON index_runs(started_at);" \
+      "CREATE INDEX IF NOT EXISTS idx_playback_history_media ON playback_history(media_id);" \
+      "CREATE INDEX IF NOT EXISTS idx_playback_history_played_at ON playback_history(played_at);" \
+      2>/dev/null || {
+      warn "No se pudo crear la base de datos vacía (¿falta sqlite3?)."
+      warn "La aplicación la creará automáticamente al ejecutarse por primera vez."
+      return 0
+    }
+
+    # Aplicar FTS5 y triggers si sqlite3 los soporta
+    sqlite3 "$db_file" \
+      "CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(title, content='media', content_rowid='id');" \
+      "CREATE TRIGGER IF NOT EXISTS media_fts_insert AFTER INSERT ON media BEGIN INSERT INTO media_fts(rowid, title) VALUES (new.id, new.title); END;" \
+      "CREATE TRIGGER IF NOT EXISTS media_fts_delete AFTER DELETE ON media BEGIN INSERT INTO media_fts(media_fts, rowid, title) VALUES ('delete', old.id, old.title); END;" \
+      "CREATE TRIGGER IF NOT EXISTS media_fts_update AFTER UPDATE ON media BEGIN INSERT INTO media_fts(media_fts, rowid, title) VALUES ('delete', old.id, old.title); INSERT INTO media_fts(rowid, title) VALUES (new.id, new.title); END;" \
+      2>/dev/null || true
+
+    ok "Base de datos vacía creada en $db_file"
+  else
+    info "La base de datos ya existe en $db_file, no se sobrescribe."
+  fi
 }
 
 main "$@"
