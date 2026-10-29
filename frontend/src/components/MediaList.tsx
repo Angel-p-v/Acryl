@@ -1,10 +1,11 @@
-import type { JSX } from 'react';
-import type { Media } from '../types/media';
 import { Poster } from './Poster';
 
-interface MediaListProps {
+import type { Media } from '../types/media';
+import type { JSX } from 'react';
+
+type MediaListProps = {
   readonly media: readonly Media[];
-}
+};
 
 export function MediaList({ media }: MediaListProps): JSX.Element {
   if (media.length === 0) {

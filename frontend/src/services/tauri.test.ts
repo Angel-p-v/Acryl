@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
 import { listMedia, searchMedia } from './tauri';
 
 const mockInvoke = vi.fn();
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (...args: unknown[]) => mockInvoke(...args),
+  invoke: (...args: unknown[]): unknown => mockInvoke(...args) as unknown,
 }));
 
 beforeEach(() => {

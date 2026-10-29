@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
-import type { JSX } from 'react';
-import type { Media } from '../types/media';
-import { listMedia, searchMedia } from '../services/tauri';
-import { MediaList } from './MediaList';
 
-interface SearchBarProps {
+import { MediaList } from './MediaList';
+import { listMedia, searchMedia } from '../services/tauri';
+
+import type { Media } from '../types/media';
+import type { JSX } from 'react';
+
+type SearchBarProps = {
   readonly dbPath: string;
-}
+};
 
 export function SearchBar({ dbPath }: SearchBarProps): JSX.Element {
   const [query, setQuery] = useState('');
@@ -16,9 +18,7 @@ export function SearchBar({ dbPath }: SearchBarProps): JSX.Element {
   const load = async (q: string) => {
     setLoading(true);
     try {
-      const results = q.trim()
-        ? await searchMedia(dbPath, q)
-        : (await listMedia(dbPath)).media;
+      const results = q.trim() ? await searchMedia(dbPath, q) : (await listMedia(dbPath)).media;
       setMedia(results);
     } catch (error) {
       console.error('Error cargando medios:', error);

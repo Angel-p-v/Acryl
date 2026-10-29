@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+
 import type { Media } from '../types/media';
 
 const DEFAULT_DB_PATH = 'media-manager.db';
@@ -16,13 +17,14 @@ export async function listMedia(
     readonly orderBy?: 'title' | 'added' | 'recent';
   } = {},
 ): Promise<{ readonly media: readonly Media[]; readonly total: number }> {
-  return invoke<{ media: Media[]; total: number }>('list_media_cmd', {
+  const result = await invoke<{ media: Media[]; total: number }>('list_media_cmd', {
     db_path: dbPath,
     type: opts.type,
     limit: opts.limit,
     offset: opts.offset,
     order_by: opts.orderBy,
   });
+  return result;
 }
 
 /**
@@ -37,10 +39,11 @@ export async function searchMedia(
     readonly limit?: number;
   } = {},
 ): Promise<readonly Media[]> {
-  return invoke<Media[]>('search_media_cmd', {
+  const result = await invoke<Media[]>('search_media_cmd', {
     db_path: dbPath,
     query,
     type: opts.type,
     limit: opts.limit,
   });
+  return result;
 }

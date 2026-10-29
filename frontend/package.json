@@ -1,6 +1,6 @@
 {
-  "name": "media-manager-frontend",
   "private": true,
+  "name": "media-manager-frontend",
   "version": "0.1.0",
   "type": "module",
   "scripts": {
