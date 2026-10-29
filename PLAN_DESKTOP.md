@@ -165,12 +165,12 @@ src-tauri/                ← Rust
 | Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ✅ completado |
 | Hito 6 | Configuración YAML en el backend | ✅ completado |
 | Hito 7 | Internacionalización (i18n) de la UI | ✅ completado |
-| Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ⏳ pendiente |
+| Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ✅ completado |
 | Hito 9 | Publicación automática en GitHub Releases | ⏳ pendiente |
 
 ## 9. Próximo paso inmediato
 
-El siguiente hito a implementar es el **Hito 8 — Metadatos automáticos TMDB/TVDB + historial de reproducción**, seguido del Hito 9 (publicación en releases).
+El siguiente hito a implementar es el **Hito 9 — Publicación automática en GitHub Releases**.
 
 ---
 

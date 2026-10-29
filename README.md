@@ -88,6 +88,7 @@ Después de instalar con `.deb` o `.rpm`, el comando `media-manager` estará dis
 | ▶️ Reproductor integrado (`libmpv` / GStreamer) | ✅ Hito 3 completado |
 | ⚙️ Configuración YAML en el backend | ✅ Hito 6 completado |
 | 🌐 Internacionalización (i18n) de la UI | ✅ Hito 7 completado |
+| 🔄 Metadatos automáticos TMDB/TVDB + historial | ✅ Hito 8 completado |
 | 📦 Instaladores nativos Linux (`.deb`, AppImage, `.rpm`) | ✅ Hito 5 completado |
 
 ---
@@ -215,6 +216,7 @@ Antes de pushear, ambos deben pasar:
 | Hito 5 | Empaquetado Linux (`.deb`, AppImage, `.rpm`) | ✅ completado |
 | Hito 6 | Configuración YAML en el backend | ✅ completado |
 | Hito 7 | Internacionalización (i18n) de la UI | ✅ completado |
+| Hito 8 | Metadatos automáticos TMDB/TVDB + historial | ✅ completado |
 
 Ver [`PLAN_DESKTOP.md`](./PLAN_DESKTOP.md) para el plan detallado.
 

@@ -10,6 +10,7 @@ use crate::config::ConfigState;
 use crate::db::{
     FileRepository, ListMediaOptions, MediaRepository, SearchMediaOptions, close_db, open_db,
 };
+use crate::metadata::{TvMazeClient, sync_metadata};
 use crate::player::{MpvPlayer, PlayerState};
 
 /// Respuesta de estado del reproductor.
@@ -327,4 +328,99 @@ pub fn config_set_cmd(
         auto_sync_metadata: config_clone.auto_sync_metadata,
         default_player: config_clone.default_player,
     })
+}
+
+/// Respuesta de sincronización de metadatos.
+#[derive(Debug, Serialize)]
+pub struct SyncMetadataResponse {
+    pub title: Option<String>,
+    pub synopsis: Option<String>,
+    pub poster_path: Option<String>,
+    pub release_date: Option<String>,
+    pub vote_average: Option<f64>,
+}
+
+/// Comando: sincroniza los metadatos de un medio desde TVmaze.
+#[command]
+pub async fn sync_metadata_cmd(
+    db_path: String,
+    media_id: i64,
+) -> Result<SyncMetadataResponse, String> {
+    let mut conn = open_db(&db_path).map_err(|e| e.to_string())?;
+    let mut repo = MediaRepository::new(&mut conn);
+
+    // Obtener el medio para saber el título.
+    let media = repo
+        .find_by_id(media_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("medio no encontrado: id={}", media_id))?;
+
+    let client = TvMazeClient::new();
+    let fetched = sync_metadata(&media.r#type, &media.title, &client).await?;
+
+    repo.update_metadata(
+        media_id,
+        fetched.poster_path.as_deref(),
+        fetched.synopsis.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
+
+    close_db(conn);
+
+    Ok(SyncMetadataResponse {
+        title: fetched.title,
+        synopsis: fetched.synopsis,
+        poster_path: fetched.poster_path,
+        release_date: fetched.release_date,
+        vote_average: fetched.vote_average,
+    })
+}
+
+/// Respuesta de registro de reproducción.
+#[derive(Debug, Serialize)]
+pub struct RecordPlaybackResponse {
+    pub ok: bool,
+}
+
+/// Comando: registra una reproducción en el historial.
+#[command]
+pub fn record_playback_cmd(
+    db_path: String,
+    media_id: i64,
+    position: f64,
+    duration: f64,
+) -> Result<RecordPlaybackResponse, String> {
+    let mut conn = open_db(&db_path).map_err(|e| e.to_string())?;
+    let mut repo = MediaRepository::new(&mut conn);
+
+    repo.record_playback(media_id, position, duration)
+        .map_err(|e| e.to_string())?;
+
+    close_db(conn);
+
+    Ok(RecordPlaybackResponse { ok: true })
+}
+
+/// Respuesta de historial de reproducción.
+#[derive(Debug, Serialize)]
+pub struct PlaybackHistoryResponse {
+    pub history: Vec<crate::db::media_repo::PlaybackRecord>,
+}
+
+/// Comando: obtiene el historial de reproducción.
+#[command]
+pub fn get_playback_history_cmd(
+    db_path: String,
+    limit: Option<i64>,
+) -> Result<PlaybackHistoryResponse, String> {
+    let mut conn = open_db(&db_path).map_err(|e| e.to_string())?;
+    let mut repo = MediaRepository::new(&mut conn);
+
+    let history = repo
+        .list_playback_history(limit)
+        .map_err(|e| e.to_string())?;
+
+    close_db(conn);
+
+    Ok(PlaybackHistoryResponse { history })
 }

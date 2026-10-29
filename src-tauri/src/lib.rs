@@ -4,6 +4,7 @@
 mod commands;
 mod config;
 mod db;
+mod metadata;
 mod player;
 
 use crate::config::ConfigState;
@@ -35,6 +36,9 @@ pub fn run() {
             commands::player_status_cmd,
             commands::config_get_cmd,
             commands::config_set_cmd,
+            commands::sync_metadata_cmd,
+            commands::record_playback_cmd,
+            commands::get_playback_history_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");

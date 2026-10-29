@@ -1,17 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { getMediaDetails, toggleFavorite, toggleWatched, playerOpen } from '../services/tauri';
+import {
+  getMediaDetails,
+  syncMetadata,
+  toggleFavorite,
+  toggleWatched,
+  playerOpen,
+} from '../services/tauri';
 import { useLanguage } from '../contexts/LanguageContext';
 import type { MediaDetails } from '../types/media';
 import type { JSX } from 'react';
 
-/**
- * Página de detalles de un medio.
- *
- * Muestra el póster (o placeholder), metadatos (título, tipo, año,
- * sinopsis), estado de favorito/visto y la lista de archivos indexados.
- * Permite alternar favorito/visto y abrir un archivo para reproducir.
- */
 export function MediaDetails({
   mediaId,
   onBack,
@@ -23,6 +22,7 @@ export function MediaDetails({
   const [details, setDetails] = useState<MediaDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const loadDetails = useCallback(async (): Promise<void> => {
     try {
@@ -36,9 +36,6 @@ export function MediaDetails({
   }, [mediaId, t]);
 
   useEffect(() => {
-    // Carga de datos al montar (o al cambiar mediaId). El setState ocurre tras
-    // el await, no de forma síncrona en el cuerpo del efecto, por lo que este
-    // patrón es el de data-fetching recomendado por React.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadDetails();
   }, [loadDetails]);
@@ -73,6 +70,31 @@ export function MediaDetails({
     },
     [t]
   );
+
+  const handleSyncMetadata = useCallback(async (): Promise<void> => {
+    setSyncing(true);
+    setError(null);
+    try {
+      const result = await syncMetadata('media-manager.db', mediaId);
+      setDetails((d) =>
+        d
+          ? {
+              ...d,
+              media: {
+                ...d.media,
+                poster_path: result.poster_path ?? d.media.poster_path,
+                synopsis: result.synopsis ?? d.media.synopsis,
+                metadata_fetched_at: new Date().toISOString(),
+              },
+            }
+          : d
+          );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('details.error'));
+    } finally {
+      setSyncing(false);
+    }
+  }, [mediaId, t]);
 
   if (loading) {
     return (
@@ -134,6 +156,25 @@ export function MediaDetails({
           >
             {media.is_watched ? '✓' : '○'}
           </button>
+          {!syncing && media.metadata_fetched_at ? (
+            <button
+              className="status-btn sync"
+              onClick={handleSyncMetadata}
+              title={t('details.syncMetadata')}
+              disabled={syncing}
+            >
+              🔄
+            </button>
+          ) : (
+            <button
+              className="status-btn sync"
+              onClick={handleSyncMetadata}
+              title={t('details.syncMetadata')}
+              disabled={syncing}
+            >
+              {syncing ? '⏳' : '🔄'}
+            </button>
+          )}
         </div>
       </header>
 
@@ -147,7 +188,9 @@ export function MediaDetails({
         </div>
 
         <div className="details-files">
-          <h2 className="details-files-title">{t('details.files', { count: files.length })}</h2>
+          <h2 className="details-files-title">
+            {t('details.files', { count: files.length })}
+          </h2>
           <ul className="details-files-list">
             {files.map((file) => (
               <li key={file.id} className="details-file-item">
@@ -159,7 +202,9 @@ export function MediaDetails({
                       })
                     : '—'}
                 </span>
-                <span className="details-file-title">{file.title ?? t('details.noTitle')}</span>
+                <span className="details-file-title">
+                  {file.title ?? t('details.noTitle')}
+                </span>
                 <button
                   className="details-file-play"
                   onClick={() => {

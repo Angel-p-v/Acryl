@@ -36,9 +36,6 @@ export function SearchBar({ dbPath }: SearchBarProps): JSX.Element {
     [dbPath]
   );
 
-  // Carga inicial: lista completa sin filtro. El setState ocurre tras el await,
-  // no de forma síncrona en el cuerpo del efecto (patrón de data-fetching de
-  // React). Se ignora la regla aquí por ser el uso legítimo de useEffect.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load('');
