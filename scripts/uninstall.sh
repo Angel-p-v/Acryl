@@ -2,14 +2,19 @@
 #
 # uninstall.sh — Desinstalador de Acryl para Linux
 #
-# Elimina la entrada .desktop, el icono, el binario (AppImage fallback) y
-# el paquete nativo (.deb / .rpm) si fue instalado con install.sh.
+# Por defecto elimina la entrada .desktop, el icono, el binario (AppImage
+# fallback) y el paquete nativo (.deb / .rpm) si fue instalado con
+# install.sh. No borra el código fuente clonado ni la base de datos de
+# usuario (acril.db), para no perder tu biblioteca indexada.
 #
-# No borra el código fuente clonado ni la base de datos de usuario
-# (acryl.db), para no perder tu biblioteca indexada.
+# Con --purge / --all borra absolutamente TODO: lo anterior más la carpeta
+# del repositorio clonado y la base de datos acril.db (¡datos del usuario
+# incluidos!).
 #
 # Uso:
-#   ./scripts/uninstall.sh
+#   ./scripts/uninstall.sh          # desinstalación estándar (conserva datos)
+#   ./scripts/uninstall.sh --purge  # borra absolutamente todo (incluye DB)
+#   ./scripts/uninstall.sh --all    # sinónimo de --purge
 #
 set -euo pipefail
 
@@ -23,6 +28,44 @@ readonly DESKTOP_DIR="$HOME/.local/share/applications"
 readonly ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
 readonly BIN_DIR="$HOME/.local/bin"
 
+# Rutas comunes donde podría estar el repositorio clonado y la base de datos
+readonly REPO_CANDIDATES=(
+  "$HOME/acryl"
+  "$HOME/$APP_NAME"
+  "$PWD"
+)
+readonly DB_CANDIDATES=(
+  "$HOME/acryl/acryl.db"
+  "$HOME/$APP_NAME/acryl.db"
+  "$PWD/acryl.db"
+  "$HOME/.local/share/acryl/acryl.db"
+  "$HOME/.config/acryl/acryl.db"
+)
+
+# -----------------------------------------------------------------------------
+# Argumentos
+# -----------------------------------------------------------------------------
+PURGE=false
+for arg in "$@"; do
+  case "$arg" in
+    --purge|--all) PURGE=true ;;
+    -h|--help)
+      echo "Uso: $0 [--purge|--all]"
+      echo ""
+      echo "  (sin argumentos)  Desinstalación estándar: .desktop, icono, binario y paquete nativo."
+      echo "                    Conserva el código fuente y la base de datos acril.db."
+      echo "  --purge / --all   Borra absolutamente TODO: lo anterior + repositorio clonado + acril.db."
+      echo "  -h / --help       Muestra esta ayuda."
+      exit 0
+      ;;
+    *)
+      error "Argumento desconocido: $arg"
+      echo "Usa '$0 --help' para ver las opciones."
+      exit 1
+      ;;
+  esac
+done
+
 # -----------------------------------------------------------------------------
 # Utilidades
 # -----------------------------------------------------------------------------
@@ -32,6 +75,19 @@ warn()  { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; }
 error() { printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+confirm() {
+  # Si no es --purge, no pide confirmación (ya se asumió al llamar)
+  if [[ "$PURGE" == "true" ]]; then
+    printf '\033[1;31m[!!]\033[0m ¿Estás seguro de que quieres borrar ABSOLUTAMENTE TODO? '
+    printf 'Esto elimina tu biblioteca indexada (acril.db) y no se puede deshacer. [s/N]: '
+    read -r respuesta || true
+    case "$respuesta" in
+      s|S|si|SI|y|Y|yes|YES) ;;
+      *) info "Operación cancelada por el usuario."; exit 0 ;;
+    esac
+  fi
+}
 
 # -----------------------------------------------------------------------------
 # Detección del gestor de paquetes
@@ -155,6 +211,47 @@ remove_native_package() {
 }
 
 # -----------------------------------------------------------------------------
+# Eliminar carpeta del repositorio clonado
+# -----------------------------------------------------------------------------
+remove_repo_folder() {
+  local found=false
+  for candidate in "${REPO_CANDIDATES[@]}"; do
+    if [[ -d "$candidate" ]]; then
+      # Evitar borrar el directorio actual si es el de trabajo real del script
+      if [[ "$candidate" == "$PWD" ]] && [[ -f "$candidate/scripts/uninstall.sh" ]]; then
+        info "Omitiendo carpeta del repositorio actual (estás dentro de ella): $candidate"
+        continue
+      fi
+      info "Eliminando carpeta del repositorio: $candidate"
+      rm -rf "$candidate"
+      ok "Carpeta eliminada: $candidate"
+      found=true
+    fi
+  done
+  if [[ "$found" == "false" ]]; then
+    warn "No se encontró carpeta del repositorio clonado en las ubicaciones habituales."
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# Eliminar base de datos acril.db
+# -----------------------------------------------------------------------------
+remove_database() {
+  local found=false
+  for candidate in "${DB_CANDIDATES[@]}"; do
+    if [[ -f "$candidate" ]]; then
+      info "Eliminando base de datos: $candidate"
+      rm -f "$candidate"
+      ok "Base de datos eliminada: $candidate"
+      found=true
+    fi
+  done
+  if [[ "$found" == "false" ]]; then
+    warn "No se encontró acril.db en las ubicaciones habituales."
+  fi
+}
+
+# -----------------------------------------------------------------------------
 # Flujo principal
 # -----------------------------------------------------------------------------
 main() {
@@ -163,19 +260,37 @@ main() {
   echo "============================================================"
   echo
 
+  confirm
+
   remove_desktop_entry
   remove_appimage_bin
   remove_native_package
 
+  if [[ "$PURGE" == "true" ]]; then
+    echo
+    info "Modo --purge activado: eliminando repositorio y base de datos..."
+    remove_repo_folder
+    remove_database
+  fi
+
   echo
   ok "Desinstalación completada."
   echo
-  echo "Se conservaron:"
-  echo "  - El código fuente clonado (por ejemplo, ~/acryl)"
-  echo "  - La base de datos de tu biblioteca (acril.db)"
-  echo
-  echo "Si quieres eliminar todo manualmente, borra la carpeta del repositorio"
-  echo "y el archivo acril.db de tu carpeta de datos."
+
+  if [[ "$PURGE" == "true" ]]; then
+    echo "Se eliminó absolutamente todo:"
+    echo "  - Entrada .desktop, icono y binario / paquete nativo"
+    echo "  - Carpeta del repositorio clonado"
+    echo "  - Base de datos acril.db (tu biblioteca indexada)"
+    echo
+    warn "Esta acción no se puede deshacer."
+  else
+    echo "Se conservaron:"
+    echo "  - El código fuente clonado (por ejemplo, ~/acryl)"
+    echo "  - La base de datos de tu biblioteca (acril.db)"
+    echo
+    info "Si quieres eliminar TODO, incluyendo acril.db, ejecuta: $0 --purge"
+  fi
 }
 
 main "$@"

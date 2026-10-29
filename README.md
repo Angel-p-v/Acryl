@@ -58,53 +58,29 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza mantenibilidad, pruebas y seguridad:
 
 ```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         FRONTEND (React + TypeScript)                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
-│  │   SearchBar  │  │  MediaList   │  │ MediaDetails │  │  VideoPlayer │   │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘   │
-│           │                  │                  │                  │         │
-│           └──────────────────┴──────────────────┴────────────────┘         │
-│                               │ invoke (Tauri IPC)                          │
-│                               ▼                                             │
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         BACKEND (Rust + Tauri v2)                           │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
-│  │   Commands   │  │   Config     │  │   Metadata   │  │   Player     │   │
-│  │  (adaptador) │  │   (YAML)     │  │   (TVmaze)   │  │   (libmpv)   │   │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘   │
-│                               │                                             │
-│                               ▼                                             │
-│                    ┌─────────────────────────────────────────┐              │
-│                    │           BASE DE DATOS SQLite           │              │
-│                    │  ┌─────────────┐  ┌─────────────┐  ┌─────────┐  │      │
-│                    │  │   media     │  │   files     │  │ playback  │  │      │
-│                    │  │   ┌─────┐   │  │   ┌─────┐   │  │   history   │  │      │
-│                    │  │   │ id  │   │  │   │ id  │   │  │   ┌─────┐   │  │      │
-│                    │  │   │ title│   │  │   │ media_id│   │  │ media_id│   │  │      │
-│                    │  │   │ year │   │  │   │ season│   │  │   │played_at│   │  │      │
-│                    │  │   │ type │   │  │   │ episode│   │  │   │ position│   │  │      │
-│                    │  │   │ folder│   │  │   │ title│   │  │   │ duration│   │  │      │
-│                    │  │   │ path │   │  │   │ file_path│   │  │   └─────┘   │  │      │
-│                    │  │   │ poster│   │  │   │ size   │   │  │             │  │      │
-│                    │  │   │_path │   │  │   │_bytes │   │  │             │  │      │
-│                    │  │   │ synopsis│   │  │   │mtime│   │  │             │  │      │
-│                    │  │   │_path │   │  │   │_ms │   │  │             │  │      │
-│                    │  │   │is_fav│   │  │   │ indexed│   │  │             │  │      │
-│                    │  │   │_ite │   │  │   │_at │   │  │             │  │      │
-│                    │  │   │is_watc│   │  │   │ │   │   │  │             │  │      │
-│                    │  │   │_hed │   │  │   │ │   │   │  │             │  │      │
-│                    │  │   │metadata│   │  │   │ │   │   │  │             │  │      │
-│                    │  │   │_fetched│   │  │   │ │   │   │  │             │  │      │
-│                    │  │   │_at   │   │  │   │ │   │   │  │             │  │      │
-│                    │  │   └─────┘   │  │   │ │   │   │  │             │  │      │
-│                    │  └─────────────┘  │   │ │   │   │  │             │  │      │
-│                    │                   │   │ │   │   │  │             │  │      │
-│                    │                   │   └─────┘   │  │             │  │      │
-│                    │                   └─────────────┘  │             │  │      │
-│                    └─────────────────────────────────────┘             │      │
-│                                                                          │      │
-└─────────────────────────────────────────────────────────────────────────┘
+                         BASE DE DATOS SQLite (acryl.db)
+
+┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
+│     media        │     │   media_files    │     │ playback_history │
+│──────────────────│     │──────────────────│     │──────────────────│
+│ id (PK)          │     │ id (PK)          │     │ id (PK)          │
+│ type             │─────┤ media_id (FK)    │─────┤ media_id (FK)    │
+│ title            │     │ season           │     │ played_at        │
+│ sort_title       │     │ episode          │     │ position         │
+│ year             │     │ title            │     │ duration         │
+│ folder_path      │     │ file_path (UQ)   │     │                  │
+│ poster_path      │     │ size_bytes       │     │                  │
+│ synopsis         │     │ mtime_ms         │     │                  │
+│ is_favorite      │     │ indexed_at       │     │                  │
+│ is_watched       │     └──────────────────┘     └──────────────────┘
+│ metadata_fetched_│
+│ _at              │
+└──────────────────┘
+         ▲
+         │
+         └── media_fts (FTS5 virtual table sobre media.title)
+
+Además: tabla interna schema_migrations (versión, nombre) para controlar las migraciones.
 ```
 
 ### Flujo de datos
@@ -199,6 +175,16 @@ Si ya no necesitas Acryl, ejecuta el desinstalador:
 curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/scripts/uninstall.sh | bash
 ```
 
+### 🗑️ Cómo desinstalar
+
+Si ya no necesitas Acryl, ejecuta el desinstalador:
+
+**Opción A — Ejecutar directamente (sin clonar):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/scripts/uninstall.sh | bash
+```
+
 **Opción B — Clonar el repositorio y ejecutar desde allí:**
 
 ```bash
@@ -214,7 +200,23 @@ El desinstalador elimina:
 - El binario AppImage de `~/.local/bin/` (si se usó como fallback).
 - El paquete nativo (`.deb` o `.rpm`) si fue instalado con el script.
 
-**No borra** el código fuente clonado ni la base de datos de tu biblioteca (`acril.db`), para que no pierdas tus medios indexados.
+**Por defecto no borra** el código fuente clonado ni la base de datos de tu biblioteca (`acril.db`), para que no pierdas tus medios indexados.
+
+#### Borrado absoluto (`--purge`)
+
+Si quieres eliminar absolutamente TODO —incluido el código fuente clonado y la base de datos `acril.db` (tus medios indexados)— usa la opción `--purge`:
+
+```bash
+# Opción A
+curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/scripts/uninstall.sh | bash -s -- --purge
+
+# Opción B
+git clone https://github.com/Angel-p-v/app-media-manager.git acryl
+cd acryl
+./scripts/uninstall.sh --purge
+```
+
+> **⚠️ Advertencia:** `--purge` borra tu base de datos `acril.db` y no se puede deshacer. El script pedirá confirmación antes de proceder.
 
 ---
 
