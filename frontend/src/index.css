@@ -144,6 +144,30 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 0.5rem;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.5rem;
+  background: var(--panel);
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color 0.2s;
+}
+
+.media-card:hover {
+  border-color: var(--accent);
+}
+
+.media-card:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.media-card-title {
+  margin: 0.25rem 0 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  text-align: center;
 }
 
 /* --- Poster --- */
