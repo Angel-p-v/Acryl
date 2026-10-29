@@ -80,6 +80,22 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 │                    │     SQLite (WAL + FTS5) │                             │
 │                    │     ┌─────────────┐     │                             │
 │                    │     │   acryl.db  │     │                             │
+│                    │     │             │     │                             │
+│                    │     │  ┌─────┐   │     │                             │
+│                    │     │  │media│   │     │                             │
+│                    │     │  └─────┘   │     │                             │
+│                    │     │  ┌─────┐   │     │                             │
+│                    │     │  │files│   │     │                             │
+│                    │     │  └─────┘   │     │                             │
+│                    │     │  ┌─────┐   │     │                             │
+│                    │     │  │playb│   │     │                             │
+│                    │     │  │ack_ │   │     │                             │
+│                    │     │  │h    │   │     │                             │
+│                    │     │  └─────┘   │     │                             │
+│                    │     │  ┌─────┐   │     │                             │
+│                    │     │  │migra│   │     │                             │
+│                    │     │  │tion │   │     │                             │
+│                    │     │  └─────┘   │     │                             │
 │                    │     └─────────────┘     │                             │
 │                    └─────────────────────────┘                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -106,14 +122,14 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 
 ### Dependencias de sistema (Linux)
 
-| Paquete | Propósito | Distribución |
-|---------|-----------|--------------|
-| `libwebkit2gtk-4.0-dev` | WebView del sistema (Tauri) | Todas |
-| `libgtk-3-dev` | Interfaz gráfica (Tauri) | Todas |
-| `librsvg2-dev` | Renderizado de SVG (Tauri) | Todas |
-| `libayatana-appindicator3-dev` | Indicadores de bandeja (opcional) | Todas |
-| `libmpv-dev` | Reproducción de vídeo integrado | Todas |
-| `xvfb` | Servidor virtual X11 (solo pruebas E2E) | Todas |
+| Paquete | Propósito |
+|---------|-----------|
+| `libwebkit2gtk-4.0-dev` | WebView del sistema (Tauri) |
+| `libgtk-3-dev` | Interfaz gráfica (Tauri) |
+| `librsvg2-dev` | Renderizado de SVG (Tauri) |
+| `libayatana-appindicator3-dev` | Indicadores de bandeja (opcional) |
+| `libmpv-dev` | Reproducción de vídeo integrado |
+| `xvfb` | Servidor virtual X11 (solo pruebas E2E) |
 
 ### Herramientas de desarrollo
 
@@ -128,12 +144,12 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 
 ## 📦 Instalación
 
-### Instalación completa (un solo bloque de copia y pega)
+### Instalación completa (un solo bloque)
 
-Copia y pega este bloque completo en tu terminal. Detecta automáticamente tu distribución, instala las dependencias del sistema, clona el repositorio, instala dependencias de Node.js y ejecuta la aplicación en modo desarrollo:
+Copia y pega este bloque completo en tu terminal. Detecta automáticamente tu distribución, instala las dependencias del sistema, clona el repositorio, instala dependencias de Node.js y compila la aplicación en modo desarrollo:
 
 ```bash
-# 1. Instalar dependencias del sistema según tu distribución
+# Detectar distribución e instalar dependencias del sistema
 if command -v apt-get &>/dev/null; then
   # Debian / Ubuntu / Mint / Pop!_OS
   sudo apt-get update -qq && sudo apt-get install -y -qq \
@@ -179,6 +195,26 @@ else
   exit 1
 fi
 
+# Clonar el repositorio
+git clone https://github.com/Angel-p-v/app-media-manager.git acryl
+cd acryl
+
+# Instalar dependencias de Node.js y ejecutar en modo desarrollo
+npm install
+npm run tauri:dev
+```
+
+### Instalación por distribución (paso a paso)
+
+#### 🟦 apt (Debian / Ubuntu / Mint / Pop!_OS)
+
+```bash
+sudo apt-get update -qq && sudo apt-get install -y -qq \
+    libwebkit2gtk-4.0-dev \
+    libgtk-3-dev \
+    librsvg2-dev \
+    libayatana-appindicator3-dev \
+    libmpv-dev
 # 2. Clonar el repositorio
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
 cd acryl
@@ -188,7 +224,77 @@ npm install
 npm run tauri:dev
 ```
 
-> **Nota:** Si prefieres no instalar dependencias globalmente, puedes usar un contenedor Docker. Los instaladores nativos (`.deb`, AppImage, `.rpm`) se generan con `npm run tauri:build`.
+#### 🟦 pacman (Arch Linux / Manjaro / EndeavourOS)
+
+```bash
+sudo pacman -Sy --needed \
+    webkit2gtk \
+    gtk3 \
+    librsvg \
+    libayatana-appindicator \
+    libmpv
+# 2. Clonar el repositorio
+git clone https://github.com/Angel-p-v/app-media-manager.git acryl
+cd acryl
+
+# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
+npm install
+npm run tauri:dev
+```
+
+#### 🟦 dnf (Fedora / RHEL / CentOS / AlmaLinux / Rocky Linux)
+
+```bash
+sudo dnf install -y \
+    webkit2gtk3-devel \
+    gtk3-devel \
+    librsvg2-devel \
+    libayatana-appindicator3-devel \
+    libmpv-devel
+# 2. Clonar el repositorio
+git clone https://github.com/Angel-p-v/app-media-manager.git acryl
+cd acryl
+
+# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
+npm install
+npm run tauri:dev
+```
+
+#### 🟦 zypper (openSUSE / SUSE Linux Enterprise)
+
+```bash
+sudo zypper install -y \
+    libwebkit2gtk-4_0-devel \
+    gtk3-devel \
+    librsvg2-devel \
+    libayatana-appindicator3-devel \
+    libmpv-devel
+# 2. Clonar el repositorio
+git clone https://github.com/Angel-p-v/app-media-manager.git acryl
+cd acryl
+
+# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
+npm install
+npm run tauri:dev
+```
+
+#### 🟦 apk (Alpine Linux)
+
+```bash
+sudo apk add \
+    webkit2gtk-dev \
+    gtk+3-dev \
+    librsvg-dev \
+    libayatana-appindicator3-dev \
+    libmpv-dev
+# 2. Clonar el repositorio
+git clone https://github.com/Angel-p-v/app-media-manager.git acryl
+cd acryl
+
+# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
+npm install
+npm run tauri:dev
+```
 
 ### Instaladores nativos
 
