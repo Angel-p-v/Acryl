@@ -15,253 +15,65 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
+  id-token: write
+  attestations: write
 
 jobs:
-  bundle:
-    name: bundle (${{ matrix.platform }})
+  build:
+    name: build (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: ubuntu-24.04
-            platform: linux-x64
-          - runner: ubuntu-24.04-arm
-            platform: linux-arm64
-          - runner: windows-latest
-            platform: windows-x64
+            platform: linux
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.tag }}
           persist-credentials: false
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version-file: scripts/build/node-version.txt
+          node-version: '>=22'
           cache: npm
-      - run: npm ci
-      - run: npm run verify
-        if: "!startsWith(matrix.platform, 'windows-')"
-      - name: Construir el bundle con el Node oficial
-        run: npm run standalone -- --node-source official
-      - name: Verificar checksum (Linux)
-        if: "!startsWith(matrix.platform, 'windows-')"
-        shell: bash
-        env:
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          set -eu
-          version="$(node -p "require('./package.json').version")"
-          asset="media-manager-cli-${version}-${PLATFORM}.tar.gz"
-          test -f "build/standalone/${asset}"
-          test -f "build/standalone/${asset}.sha256"
-          cd build/standalone
-          sha256sum -c "${asset}.sha256"
-      - name: Verificar checksum (Windows)
-        if: startsWith(matrix.platform, 'windows-')
-        shell: pwsh
-        env:
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          $version = (node -p "require('./package.json').version")
-          $asset = "media-manager-cli-${version}-${env:PLATFORM}.zip"
-          if (-not (Test-Path "build/standalone/$asset")) { throw "Asset no encontrado: $asset" }
-          if (-not (Test-Path "build/standalone/$asset.sha256")) { throw "Checksum no encontrado: $asset.sha256" }
-          $expected = (Get-Content "build/standalone/$asset.sha256").Split(' ')[0]
-          $hash = Get-FileHash -Path "build/standalone/$asset" -Algorithm SHA256
-          $actual = $hash.Hash.ToLower()
-          $expected = (Get-Content "build/standalone/$asset.sha256").Split(' ')[0].ToLower()
-          if ($actual -ne $expected) {
-            Write-Error "Checksum mismatch: $actual != $expected"
-            exit 1
-          }
-      - name: Atestar la procedencia
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: cd frontend && npm ci
+      - run: cd frontend && npm run build
+
+      - uses: dtolnay/rust-toolchain@master
         with:
-          subject-path: ${{ startsWith(matrix.platform, 'windows-') && 'build/standalone/*.zip' || 'build/standalone/*.tar.gz' }}
-      - name: Verificar la atestación
+          toolchain: stable
+
+      - name: Instalar dependencias de sistema de Tauri (Linux)
+        if: startsWith(matrix.platform, 'linux')
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libwebkit2gtk-4.0-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Construir instaladores con Tauri
+        run: cargo tauri build
+        working-directory: src-tauri
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+      - name: Listar artifacts generados
+        run: find src-tauri/target/release/bundle -type f | sort
+
+      - name: Subir assets a la release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
           set -eu
-          version="$(node -p "require('./package.json').version")"
-          if [[ "${{ matrix.platform }}" == windows-* ]]; then
-            ext="zip"
-          else
-            ext="tar.gz"
-          fi
-          gh attestation verify "build/standalone/media-manager-cli-${version}-${{ matrix.platform }}.${ext}" --repo "${{ github.repository }}"
-      - name: Publicar los assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -eu
-          if [[ "${{ matrix.platform }}" == windows-* ]]; then
-            gh release upload "${{ inputs.tag }}" \
-              build/standalone/*.zip \
-              build/standalone/*.sha256 \
-              --clobber \
-              --repo "${{ github.repository }}"
-          else
-            gh release upload "${{ inputs.tag }}" \
-              build/standalone/*.tar.gz \
-              build/standalone/*.sha256 \
-              --clobber \
-              --repo "${{ github.repository }}"
-          fi
-
-  install-test:
-    name: install (${{ matrix.os }}, sin Node)
-    needs: bundle
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            label: ubuntu
-            use-docker: 'true'
-          - os: windows-latest
-            label: windows
-            use-docker: 'false'
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ inputs.tag }}
-          persist-credentials: false
-      - name: Instalar y desinstalar desde la release (Linux)
-        if: matrix.use-docker == 'true'
-        env:
-          TAG: ${{ inputs.tag }}
-        run: |
-          set -eu
-          docker run --rm \
-            -e TAG="$TAG" \
-            -v "$PWD/installers/linux/install.sh:/install.sh:ro" \
-            -v "$PWD/installers/linux/uninstall.sh:/uninstall.sh:ro" \
-            ubuntu:24.04 bash -eu -c '
-              export DEBIAN_FRONTEND=noninteractive
-              apt-get update -qq
-              apt-get install -y -qq curl ca-certificates tar gzip >/dev/null
-              if command -v node >/dev/null 2>&1; then
-                echo "El contenedor no debe tener Node" >&2
-                exit 1
-              fi
-              mkdir -p /root/.config/media-manager
-              printf "version: 1\n" > /root/.config/media-manager/config.yaml
-              sh /install.sh --version "$TAG" --prefix /root/.local --no-path-check
-              test -x /root/.local/bin/mm
-              /root/.local/bin/mm --version
-              if command -v node >/dev/null 2>&1; then
-                echo "El bundle no debe exponer Node en PATH" >&2
-                exit 1
-              fi
-              sh /uninstall.sh --prefix /root/.local --yes
-              test -f /root/.config/media-manager/config.yaml
-            '
-      - name: Instalar y desinstalar desde la release (Windows)
-        if: matrix.use-docker == 'false'
-        env:
-          TAG: ${{ inputs.tag }}
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $tag = $env:TAG
-          $version = $tag.TrimStart('v')
-          $platform = "windows-x64"
-          $artifact = "media-manager-cli-${version}-${platform}.zip"
-          $tempDir = Join-Path $env:TEMP "mm-install-test-$([System.IO.Path]::GetRandomFileName())"
-          New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-          try {
-            # Descargar desde release
-            $url = "https://github.com/${env:GITHUB_REPOSITORY}/releases/download/${tag}/${artifact}"
-            & curl --fail --silent --show-error --location --retry 3 --output (Join-Path $tempDir $artifact) $url
-            & curl --fail --silent --show-error --location --retry 3 --output (Join-Path $tempDir "$artifact.sha256") "$url.sha256"
-
-            # Verificar checksum
-            $checksumContent = Get-Content (Join-Path $tempDir "$artifact.sha256") -TotalCount 1
-            $expected = $checksumContent.Split(' ')[0].Trim().ToLower()
-            Add-Type -AssemblyName System.IO.Compression.FileSystem
-            $actual = & certutil -hashfile (Join-Path $tempDir $artifact) SHA256
-            $actualHash = ($actual | Select-String '[0-9a-fA-F]{64}').ToString().Trim().ToLower()
-            if ($actualHash -ne $expected) {
-              Write-Error "Checksum mismatch: $actualHash != $expected"
-              exit 1
-            }
-
-            # Extraer
-            [System.IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $tempDir $artifact), $tempDir)
-
-            # Copiar los instaladores de Windows desde el checkout del repo
-            # (no están incluidos en el bundle portable ZIP)
-            Copy-Item -Path "installers/windows/install.ps1" -Destination (Join-Path $tempDir "install.ps1") -Force
-            Copy-Item -Path "installers/windows/uninstall.ps1" -Destination (Join-Path $tempDir "uninstall.ps1") -Force
-
-            # Leer install.json para plataforma
-            $entries = [System.IO.Compression.ZipFile]::OpenRead((Join-Path $tempDir $artifact)).Entries
-            $zipEntry = $entries | Where-Object { $_.Name -eq 'install.json' } | Select-Object -First 1
-            if (-not $zipEntry) {
-              Write-Error "install.json no encontrado en el paquete"
-              exit 1
-            }
-            $reader = New-Object System.IO.StreamReader($zipEntry.Open())
-            $installJson = $reader.ReadToEnd()
-            $reader.Close()
-            $installObj = $installJson | ConvertFrom-Json
-            if ($installObj.platform -ne $platform) {
-              Write-Error "Plataforma mismatch: $($installObj.platform) != $platform"
-              exit 1
-            }
-
-            # Instalar
-            $prefix = "$env:LOCALAPPDATA\media-manager-cli-test"
-            $bindir = "$prefix\bin"
-            New-Item -ItemType Directory -Path $bindir -Force | Out-Null
-            & "$tempDir\install.ps1" --version $tag --prefix $prefix --bindir $bindir --no-path-check
-            $mm = Join-Path $bindir "mm.bat"
-            $installedVersion = & $mm --version | Select-Object -First 1
-            if ($installedVersion.Trim() -ne $version) {
-              Write-Error "Version mismatch: $installedVersion != $version"
-              exit 1
-            }
-            Write-Output "Windows install-test OK: $installedVersion"
-
-            # Desinstalar
-            & "$tempDir\uninstall.ps1" --prefix $prefix --bindir $bindir --yes
-            if (Test-Path $mm) { Write-Error "mm.bat still exists after uninstall"; exit 1 }
-            Write-Output "Windows uninstall-test OK"
-          }
-          finally {
-            Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
-          }
-
-  sbom:
-    name: sbom (CycloneDX)
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ inputs.tag }}
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version-file: scripts/build/node-version.txt
-          cache: npm
-      - run: npm ci
-      - name: Generar el SBOM
-        run: npm sbom --omit=dev --sbom-format=cyclonedx > sbom.cdx.json
-      - name: Validar el SBOM
-        run: node -e "const data = require('./sbom.cdx.json'); if (data.bomFormat !== 'CycloneDX') process.exit(1)"
-      - name: Publicar el SBOM
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ inputs.tag }}" sbom.cdx.json --clobber --repo "${{ github.repository }}"
+          for asset in src-tauri/target/release/bundle/*/*/*.{deb,AppImage,rpm,tar.gz,zip}; do
+            [ -f "$asset" ] || continue
+            gh release upload "${{ inputs.tag }}" "$asset" --clobber --repo "${{ github.repository }}"
+          done
