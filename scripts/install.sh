@@ -428,9 +428,10 @@ install_package() {
   if [[ -n "$appimage_file" ]]; then
     info "No se pudo instalar un paquete nativo; usando AppImage como fallback."
     mkdir -p "$BIN_DIR"
-    install -Dm755 "$appimage_file" "$BIN_DIR/$APP_NAME"
-    ok "AppImage instalado en $BIN_DIR/$APP_NAME"
-    INSTALLED_BIN="$BIN_DIR/$APP_NAME"
+    # Instalar el binario real con sufijo -real para que el wrapper no entre en bucle
+    install -Dm755 "$appimage_file" "$BIN_DIR/${APP_NAME}-real"
+    ok "AppImage instalado en $BIN_DIR/${APP_NAME}-real"
+    INSTALLED_BIN="$BIN_DIR/${APP_NAME}-real"
     return 0
   fi
 
@@ -443,7 +444,6 @@ install_package() {
 # -----------------------------------------------------------------------------
 create_desktop_entry() {
   local project_dir="$1"
-  local exec_cmd="${INSTALLED_BIN:-$APP_NAME}"
 
   info "Creando entrada .desktop en $DESKTOP_DIR..."
   mkdir -p "$DESKTOP_DIR"
@@ -469,7 +469,7 @@ create_desktop_entry() {
 Name=Acryl
 GenericName=Gestor de contenido multimedia
 Comment=Indexa y reproduce tu colección de series, anime y películas
-Exec=$exec_cmd %F
+Exec=$APP_NAME %F
 Icon=$icon_name
 Terminal=false
 Type=Application
@@ -517,7 +517,7 @@ main() {
   build_and_install "$target_dir"
   create_desktop_entry "$target_dir"
   create_empty_database
-  install_launcher_wrapper
+  install_launcher_wrapper "$target_dir"
 
   echo
   ok "Instalación completada."
@@ -620,13 +620,7 @@ install_launcher_wrapper() {
 
   info "Instalando lanzador con captura de errores..."
 
-  # Renombrar el binario real si aún no se ha renombrado
-  if [[ -f "$HOME/.local/bin/${APP_NAME}" && ! -f "$real_bin" ]]; then
-    mv "$HOME/.local/bin/${APP_NAME}" "$real_bin"
-    ok "Binario real renombrado a ${APP_NAME}-real"
-  fi
-
-  # Instalar el wrapper
+  # Instalar el wrapper que busca y ejecuta el binario real
   install -Dm755 "$project_dir/scripts/acryl-launcher.sh" "$wrapper_bin"
   ok "Lanzador instalado en $wrapper_bin"
 
