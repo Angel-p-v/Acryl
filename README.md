@@ -150,18 +150,24 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 
 ## 📦 Instalación
 
-### Instalación automática (recomendado)
+### 🚀 Cómo instalar
 
 Acryl incluye un script que detecta tu gestor de paquetes, instala las
 dependencias del sistema y de desarrollo, clona el repositorio, compila la
 aplicación y crea la entrada `.desktop` para que la encuentres en el
 buscador de aplicaciones.
 
-```bash
-# 1. Descargar y ejecutar el instalador
-curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/scripts/install.sh | bash
+Elige una de las dos opciones:
 
-# 2. O clonar primero y ejecutar desde el repositorio
+**Opción A — Ejecutar directamente (sin clonar):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/scripts/install.sh | bash
+```
+
+**Opción B — Clonar el repositorio y ejecutar desde allí:**
+
+```bash
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
 cd acryl
 ./scripts/install.sh
@@ -181,32 +187,22 @@ Al terminar, busca **Acryl** en el menú de aplicaciones o ejecuta `acryl`.
 
 > **Nota:** el script usa `sudo` para instalar dependencias de sistema y el paquete generado. La entrada `.desktop` y el icono se instalan a nivel de usuario (`~/.local`), sin necesidad de root.
 
-### Instaladores nativos
+---
 
-Una vez compilado, los instaladores también se generan en:
+### 🗑️ Cómo desinstalar
 
+Si ya no necesitas Acryl, ejecuta el desinstalador:
+
+**Opción A — Ejecutar directamente (sin clonar):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/scripts/uninstall.sh | bash
 ```
-src-tauri/target/release/bundle/
-```
 
-Formatos disponibles: `.deb`, AppImage, `.rpm`.
-
-### Modo desarrollo
-
-Si quieres ejecutar la aplicación en modo desarrollo (sin instalar):
+**Opción B — Clonar el repositorio y ejecutar desde allí:**
 
 ```bash
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
-cd acryl
-npm install
-npm run tauri:dev
-```
-
-### Desinstalación
-
-Si ya no necesitas Acryl, ejecuta el desinstalador desde el repositorio clonado:
-
-```bash
 cd acryl
 ./scripts/uninstall.sh
 ```
@@ -219,6 +215,31 @@ El desinstalador elimina:
 - El paquete nativo (`.deb` o `.rpm`) si fue instalado con el script.
 
 **No borra** el código fuente clonado ni la base de datos de tu biblioteca (`acril.db`), para que no pierdas tus medios indexados.
+
+---
+
+### Instaladores nativos
+
+Una vez compilado, los instaladores también se generan en:
+
+```
+src-tauri/target/release/bundle/
+```
+
+Formatos disponibles: `.deb`, AppImage, `.rpm`.
+
+---
+
+### Modo desarrollo
+
+Si quieres ejecutar la aplicación en modo desarrollo (sin instalar):
+
+```bash
+git clone https://github.com/Angel-p-v/app-media-manager.git acryl
+cd acryl
+npm install
+npm run tauri:dev
+```
 
 ---
 
