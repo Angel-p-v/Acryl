@@ -6,6 +6,33 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 versionado [SemVer](https://semver.org/lang/es/). A partir de `v1.0.0`, release-please
 mantiene este archivo a partir de los commits convencionales.
 
+## [0.2.0](https://github.com/Angel-p-v/Acryl/compare/v0.1.0...v0.2.0) (2026-10-29)
+
+
+### Features
+
+* añadir archivo acryl.desktop para empaquetado Linux ([c429c68](https://github.com/Angel-p-v/Acryl/commit/c429c68cbaf1375ee6167452d18bb93c234970b6))
+* **diagnose:** añadir script de diagnóstico para fallos de inicio ([3ebef49](https://github.com/Angel-p-v/Acryl/commit/3ebef49bca35e07d6f5345b8c38c5ee2438fa925))
+* **hito-6:** configuración YAML en el backend ([#16](https://github.com/Angel-p-v/Acryl/issues/16)) ([7886cea](https://github.com/Angel-p-v/Acryl/commit/7886ceacac821c2e7da797adaacabfa4e9e5003f))
+* **hito-7:** internacionalización (i18n) de la UI ([#17](https://github.com/Angel-p-v/Acryl/issues/17)) ([af65d36](https://github.com/Angel-p-v/Acryl/commit/af65d36ac7e93535cc9a6d2cd14735a2a9b57446))
+* **hito-8:** metadatos automáticos TMDB/TVDB + historial de reproducción ([#18](https://github.com/Angel-p-v/Acryl/issues/18)) ([6634b5a](https://github.com/Angel-p-v/Acryl/commit/6634b5a81ddf33dd888c80c16bb9bcd1caf68b47))
+* **hito-9:** publicación automática en GitHub Releases ([#19](https://github.com/Angel-p-v/Acryl/issues/19)) ([aef3e88](https://github.com/Angel-p-v/Acryl/commit/aef3e88f5ab5249161b1e4e2cf9031ccf9eafd24))
+* **install:** añadir script de instalación automática y actualizar README ([#24](https://github.com/Angel-p-v/Acryl/issues/24)) ([c257c92](https://github.com/Angel-p-v/Acryl/commit/c257c92556820928f98d94a42b3ccbab5134b713))
+* README completo con diagrama de una sola BD y bloques de instalación por distro ([89b6d95](https://github.com/Angel-p-v/Acryl/commit/89b6d952a8c9bbba5257f64799afa29a113a8548))
+* **readme,install:** uninstaller --purge y diagramas de arquitectura y BD ([#26](https://github.com/Angel-p-v/Acryl/issues/26)) ([782450b](https://github.com/Angel-p-v/Acryl/commit/782450b70d9765ce0ae0532aaef95112d6dae222))
+* **readme:** diagrama de BD como una sola tabla, bloques de instalación por distro ([a2d5595](https://github.com/Angel-p-v/Acryl/commit/a2d5595fd63d2b0f2ef6ca90962cef2c65cdcb69))
+* renombra a Acryl con logo, diagrama de flujo y README completo ([5ee7600](https://github.com/Angel-p-v/Acryl/commit/5ee7600a864e5d1a8f2521d95e0fb01a36da9914))
+* renombra proyecto a Acryl ([2823564](https://github.com/Angel-p-v/Acryl/commit/28235641229218ac92eee7f6b98bb3b8a189e33f))
+
+
+### Bug Fixes
+
+* **ci:** corrige marcadores de conflicto en metadata/mod.rs y formatea MediaDetails.tsx ([4d4b649](https://github.com/Angel-p-v/Acryl/commit/4d4b649853e75dfcb5f47169f3f37f8859f843ad))
+* **install:** corregir nombres de paquetes para todas las distribuciones ([#28](https://github.com/Angel-p-v/Acryl/issues/28)) ([7c637cf](https://github.com/Angel-p-v/Acryl/commit/7c637cf01d3c103b7e6dc21ad50dbec5f51ced7f))
+* **install:** corregir paquetes Arch y manejo de cambios git locales ([#30](https://github.com/Angel-p-v/Acryl/issues/30)) ([afcac99](https://github.com/Angel-p-v/Acryl/commit/afcac99addb15ecf6738dca0128324229efd10d4))
+* **install:** quitar nodejs de paquetes sistema y npm install en frontend ([#32](https://github.com/Angel-p-v/Acryl/issues/32)) ([dab394d](https://github.com/Angel-p-v/Acryl/commit/dab394d5744cdc222bd065856bfc3ef558f193a9))
+* **release-please:** corrige versión inicial y bootstrap-sha ([#14](https://github.com/Angel-p-v/Acryl/issues/14)) ([08be678](https://github.com/Angel-p-v/Acryl/commit/08be67806e6d958a7999b75723d3b3698ab7a68b))
+
 ## [3.3.0](https://github.com/Angel-p-v/media-manager/compare/v3.2.0...v3.3.0) (2026-10-27)
 
 
