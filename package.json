@@ -1,6 +1,6 @@
 {
   "name": "media-manager",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Gestor de contenido multimedia de escritorio (Linux): índice SQLite local y reproducción integrada. Frontend React + TypeScript dentro de WebView de Tauri; backend Rust.",
   "repository": {
     "type": "git",
