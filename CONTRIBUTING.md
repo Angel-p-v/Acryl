@@ -97,10 +97,9 @@ Si añades una dependencia con script de instalación, apruébala con
 - `docs/guides/performance.md`: benchmarks y presupuesto.
 - `docs/guides/release.md`: publicación y credenciales.
 - `docs/adr/`: decisiones de arquitectura.
-- `docs/plans/`: planes de trabajo.
-- `PLAN.md`: hitos y estado.
+- `PLAN_DESKTOP.md`: plan de migración desktop y estado de hitos.
 
-Al cerrar un hito, actualiza las tablas de estado de `PLAN.md`, `README.md` y `AGENTS.md`
+Al cerrar un hito, actualiza las tablas de estado de `PLAN_DESKTOP.md`, `README.md` y `AGENTS.md`
 en el mismo PR.
 
 ## Publicación
