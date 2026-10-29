@@ -97,6 +97,29 @@ src-tauri/                ← Rust
 - Icono de aplicación, entrada de menú, archivo `.desktop`.
 - **Criterio de aceptación:** se instala y ejecuta en Linux sin dependencias manuales de Rust/Node. ✅ cumplido
 
+### Hito 6 — Configuración YAML en el backend (Semanas 16–17)
+- Carga de configuración desde archivo YAML en Rust usando `serde` + `serde_yaml`.
+- Comandos Tauri para leer y escribir claves de configuración desde el frontend.
+- Reemplazo progresivo de valores hardcodeados por lectura del archivo YAML.
+- **Criterio de aceptación:** la app lee la configuración desde un archivo YAML en startup y expone comandos para modificarla desde la UI.
+
+### Hito 7 — Internacionalización (i18n) de la UI (Semanas 18–19)
+- Extraer cadenas de texto de la UI a archivos de traducción (español e inglés).
+- Selector de idioma en la UI con persistencia de la elección.
+- **Criterio de aceptación:** la app cambia de idioma sin recargar y todos los textos visibles usan el sistema i18n.
+
+### Hito 8 — Metadatos automáticos TMDB/TVDB + historial de reproducción (Semanas 20–23)
+- Servicio de sincronización automática de metadatos con TMDB y TVDB (póster, sinopsis, año, género).
+- Llenado automático de columnas `poster_path`, `synopsis` y `metadata_fetched_at` en la BD.
+- Comandos Tauri para registrar reproducciones en la tabla `playback_history` (media_id, fecha, posición, duración).
+- Vista de historial de reproducción en la UI.
+- **Criterio de aceptación:** al buscar un medio sin metadatos, la app los rellena automáticamente desde TMDB/TVDB; al reproducir un video se registra en el historial.
+
+### Hito 9 — Publicación automática en GitHub Releases (Semanas 24–25)
+- Configurar `release.yml` y `release-please.yml` para generar releases automáticos.
+- Subir artefactos `.deb`, AppImage y `.rpm` a GitHub Releases con checksums y notas de release.
+- **Criterio de aceptación:** al hacer push de un tag, se genera un release en GitHub con los instaladores listos para descargar.
+
 ---
 
 ## 5. Desafíos clave
@@ -108,12 +131,14 @@ src-tauri/                ← Rust
 | Migración de datos SQLite | Leer el archivo `.db` existente directamente desde Rust, sin migración de datos |
 | Configuración YAML | Reemplazar `zod` por `serde` + `serde_yaml` en Rust |
 | Comunicación Rust↔TS | Comandos Tauri con tipado estricto en ambos extremos |
+| Metadatos externos | Rate limiting y caché TTL para llamadas a TMDB/TVDB; manejo de errores cuando no hay conexión |
+| i18n | Estructura de archivos de traducción y selector de idioma persistente |
 
 ---
 
 ## 6. Estimación de tiempo
 
-**Total:** 14–15 semanas (tiempo parcial, ~10–15 h/semana)
+**Total:** 25 semanas (tiempo parcial, ~10–15 h/semana)
 
 ---
 
@@ -138,11 +163,14 @@ src-tauri/                ← Rust
 | Hito 3 | Reproductor integrado (libmpv) | ✅ completado |
 | Hito 4 | UI completa (detalles, favoritos, visto, navegación) | ✅ completado |
 | Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ✅ completado |
+| Hito 6 | Configuración YAML en el backend | ⏳ pendiente |
+| Hito 7 | Internacionalización (i18n) de la UI | ⏳ pendiente |
+| Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ⏳ pendiente |
+| Hito 9 | Publicación automática en GitHub Releases | ⏳ pendiente |
 
 ## 9. Próximo paso inmediato
 
-Todos los hitos del plan están completados. El proyecto está listo para
-publicación en GitHub Releases con instaladores nativos Linux.
+El siguiente hito a implementar es el **Hito 6 — Configuración YAML en el backend**, seguido del Hito 7 (i18n), Hito 8 (metadatos automáticos e historial) y Hito 9 (publicación en releases).
 
 ---
 
