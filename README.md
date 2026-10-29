@@ -57,7 +57,7 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 
 media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza mantenibilidad, pruebas y seguridad:
 
-![Arquitectura de Acryl: capas Frontend → Backend → Base de datos SQLite](./docs/assets/architecture.svg)
+![Diagrama de flujo de Acryl: Usuario → Frontend → Backend → SQLite / libmpv → Usuario](./docs/assets/architecture.svg)
 
 ### Flujo de datos
 
