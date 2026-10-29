@@ -52,6 +52,56 @@ detect_package_manager() {
 }
 
 # -----------------------------------------------------------------------------
+# Intenta instalar una lista de nombres de paquete; usa el primero que exista.
+# Devuelve 0 si al menos uno se instaló, 1 si ninguno.
+# -----------------------------------------------------------------------------
+try_install_pkgs() {
+  local pm="$1"; shift
+  local pkgs=("$@")
+  local installed_any=false
+
+  for pkg in "${pkgs[@]}"; do
+    case "$pm" in
+      apt)
+        if sudo apt-get install -y -qq "$pkg" 2>/dev/null; then
+          installed_any=true
+          break
+        fi
+        ;;
+      pacman)
+        if sudo pacman -Sy --needed --noconfirm "$pkg" 2>/dev/null; then
+          installed_any=true
+          break
+        fi
+        ;;
+      dnf)
+        if sudo dnf install -y "$pkg" 2>/dev/null; then
+          installed_any=true
+          break
+        fi
+        ;;
+      zypper)
+        if sudo zypper install -y "$pkg" 2>/dev/null; then
+          installed_any=true
+          break
+        fi
+        ;;
+      apk)
+        if sudo apk add "$pkg" 2>/dev/null; then
+          installed_any=true
+          break
+        fi
+        ;;
+    esac
+  done
+
+  if [[ "$installed_any" == "true" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+# -----------------------------------------------------------------------------
 # Dependencias de sistema
 # -----------------------------------------------------------------------------
 install_system_deps() {
@@ -71,80 +121,83 @@ install_system_deps() {
         librsvg2-dev \
         libayatana-appindicator3-dev \
         libmpv-dev \
-        nodejs npm || true
+        nodejs npm || {
+        warn "Algunos paquetes de Debian/Ubuntu no se pudieron instalar."
+        warn "Intenta: sudo apt-get install libwebkit2gtk-4.0-dev libgtk-3-dev librsvg2-dev libmpv-dev nodejs npm"
+      }
       ;;
     pacman)
       # Arch divide webkit2gtk en paquetes versionados (4.0 / 4.1); Tauri v2
-      # funciona con webkit2gtk-4.0. El paquete no versionado ya no existe.
-      sudo pacman -Sy --needed \
+      # funciona con cualquiera de las dos. mpv se llama simplemente 'mpv'.
+      sudo pacman -Sy --needed --noconfirm \
         base-devel \
         curl \
         git \
-        webkit2gtk-4.0 \
         gtk3 \
         librsvg \
         libayatana-appindicator \
-        libmpv \
+        mpv \
         nodejs npm || {
-        warn "Algunos paquetes de Arch no se pudieron instalar automáticamente."
-        warn "Intenta instalarlos manualmente: webkit2gtk-4.0, gtk3, librsvg, libmpv, nodejs, npm"
+        warn "Algunos paquetes base de Arch no se pudieron instalar."
       }
+
+      # webkit2gtk: probar 4.1 primero, luego 4.0
+      if ! try_install_pkgs pacman webkit2gtk-4.1 webkit2gtk-4.0; then
+        warn "No se encontró webkit2gtk-4.1 ni webkit2gtk-4.0 en los repos de Arch."
+        warn "Instala manualmente: sudo pacman -S webkit2gtk-4.1 (o webkit2gtk-4.0)"
+      fi
       ;;
     dnf)
-      # En Fedora reciente el paquete es webkit2gtk4.0-devel (o 4.1);
-      # en RHEL/Rocky/Alma 9 sigue siendo webkit2gtk3-devel. Probamos 4.0
-      # primero y avisamos si falla.
+      # Fedora reciente: webkit2gtk4.0-devel; distros antiguas: webkit2gtk3-devel
       sudo dnf install -y \
         gcc gcc-c++ make \
         curl git \
-        webkit2gtk4.0-devel \
         gtk3-devel \
         librsvg2-devel \
         libayatana-appindicator3-devel \
         libmpv-devel \
         nodejs npm || {
-        warn "webkit2gtk4.0-devel no disponible; intentando webkit2gtk3-devel (distros antiguas)..."
-        sudo dnf install -y \
-          gcc gcc-c++ make \
-          curl git \
-          webkit2gtk3-devel \
-          gtk3-devel \
-          librsvg2-devel \
-          libayatana-appindicator3-devel \
-          libmpv-devel \
-          nodejs npm || {
-          warn "Algunos paquetes de dnf no se pudieron instalar automáticamente."
-          warn "Instala manualmente: webkit2gtk4.0-devel (o webkit2gtk3-devel), gtk3-devel, libmpv-devel, nodejs, npm"
-        }
+        warn "Algunos paquetes base de dnf no se pudieron instalar."
       }
+
+      if ! try_install_pkgs dnf webkit2gtk4.0-devel webkit2gtk3-devel; then
+        warn "No se encontró webkit2gtk4.0-devel ni webkit2gtk3-devel."
+        warn "Instala manualmente: sudo dnf install webkit2gtk4.0-devel (o webkit2gtk3-devel)"
+      fi
       ;;
     zypper)
       sudo zypper install -y \
         patterns-base-C_C++ \
         curl git \
-        libwebkit2gtk-4_0-devel \
         gtk3-devel \
         librsvg2-devel \
         libayatana-appindicator3-devel \
         libmpv-devel \
         nodejs npm || {
-        warn "Algunos paquetes de openSUSE no se pudieron instalar automáticamente."
-        warn "Intenta instalarlos manualmente: libwebkit2gtk-4_0-devel, gtk3-devel, libmpv-devel, nodejs, npm"
+        warn "Algunos paquetes base de openSUSE no se pudieron instalar."
       }
+
+      if ! try_install_pkgs zypper libwebkit2gtk-4_0-devel libwebkit2gtk3-devel; then
+        warn "No se encontró libwebkit2gtk-4_0-devel ni libwebkit2gtk3-devel."
+        warn "Instala manualmente: sudo zypper install libwebkit2gtk-4_0-devel"
+      fi
       ;;
     apk)
       sudo apk add \
         build-base \
         curl git \
-        webkit2gtk-dev \
         gtk+3-dev \
         librsvg-dev \
         libayatana-appindicator3-dev \
         libmpv-dev \
         nodejs npm || {
-        warn "Algunos paquetes de Alpine no se pudieron instalar automáticamente."
-        warn "Intenta instalarlos manualmente: webkit2gtk-dev, gtk+3-dev, libmpv-dev, nodejs, npm"
+        warn "Algunos paquetes base de Alpine no se pudieron instalar."
       }
+
+      if ! try_install_pkgs apk webkit2gtk-dev; then
+        warn "No se encontró webkit2gtk-dev en Alpine."
+        warn "Instala manualmente: sudo apk add webkit2gtk-dev"
+      fi
       ;;
     *)
       error "Gestor de paquetes no soportado: '$pm'."
@@ -153,7 +206,7 @@ install_system_deps() {
       ;;
   esac
 
-  ok "Dependencias de sistema instaladas."
+  ok "Dependencias de sistema instaladas (o advertencias si faltaron algunas)."
 }
 
 # -----------------------------------------------------------------------------
@@ -291,8 +344,13 @@ clone_repo() {
   if [[ -d "$target_dir/.git" ]]; then
     info "El repositorio ya existe en $target_dir. Actualizando..."
     git -C "$target_dir" remote set-url origin "$REPO_URL" >/dev/null 2>&1 || true
-    git -C "$target_dir" pull --ff-only
-    ok "Repositorio actualizado."
+    if ! git -C "$target_dir" pull --rebase --autostash 2>/dev/null; then
+      warn "No se pudo actualizar el repositorio automáticamente."
+      warn "Posibles cambios locales sin marcar en $target_dir."
+      warn "Ejecuta manualmente: cd $target_dir && git pull --rebase --autostash"
+    else
+      ok "Repositorio actualizado."
+    fi
   else
     info "Clonando $REPO_URL en $target_dir..."
     git clone "$REPO_URL" "$target_dir"
