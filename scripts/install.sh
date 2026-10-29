@@ -120,15 +120,16 @@ install_system_deps() {
         libgtk-3-dev \
         librsvg2-dev \
         libayatana-appindicator3-dev \
-        libmpv-dev \
-        nodejs npm || {
+        libmpv-dev || {
         warn "Algunos paquetes de Debian/Ubuntu no se pudieron instalar."
-        warn "Intenta: sudo apt-get install libwebkit2gtk-4.0-dev libgtk-3-dev librsvg2-dev libmpv-dev nodejs npm"
+        warn "Intenta: sudo apt-get install libwebkit2gtk-4.0-dev libgtk-3-dev librsvg2-dev libmpv-dev"
       }
       ;;
     pacman)
       # Arch divide webkit2gtk en paquetes versionados (4.0 / 4.1); Tauri v2
       # funciona con cualquiera de las dos. mpv se llama simplemente 'mpv'.
+      # Node.js se gestiona por separado en ensure_node() para evitar conflictos
+      # con versiones LTS ya instaladas (p.ej. nodejs-lts-jod).
       sudo pacman -Sy --needed --noconfirm \
         base-devel \
         curl \
@@ -136,8 +137,7 @@ install_system_deps() {
         gtk3 \
         librsvg \
         libayatana-appindicator \
-        mpv \
-        nodejs npm || {
+        mpv || {
         warn "Algunos paquetes base de Arch no se pudieron instalar."
       }
 
@@ -149,14 +149,14 @@ install_system_deps() {
       ;;
     dnf)
       # Fedora reciente: webkit2gtk4.0-devel; distros antiguas: webkit2gtk3-devel
+      # Node.js se gestiona por separado en ensure_node().
       sudo dnf install -y \
         gcc gcc-c++ make \
         curl git \
         gtk3-devel \
         librsvg2-devel \
         libayatana-appindicator3-devel \
-        libmpv-devel \
-        nodejs npm || {
+        libmpv-devel || {
         warn "Algunos paquetes base de dnf no se pudieron instalar."
       }
 
@@ -172,8 +172,7 @@ install_system_deps() {
         gtk3-devel \
         librsvg2-devel \
         libayatana-appindicator3-devel \
-        libmpv-devel \
-        nodejs npm || {
+        libmpv-devel || {
         warn "Algunos paquetes base de openSUSE no se pudieron instalar."
       }
 
@@ -189,8 +188,7 @@ install_system_deps() {
         gtk+3-dev \
         librsvg-dev \
         libayatana-appindicator3-dev \
-        libmpv-dev \
-        nodejs npm || {
+        libmpv-dev || {
         warn "Algunos paquetes base de Alpine no se pudieron instalar."
       }
 
@@ -365,8 +363,8 @@ build_and_install() {
   local project_dir="$1"
   cd "$project_dir"
 
-  info "Instalando dependencias de Node.js..."
-  npm install
+  info "Instalando dependencias de Node.js (frontend)..."
+  (cd frontend && npm install)
 
   info "Compilando la aplicación con Tauri (genera .deb / AppImage / .rpm)..."
   # shellcheck disable=SC1090
