@@ -57,7 +57,32 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 
 media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza mantenibilidad, pruebas y seguridad:
 
-![Diagrama de flujo de Acryl: Usuario → Frontend → Backend → SQLite / libmpv → Usuario](./docs/assets/architecture.svg)
+```mermaid
+graph TD
+    Usuario((Usuario)) -->|busca / reproduce| Frontend[Frontend<br/>React + TypeScript]
+    Frontend -->|invoke Tauri IPC| Commands[Commands<br/>Rust + Tauri]
+    Commands --> Decision{¿Consulta<br/>o reproduce?}
+    Decision -->|consulta SQLite| SQLite[(SQLite<br/>acryl.db)]
+    Decision -->|reproduce con libmpv| MPV[libmpv<br/>FFI]
+    SQLite -->|datos| Frontend
+    MPV -->|frames| Frontend
+    Commands -.->|sincroniza opcional| TVmaze[TVmaze<br/>API pública]
+    TVmaze -.->|metadatos| Decision
+    Frontend -->|resultado| Usuario
+
+    classDef usuario fill:#f3f4f6,stroke:#4f46e5,stroke-width:2px
+    classDef frontend fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    classDef backend fill:#dcfce7,stroke:#059669,stroke-width:2px
+    classDef db fill:#e0e7ff,stroke:#4f46e5,stroke-width:2px
+    classDef ext fill:#fef3c7,stroke:#b45309,stroke-width:2px,stroke-dasharray: 5 5
+
+    class Usuario usuario
+    class Frontend frontend
+    class Commands backend
+    class SQLite db
+    class MPV backend
+    class TVmaze ext
+```
 
 ### Flujo de datos
 
