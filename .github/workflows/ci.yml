@@ -63,6 +63,9 @@ jobs:
         with:
           toolchain: stable
           components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
       - name: Install system dependencies (Tauri/Linux)
         run: |
           sudo apt-get update -qq
@@ -82,9 +85,9 @@ jobs:
         working-directory: src-tauri
       - run: cargo clippy --all-targets
         working-directory: src-tauri
-      - run: cargo build
+      - run: cargo build --locked
         working-directory: src-tauri
-      - run: cargo test
+      - run: cargo test --locked
         working-directory: src-tauri
 
   build-tauri:
