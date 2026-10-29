@@ -134,14 +134,15 @@ src-tauri/                ← Rust
 | Hito | Contenido | Estado |
 |------|-----------|--------|
 | Hito 1 | Prototipo mínimo: ventana Tauri, lista desde SQLite, póster, búsqueda | ✅ completado |
-| Hito 2 | Capa de dominio en Rust (db, library, metadata) | pendiente |
+| Hito 2 | Capa de dominio en Rust (db, library, metadata) | ✅ completado |
 | Hito 3 | Reproductor integrado (libmpv/GStreamer) | pendiente |
 | Hito 4 | UI completa | pendiente |
 | Hito 5 | Empaquetado Linux | pendiente |
 
 ## 9. Próximo paso inmediato
 
-Comenzar el Hito 2: puerto de `core/db` a `rusqlite`/`sqlx` y comandos Tauri que expongan la lógica de negocio al frontend.
+Comenzar el Hito 3: bindings a `libmpv` (o GStreamer) desde Rust para
+reproductor integrado dentro de la ventana de la app.
 
 ---
 
