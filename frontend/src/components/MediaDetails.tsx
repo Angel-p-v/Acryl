@@ -23,8 +23,6 @@ export function MediaDetails({
   const [error, setError] = useState<string | null>(null);
 
   const loadDetails = useCallback(async (): Promise<void> => {
-    setLoading(true);
-    setError(null);
     try {
       const d = await getMediaDetails('media-manager.db', mediaId);
       setDetails(d);
@@ -36,6 +34,10 @@ export function MediaDetails({
   }, [mediaId]);
 
   useEffect(() => {
+    // Carga de datos al montar (o al cambiar mediaId). El setState ocurre tras
+    // el await, no de forma síncrona en el cuerpo del efecto, por lo que este
+    // patrón es el de data-fetching recomendado por React.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadDetails();
   }, [loadDetails]);
 
