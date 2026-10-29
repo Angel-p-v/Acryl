@@ -6,6 +6,7 @@ node_modules/
 # Compilación
 /dist/
 /build/
+target/
 *.tsbuildinfo
 
 # Tests y cobertura
