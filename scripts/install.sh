@@ -366,11 +366,14 @@ build_and_install() {
   info "Instalando dependencias de Node.js (frontend)..."
   (cd frontend && npm install)
 
+  info "Compilando frontend con Vite..."
+  (cd frontend && npm run build)
+
   info "Compilando la aplicación con Tauri (genera .deb / AppImage / .rpm)..."
   # shellcheck disable=SC1090
   [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
   export PATH="$HOME/.cargo/bin:$PATH"
-  npm run tauri:build
+  (cd src-tauri && cargo tauri build)
 
   local bundle_dir
   bundle_dir="$project_dir/src-tauri/target/release/bundle"

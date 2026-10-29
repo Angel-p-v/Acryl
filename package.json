@@ -26,7 +26,7 @@
     "verify": "npm run lint && npm run format:check && npm run typecheck && npm run test && npm run test:e2e",
     "tauri": "tauri",
     "tauri:dev": "cd frontend && npm run dev & cargo tauri dev",
-    "tauri:build": "cargo tauri build"
+    "tauri:build": "cd frontend && npm run build && cd ../src-tauri && cargo tauri build"
   },
   "engines": {
     "node": ">=22"
