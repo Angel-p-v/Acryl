@@ -74,27 +74,49 @@ install_system_deps() {
         nodejs npm || true
       ;;
     pacman)
+      # Arch divide webkit2gtk en paquetes versionados (4.0 / 4.1); Tauri v2
+      # funciona con webkit2gtk-4.0. El paquete no versionado ya no existe.
       sudo pacman -Sy --needed \
         base-devel \
         curl \
         git \
-        webkit2gtk \
+        webkit2gtk-4.0 \
         gtk3 \
         librsvg \
         libayatana-appindicator \
         libmpv \
-        nodejs npm
+        nodejs npm || {
+        warn "Algunos paquetes de Arch no se pudieron instalar automáticamente."
+        warn "Intenta instalarlos manualmente: webkit2gtk-4.0, gtk3, librsvg, libmpv, nodejs, npm"
+      }
       ;;
     dnf)
+      # En Fedora reciente el paquete es webkit2gtk4.0-devel (o 4.1);
+      # en RHEL/Rocky/Alma 9 sigue siendo webkit2gtk3-devel. Probamos 4.0
+      # primero y avisamos si falla.
       sudo dnf install -y \
         gcc gcc-c++ make \
         curl git \
-        webkit2gtk3-devel \
+        webkit2gtk4.0-devel \
         gtk3-devel \
         librsvg2-devel \
         libayatana-appindicator3-devel \
         libmpv-devel \
-        nodejs npm
+        nodejs npm || {
+        warn "webkit2gtk4.0-devel no disponible; intentando webkit2gtk3-devel (distros antiguas)..."
+        sudo dnf install -y \
+          gcc gcc-c++ make \
+          curl git \
+          webkit2gtk3-devel \
+          gtk3-devel \
+          librsvg2-devel \
+          libayatana-appindicator3-devel \
+          libmpv-devel \
+          nodejs npm || {
+          warn "Algunos paquetes de dnf no se pudieron instalar automáticamente."
+          warn "Instala manualmente: webkit2gtk4.0-devel (o webkit2gtk3-devel), gtk3-devel, libmpv-devel, nodejs, npm"
+        }
+      }
       ;;
     zypper)
       sudo zypper install -y \
@@ -105,7 +127,10 @@ install_system_deps() {
         librsvg2-devel \
         libayatana-appindicator3-devel \
         libmpv-devel \
-        nodejs npm
+        nodejs npm || {
+        warn "Algunos paquetes de openSUSE no se pudieron instalar automáticamente."
+        warn "Intenta instalarlos manualmente: libwebkit2gtk-4_0-devel, gtk3-devel, libmpv-devel, nodejs, npm"
+      }
       ;;
     apk)
       sudo apk add \
@@ -116,7 +141,10 @@ install_system_deps() {
         librsvg-dev \
         libayatana-appindicator3-dev \
         libmpv-dev \
-        nodejs npm
+        nodejs npm || {
+        warn "Algunos paquetes de Alpine no se pudieron instalar automáticamente."
+        warn "Intenta instalarlos manualmente: webkit2gtk-dev, gtk+3-dev, libmpv-dev, nodejs, npm"
+      }
       ;;
     *)
       error "Gestor de paquetes no soportado: '$pm'."
