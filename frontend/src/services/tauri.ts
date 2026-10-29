@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
-import type { Media, PlayerStatus } from '../types/media';
+import type { Media, MediaDetails, PlayerStatus } from '../types/media';
 
 const DEFAULT_DB_PATH = 'media-manager.db';
 
@@ -97,4 +97,46 @@ export async function playerVolume(volume: number): Promise<void> {
  */
 export async function playerStatus(): Promise<PlayerStatus> {
   return await invoke<PlayerStatus>('player_status_cmd');
+}
+
+/**
+ * Obtiene el detalle completo de un medio (título + archivos indexados)
+ * mediante `get_media_details_cmd`.
+ */
+export async function getMediaDetails(
+  dbPath: string = DEFAULT_DB_PATH,
+  mediaId: number
+): Promise<MediaDetails | null> {
+  return await invoke<MediaDetails | null>('get_media_details_cmd', {
+    db_path: dbPath,
+    media_id: mediaId,
+  });
+}
+
+/**
+ * Invierte el estado de favorito de un medio mediante
+ * `toggle_favorite_cmd`. Devuelve el nuevo valor.
+ */
+export async function toggleFavorite(
+  dbPath: string = DEFAULT_DB_PATH,
+  mediaId: number
+): Promise<boolean> {
+  return await invoke<boolean>('toggle_favorite_cmd', {
+    db_path: dbPath,
+    media_id: mediaId,
+  });
+}
+
+/**
+ * Invierte el estado de visto de un medio mediante
+ * `toggle_watched_cmd`. Devuelve el nuevo valor.
+ */
+export async function toggleWatched(
+  dbPath: string = DEFAULT_DB_PATH,
+  mediaId: number
+): Promise<boolean> {
+  return await invoke<boolean>('toggle_watched_cmd', {
+    db_path: dbPath,
+    media_id: mediaId,
+  });
 }

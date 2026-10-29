@@ -4,6 +4,7 @@
 //! Recibe la conexión SQLite como parámetro (inyección de dependencias), sin
 //! estado global.
 
+use crate::db::file_repo::FileRepository;
 use rusqlite::{Connection, Result as RusqliteResult, params};
 
 /// Entidad de dominio: un título de la biblioteca (película, serie o anime).
@@ -17,6 +18,18 @@ pub struct Media {
     pub folder_path: String,
     pub created_at: String,
     pub updated_at: String,
+    pub is_favorite: bool,
+    pub is_watched: bool,
+    pub poster_path: Option<String>,
+    pub synopsis: Option<String>,
+    pub metadata_fetched_at: Option<String>,
+}
+
+/// Detalle completo de un título: el medio más sus archivos indexados.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MediaDetails {
+    pub media: Media,
+    pub files: Vec<crate::db::file_repo::MediaFile>,
 }
 
 /// Datos de entrada para insertar o actualizar un título.
@@ -63,19 +76,11 @@ impl<'a> MediaRepository<'a> {
     pub fn upsert(&mut self, input: &MediaInput) -> RusqliteResult<Media> {
         let sort_title = input.sort_title.clone();
 
-        // `INSERT ... ON CONFLICT ... RETURNING id` devuelve el id ya sea de
-        // la inserción o del conflicto, así obtenemos el id real sin depender
-        // de last_insert_rowid (que no se actualiza en el camino de UPDATE).
-        let id: i64 = self.conn.query_row(
+        // Intentar INSERT simple. Si falla por violación de UNIQUE en
+        // folder_path, hacemos UPDATE sobre la fila existente.
+        let insert_result = self.conn.execute(
             "INSERT INTO media (type, title, sort_title, year, folder_path)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT(folder_path) DO UPDATE SET
-                   type = excluded.type,
-                   title = excluded.title,
-                   sort_title = excluded.sort_title,
-                   year = excluded.year,
-                   updated_at = datetime('now')
-                 RETURNING id",
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 input.r#type,
                 input.title,
@@ -83,8 +88,31 @@ impl<'a> MediaRepository<'a> {
                 input.year,
                 input.folder_path
             ],
-            |row| row.get(0),
-        )?;
+        );
+
+        let id: i64 = match insert_result {
+            Ok(_) => self.conn.last_insert_rowid(),
+            Err(rusqlite::Error::SqliteFailure(_, _)) => {
+                self.conn.execute(
+                    "UPDATE media SET type = ?1, title = ?2, sort_title = ?3,
+                     year = ?4, updated_at = datetime('now')
+                     WHERE folder_path = ?5",
+                    params![
+                        input.r#type,
+                        input.title,
+                        sort_title,
+                        input.year,
+                        input.folder_path
+                    ],
+                )?;
+                self.conn.query_row(
+                    "SELECT id FROM media WHERE folder_path = ?1",
+                    params![input.folder_path],
+                    |row| row.get(0),
+                )?
+            }
+            Err(e) => return Err(e),
+        };
 
         self.find_by_id(id)?
             .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)
@@ -93,7 +121,8 @@ impl<'a> MediaRepository<'a> {
     /// Busca un título por su id.
     pub fn find_by_id(&mut self, id: i64) -> RusqliteResult<Option<Media>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at
+            "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
+                    is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at
              FROM media WHERE id = ?1",
         )?;
         let row = stmt.query_row(params![id], map_media_row);
@@ -107,7 +136,8 @@ impl<'a> MediaRepository<'a> {
     /// Busca un título por ruta de carpeta.
     pub fn find_by_folder_path(&mut self, folder_path: &str) -> RusqliteResult<Option<Media>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at
+            "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
+                    is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at
              FROM media WHERE folder_path = ?1",
         )?;
         let row = stmt.query_row(params![folder_path], map_media_row);
@@ -121,7 +151,8 @@ impl<'a> MediaRepository<'a> {
     /// Lista títulos con filtros opcionales (tipo, orden, límite, offset).
     pub fn list(&mut self, options: ListMediaOptions) -> RusqliteResult<Vec<Media>> {
         let mut sql = String::from(
-            "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at
+            "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
+                    is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at
              FROM media",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -177,7 +208,9 @@ impl<'a> MediaRepository<'a> {
         if !fts_query.is_empty() {
             let mut sql = String::from(
                 "SELECT m.id, m.type, m.title, m.sort_title, m.year, m.folder_path,
-                        m.created_at, m.updated_at
+                        m.created_at, m.updated_at,
+                        m.is_favorite, m.is_watched, m.poster_path, m.synopsis,
+                        m.metadata_fetched_at
                  FROM media m
                  JOIN media_fts f ON f.rowid = m.id
                  WHERE media_fts MATCH ?1",
@@ -207,7 +240,8 @@ impl<'a> MediaRepository<'a> {
         if results.is_empty() {
             let like_pattern = format!("%{}%", escape_like(trimmed));
             let mut sql = String::from(
-                "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at
+                "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
+                        is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at
                  FROM media
                  WHERE sort_title LIKE ?1",
             );
@@ -296,6 +330,46 @@ impl<'a> MediaRepository<'a> {
         )?;
         Ok(changes > 0)
     }
+
+    /// Invierte el estado de favorito de un título. Devuelve el nuevo valor.
+    pub fn toggle_favorite(&mut self, id: i64) -> RusqliteResult<bool> {
+        self.conn.execute(
+            "UPDATE media SET is_favorite = NOT is_favorite, updated_at = datetime('now') WHERE id = ?1",
+            params![id],
+        )?;
+        let value: bool = self.conn.query_row(
+            "SELECT is_favorite FROM media WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+        Ok(value)
+    }
+
+    /// Invierte el estado de visto de un título. Devuelve el nuevo valor.
+    pub fn toggle_watched(&mut self, id: i64) -> RusqliteResult<bool> {
+        self.conn.execute(
+            "UPDATE media SET is_watched = NOT is_watched, updated_at = datetime('now') WHERE id = ?1",
+            params![id],
+        )?;
+        let value: bool = self.conn.query_row(
+            "SELECT is_watched FROM media WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+        Ok(value)
+    }
+
+    /// Obtiene el detalle completo de un título (medio + archivos indexados).
+    pub fn get_details(&mut self, id: i64) -> RusqliteResult<Option<MediaDetails>> {
+        let media = self.find_by_id(id)?;
+        let media = match media {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+        let mut file_repo = FileRepository::new(self.conn);
+        let files = file_repo.list_by_media(id)?;
+        Ok(Some(MediaDetails { media, files }))
+    }
 }
 
 /// Convierte una fila de SQLite a la entidad Media.
@@ -309,6 +383,11 @@ fn map_media_row(row: &rusqlite::Row<'_>) -> RusqliteResult<Media> {
         folder_path: row.get(5)?,
         created_at: row.get(6)?,
         updated_at: row.get(7)?,
+        is_favorite: row.get(8)?,
+        is_watched: row.get(9)?,
+        poster_path: row.get(10)?,
+        synopsis: row.get(11)?,
+        metadata_fetched_at: row.get(12)?,
     })
 }
 
@@ -451,5 +530,100 @@ mod tests {
             .expect("buscar");
         assert!(!resultados.is_empty());
         assert!(resultados.iter().any(|m| m.title == "Cowboy Bebop"));
+    }
+
+    #[test]
+    fn toggle_favorite_cambia_estado() {
+        let (mut repo, _db) = new_repo();
+        let media = repo
+            .upsert(&MediaInput {
+                r#type: "movie".to_string(),
+                title: "Test".to_string(),
+                sort_title: "test".to_string(),
+                year: None,
+                folder_path: "/media/movies/test".to_string(),
+            })
+            .expect("insertar");
+
+        assert!(!media.is_favorite);
+
+        let activado = repo.toggle_favorite(media.id).expect("toggle favorite");
+        assert!(activado);
+
+        let desactivado = repo.toggle_favorite(media.id).expect("toggle favorite");
+        assert!(!desactivado);
+    }
+
+    #[test]
+    fn toggle_watched_cambia_estado() {
+        let (mut repo, _db) = new_repo();
+        let media = repo
+            .upsert(&MediaInput {
+                r#type: "movie".to_string(),
+                title: "Test".to_string(),
+                sort_title: "test".to_string(),
+                year: None,
+                folder_path: "/media/movies/test".to_string(),
+            })
+            .expect("insertar");
+
+        assert!(!media.is_watched);
+
+        let activado = repo.toggle_watched(media.id).expect("toggle watched");
+        assert!(activado);
+
+        let desactivado = repo.toggle_watched(media.id).expect("toggle watched");
+        assert!(!desactivado);
+    }
+
+    #[test]
+    fn get_details_devuelve_media_y_archivos() {
+        let conn_ref: &'static mut rusqlite::Connection = {
+            let db_path = ":memory:".to_string();
+            let conn = open_db(&db_path).expect("debe abrir BD en memoria");
+            Box::leak(Box::new(conn))
+        };
+
+        let media_id = {
+            let mut media_repo = MediaRepository::new(conn_ref);
+            let media = media_repo
+                .upsert(&MediaInput {
+                    r#type: "movie".to_string(),
+                    title: "Test Media".to_string(),
+                    sort_title: "test media".to_string(),
+                    year: None,
+                    folder_path: "/media/movies/test".to_string(),
+                })
+                .expect("insertar media");
+            media.id
+        };
+        // media_repo se descarta aquí: el préstamo termina.
+
+        {
+            let mut file_repo = FileRepository::new(conn_ref);
+            file_repo
+                .upsert_many(&[crate::db::file_repo::MediaFileInput {
+                    media_id,
+                    season: Some(1),
+                    episode: Some(1),
+                    title: Some("Piloto".to_string()),
+                    file_path: "/media/movies/test/file.mkv".to_string(),
+                    size_bytes: Some(1_000_000),
+                    mtime_ms: None,
+                }])
+                .expect("insertar archivo");
+        }
+        // file_repo se descarta aquí.
+
+        let details = {
+            let mut media_repo = MediaRepository::new(conn_ref);
+            media_repo.get_details(media_id).expect("obtener detalles")
+        };
+
+        let details = details.expect("debe ser Some");
+        assert_eq!(details.media.id, media_id);
+        assert_eq!(details.media.title, "Test Media");
+        assert_eq!(details.files.len(), 1);
+        assert_eq!(details.files[0].episode, Some(1));
     }
 }

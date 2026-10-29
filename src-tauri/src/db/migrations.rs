@@ -82,6 +82,28 @@ CREATE INDEX IF NOT EXISTS idx_media_updated_at ON media(updated_at);
 CREATE INDEX IF NOT EXISTS idx_index_runs_started_at ON index_runs(started_at);
 "#;
 
+// v3: estado de reproducción y metadatos. Agrega columnas a `media` (aditivas,
+// con valores por defecto seguros) y la tabla `playback_history` para el
+// historial de reproducción.
+const MEDIA_STATE_AND_HISTORY_SQL: &str = r#"
+ALTER TABLE media ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1));
+ALTER TABLE media ADD COLUMN is_watched INTEGER NOT NULL DEFAULT 0 CHECK (is_watched IN (0, 1));
+ALTER TABLE media ADD COLUMN poster_path TEXT;
+ALTER TABLE media ADD COLUMN synopsis TEXT;
+ALTER TABLE media ADD COLUMN metadata_fetched_at TEXT;
+
+CREATE TABLE IF NOT EXISTS playback_history (
+  id          INTEGER PRIMARY KEY,
+  media_id    INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+  played_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  position    REAL NOT NULL DEFAULT 0,
+  duration    REAL NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_playback_history_media ON playback_history(media_id);
+CREATE INDEX IF NOT EXISTS idx_playback_history_played_at ON playback_history(played_at);
+"#;
+
 /// Lista de migraciones en orden de versión.
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
@@ -93,5 +115,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 2,
         name: "performance-indexes",
         sql: PERFORMANCE_INDEXES_SQL,
+    },
+    Migration {
+        version: 3,
+        name: "media-state-and-history",
+        sql: MEDIA_STATE_AND_HISTORY_SQL,
     },
 ];
