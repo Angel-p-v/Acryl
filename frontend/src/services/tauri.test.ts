@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { listMedia } from './tauri';
+import { listMedia, searchMedia } from './tauri';
 
 const mockInvoke = vi.fn();
 vi.mock('@tauri-apps/api/core', () => ({
@@ -11,29 +11,59 @@ beforeEach(() => {
 });
 
 describe('listMedia', () => {
-  it('invoca list_media_cmd con db_path y query', async () => {
-    const medios = [
-      { id: 1, type: 'movie', title: 'X', sort_title: 'x', year: 2000, folder_path: '/a' },
-    ];
-    mockInvoke.mockResolvedValue(medios);
+  it('invoca list_media_cmd con filtros de tipo y paginación', async () => {
+    mockInvoke.mockResolvedValue({ media: [], total: 0 });
 
-    const resultado = await listMedia('/ruta/db', 'bebop');
+    await listMedia('/ruta/db', { type: 'movie', limit: 10, offset: 0, orderBy: 'title' });
 
     expect(mockInvoke).toHaveBeenCalledWith('list_media_cmd', {
       db_path: '/ruta/db',
-      query: 'bebop',
+      type: 'movie',
+      limit: 10,
+      offset: 0,
+      order_by: 'title',
     });
-    expect(resultado).toEqual(medios);
   });
 
-  it('usa la ruta por defecto y query undefined cuando no se proveen', async () => {
-    mockInvoke.mockResolvedValue([]);
+  it('usa valores por defecto cuando no se proveen opciones', async () => {
+    mockInvoke.mockResolvedValue({ media: [], total: 0 });
 
     await listMedia();
 
     expect(mockInvoke).toHaveBeenCalledWith('list_media_cmd', {
       db_path: 'media-manager.db',
-      query: undefined,
+      type: undefined,
+      limit: undefined,
+      offset: undefined,
+      order_by: undefined,
+    });
+  });
+});
+
+describe('searchMedia', () => {
+  it('invoca search_media_cmd con query y filtros', async () => {
+    mockInvoke.mockResolvedValue([]);
+
+    await searchMedia('/ruta/db', 'bebop', { type: 'anime', limit: 5 });
+
+    expect(mockInvoke).toHaveBeenCalledWith('search_media_cmd', {
+      db_path: '/ruta/db',
+      query: 'bebop',
+      type: 'anime',
+      limit: 5,
+    });
+  });
+
+  it('usa la ruta por defecto cuando no se provee', async () => {
+    mockInvoke.mockResolvedValue([]);
+
+    await searchMedia('db', 'query');
+
+    expect(mockInvoke).toHaveBeenCalledWith('search_media_cmd', {
+      db_path: 'db',
+      query: 'query',
+      type: undefined,
+      limit: undefined,
     });
   });
 });

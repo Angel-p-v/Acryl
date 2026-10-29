@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { JSX } from 'react';
 import type { Media } from '../types/media';
-import { listMedia } from '../services/tauri';
+import { listMedia, searchMedia } from '../services/tauri';
 import { MediaList } from './MediaList';
 
 interface SearchBarProps {
@@ -10,16 +10,18 @@ interface SearchBarProps {
 
 export function SearchBar({ dbPath }: SearchBarProps): JSX.Element {
   const [query, setQuery] = useState('');
-  const [media, setMedia] = useState<Media[]>([]);
+  const [media, setMedia] = useState<readonly Media[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const search = async (q: string) => {
+  const load = async (q: string) => {
     setLoading(true);
     try {
-      const results = await listMedia(dbPath, q || undefined);
+      const results = q.trim()
+        ? await searchMedia(dbPath, q)
+        : (await listMedia(dbPath)).media;
       setMedia(results);
     } catch (error) {
-      console.error('Error buscando medios:', error);
+      console.error('Error cargando medios:', error);
       setMedia([]);
     } finally {
       setLoading(false);
@@ -28,7 +30,7 @@ export function SearchBar({ dbPath }: SearchBarProps): JSX.Element {
 
   // Carga inicial: lista completa sin filtro.
   useEffect(() => {
-    void search('');
+    void load('');
   }, [dbPath]);
 
   return (
@@ -43,7 +45,7 @@ export function SearchBar({ dbPath }: SearchBarProps): JSX.Element {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
-              void search(query);
+              void load(query);
             }
           }}
           disabled={loading}
