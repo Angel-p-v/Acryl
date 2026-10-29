@@ -58,15 +58,23 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza mantenibilidad, pruebas y seguridad:
 
 ```mermaid
-graph LR
-    Usuario((Usuario)) -->|busca / reproduce| Frontend[Frontend<br/>React + TS]
-    Frontend -->|invoke| Commands[Commands<br/>Rust + Tauri]
-    Commands --> Decision{¿Consulta<br/>o reproduce?}
-    Decision -->|consulta| SQLite[(SQLite<br/>acryl.db)]
-    Decision -->|reproduce| MPV[libmpv<br/>FFI]
+graph TD
+    Usuario((Usuario))
+    Frontend[Frontend<br/>React + TS]
+    Commands[Commands<br/>Rust + Tauri]
+    Decision{¿Consulta<br/>o reproduce?}
+    SQLite[(SQLite<br/>acryl.db)]
+    MPV[libmpv<br/>FFI]
+    TVmaze[TVmaze<br/>API pública]
+
+    Usuario -->|busca / reproduce| Frontend
+    Frontend -->|invoke| Commands
+    Commands --> Decision
+    Decision -->|consulta| SQLite
+    Decision -->|reproduce| MPV
     SQLite -->|datos| Frontend
     MPV -->|frames| Frontend
-    Commands -.->|sincroniza opcional| TVmaze[TVmaze<br/>API pública]
+    Commands -.->|sincroniza opcional| TVmaze
     TVmaze -.->|metadatos| Decision
     Frontend -->|resultado| Usuario
 
