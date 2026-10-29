@@ -1,9 +1,9 @@
 [Desktop Entry]
-Name=media-manager
+Name=Acryl
 GenericName=Gestor de contenido multimedia
 Comment=Indexa y reproduce tu colección de series, anime y películas
-Exec=media-manager %F
-Icon=media-manager
+Exec=acryl %F
+Icon=acryl
 Terminal=false
 Type=Application
 Categories=AudioVideo;Player;AudioVideo;

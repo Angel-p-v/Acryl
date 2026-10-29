@@ -3,6 +3,25 @@
 version = 4
 
 [[package]]
+name = "acryl"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "log",
+ "pkg-config",
+ "reqwest 0.11.27",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-log",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1956,25 +1975,6 @@ dependencies = [
  "log",
  "tendril",
  "web_atoms",
-]
-
-[[package]]
-name = "media-manager"
-version = "0.1.0"
-dependencies = [
- "libc",
- "log",
- "pkg-config",
- "reqwest 0.11.27",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml",
- "tauri",
- "tauri-build",
- "tauri-plugin-log",
- "tempfile",
- "thiserror 1.0.69",
 ]
 
 [[package]]
