@@ -150,114 +150,57 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 
 ## 📦 Instalación
 
-### Instalación por distribución
+### Instalación automática (recomendado)
 
-Elige tu distribución y ejecuta el bloque correspondiente:
-
-#### 🟦 Debian / Ubuntu / Mint / Pop!_OS
-
-```bash
-sudo apt-get update -qq && sudo apt-get install -y -qq \
-    libwebkit2gtk-4.0-dev \
-    libgtk-3-dev \
-    librsvg2-dev \
-    libayatana-appindicator3-dev \
-    libmpv-dev
-
-# 2. Clonar el repositorio
-git clone https://github.com/Angel-p-v/app-media-manager.git acryl
-cd acryl
-
-# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
-npm install
-npm run tauri:dev
-```
-
-#### 🟦 Arch Linux / Manjaro / EndeavourOS
+Acryl incluye un script que detecta tu gestor de paquetes, instala las
+dependencias del sistema y de desarrollo, clona el repositorio, compila la
+aplicación y crea la entrada `.desktop` para que la encuentres en el
+buscador de aplicaciones.
 
 ```bash
-sudo pacman -Sy --needed \
-    webkit2gtk \
-    gtk3 \
-    librsvg \
-    libayatana-appindicator \
-    libmpv
+# 1. Descargar y ejecutar el instalador
+curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/install.sh | bash
 
-# 2. Clonar el repositorio
+# 2. O clonar primero y ejecutar desde el repositorio
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
 cd acryl
-
-# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
-npm install
-npm run tauri:dev
+./install.sh
 ```
 
-#### 🟦 Fedora / RHEL / CentOS / AlmaLinux / Rocky Linux
+El script hace lo siguiente:
 
-```bash
-sudo dnf install -y \
-    webkit2gtk3-devel \
-    gtk3-devel \
-    librsvg2-devel \
-    libayatana-appindicator3-devel \
-    libmpv-devel
+1. Detecta el gestor de paquetes (`apt`, `pacman`, `dnf`, `zypper` o `apk`).
+2. Instala las dependencias de sistema (`libwebkit2gtk`, `libgtk-3`, `librsvg2`, `libmpv`, etc.).
+3. Instala Node.js (≥ 22) y Rust/Cargo (≥ 1.90) si faltan o están desactualizados.
+4. Clona el repositorio (o lo actualiza si ya existe).
+5. Instala dependencias de Node.js y compila con Tauri (`.deb`, AppImage o `.rpm`).
+6. Instala el paquete generado y crea el archivo `.desktop` en
+   `~/.local/share/applications`.
 
-# 2. Clonar el repositorio
-git clone https://github.com/Angel-p-v/app-media-manager.git acryl
-cd acryl
+Al terminar, busca **Acryl** en el menú de aplicaciones o ejecuta `acryl`.
 
-# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
-npm install
-npm run tauri:dev
-```
-
-#### 🟦 openSUSE / SUSE Linux Enterprise
-
-```bash
-sudo zypper install -y \
-    libwebkit2gtk-4_0-devel \
-    gtk3-devel \
-    librsvg2-devel \
-    libayatana-appindicator3-devel \
-    libmpv-devel
-
-# 2. Clonar el repositorio
-git clone https://github.com/Angel-p-v/app-media-manager.git acryl
-cd acryl
-
-# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
-npm install
-npm run tauri:dev
-```
-
-#### 🟦 Alpine Linux
-
-```bash
-sudo apk add \
-    webkit2gtk-dev \
-    gtk+3-dev \
-    librsvg-dev \
-    libayatana-appindicator3-dev \
-    libmpv-dev
-
-# 2. Clonar el repositorio
-git clone https://github.com/Angel-p-v/app-media-manager.git acryl
-cd acryl
-
-# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
-npm install
-npm run tauri:dev
-```
+> **Nota:** el script usa `sudo` para instalar dependencias de sistema y el paquete generado. La entrada `.desktop` y el icono se instalan a nivel de usuario (`~/.local`), sin necesidad de root.
 
 ### Instaladores nativos
 
-Una vez compilado, los instaladores se generan en:
+Una vez compilado, los instaladores también se generan en:
 
 ```
 src-tauri/target/release/bundle/
 ```
 
 Formatos disponibles: `.deb`, AppImage, `.rpm`.
+
+### Modo desarrollo
+
+Si quieres ejecutar la aplicación en modo desarrollo (sin instalar):
+
+```bash
+git clone https://github.com/Angel-p-v/app-media-manager.git acryl
+cd acryl
+npm install
+npm run tauri:dev
+```
 
 ---
 
@@ -311,6 +254,7 @@ app-media-manager/
 ├── LICENSE                   Licencia MIT
 ├── README.md                 Este archivo
 └── package.json              Scripts raíz que delegan a frontend/
+├── install.sh                Instalador automático (detecta gestor de paquetes, dependencias, .desktop)
 ```
 
 ---
