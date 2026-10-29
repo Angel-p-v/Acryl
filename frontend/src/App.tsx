@@ -1,4 +1,5 @@
 import { SearchBar } from './components/SearchBar';
+import { VideoPlayer } from './components/VideoPlayer';
 import './index.css';
 
 import type { JSX } from 'react';
@@ -14,6 +15,7 @@ export function App(): JSX.Element {
       </header>
       <main className="app-main">
         <SearchBar dbPath={DEFAULT_DB_PATH} />
+        <VideoPlayer />
       </main>
     </div>
   );

@@ -8,3 +8,10 @@ export type Media = {
   readonly year: number | null;
   readonly folder_path: string;
 };
+
+export type PlayerStatus = {
+  readonly timePosition: number;
+  readonly duration: number;
+  readonly paused: boolean;
+  readonly volume: number;
+};
