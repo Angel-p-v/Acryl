@@ -63,6 +63,20 @@ npm run tauri:build
 
 ---
 
+## 📦 Instalación desde instaladores
+
+Descarga el instalador para tu distribución desde [GitHub Releases](https://github.com/Angel-p-v/app-media-manager/releases):
+
+| Formato | Distribuciones | Comando de instalación |
+|---------|---------------|----------------------|
+| `.deb` | Debian, Ubuntu, Mint | `sudo dpkg -i media-manager_amd64.deb` |
+| `.rpm` | Fedora, RHEL, openSUSE | `sudo rpm -i media-manager.x86_64.rpm` |
+| `.AppImage` | Cualquier Linux | `chmod +x media-manager.AppImage && ./media-manager.AppImage` |
+
+Después de instalar con `.deb` o `.rpm`, el comando `media-manager` estará disponible en tu PATH y aparecerá en el menú de aplicaciones.
+
+---
+
 ## ✨ Características principales
 
 | Capacidad | Estado |
@@ -71,8 +85,8 @@ npm run tauri:build
 | 🗃️ Índice local en SQLite con FTS5 | ✅ Hito 2 completado |
 | 🔍 Búsqueda de medios desde el frontend | ✅ Hito 1 completado |
 | 🖼️ Pósteres de medios en alta resolución | ✅ Hito 1 completado |
-| ▶️ Reproductor integrado (`libmpv` / GStreamer) | 🔄 Hito 3 pendiente |
-| 📦 Instaladores nativos Linux (`.deb`, AppImage, `.rpm`) | 🔄 Hito 5 pendiente |
+| ▶️ Reproductor integrado (`libmpv` / GStreamer) | ✅ Hito 3 completado |
+| 📦 Instaladores nativos Linux (`.deb`, AppImage, `.rpm`) | ✅ Hito 5 completado |
 
 ---
 
@@ -194,9 +208,9 @@ Antes de pushear, ambos deben pasar:
 |------|-----------|--------|
 | Hito 1 | Prototipo mínimo: ventana Tauri, lista desde SQLite, póster, búsqueda | ✅ completado |
 | Hito 2 | Capa de dominio en Rust (db, library, metadata) | ✅ completado |
-| Hito 3 | Reproductor integrado (`libmpv` / GStreamer) | 🔄 pendiente |
-| Hito 4 | UI completa (detalles, favoritos, historial) | 🔄 pendiente |
-| Hito 5 | Empaquetado Linux (`.deb`, AppImage, `.rpm`) | 🔄 pendiente |
+| Hito 3 | Reproductor integrado (`libmpv` / GStreamer) | ✅ completado |
+| Hito 4 | UI completa (detalles, favoritos, historial) | ✅ completado |
+| Hito 5 | Empaquetado Linux (`.deb`, AppImage, `.rpm`) | ✅ completado |
 
 Ver [`PLAN_DESKTOP.md`](./PLAN_DESKTOP.md) para el plan detallado.
 

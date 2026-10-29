@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=media-manager
+GenericName=Gestor de contenido multimedia
+Comment=Indexa y reproduce tu colección de series, anime y películas
+Exec=media-manager %F
+Icon=media-manager
+Terminal=false
+Type=Application
+Categories=AudioVideo;Player;AudioVideo;
+MimeType=video/mp4;video/mkv;video/avi;video/webm;video/quicktime;
+Keywords=media;video;movie;series;anime;library;
