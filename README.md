@@ -150,114 +150,96 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 
 ## 📦 Instalación
 
-### Instalación por distribución
+### 🚀 Cómo instalar
 
-Elige tu distribución y ejecuta el bloque correspondiente:
+Acryl incluye un script que detecta tu gestor de paquetes, instala las
+dependencias del sistema y de desarrollo, clona el repositorio, compila la
+aplicación y crea la entrada `.desktop` para que la encuentres en el
+buscador de aplicaciones.
 
-#### 🟦 Debian / Ubuntu / Mint / Pop!_OS
+Elige una de las dos opciones:
 
-```bash
-sudo apt-get update -qq && sudo apt-get install -y -qq \
-    libwebkit2gtk-4.0-dev \
-    libgtk-3-dev \
-    librsvg2-dev \
-    libayatana-appindicator3-dev \
-    libmpv-dev
-
-# 2. Clonar el repositorio
-git clone https://github.com/Angel-p-v/app-media-manager.git acryl
-cd acryl
-
-# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
-npm install
-npm run tauri:dev
-```
-
-#### 🟦 Arch Linux / Manjaro / EndeavourOS
+**Opción A — Ejecutar directamente (sin clonar):**
 
 ```bash
-sudo pacman -Sy --needed \
-    webkit2gtk \
-    gtk3 \
-    librsvg \
-    libayatana-appindicator \
-    libmpv
-
-# 2. Clonar el repositorio
-git clone https://github.com/Angel-p-v/app-media-manager.git acryl
-cd acryl
-
-# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
-npm install
-npm run tauri:dev
+curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/scripts/install.sh | bash
 ```
 
-#### 🟦 Fedora / RHEL / CentOS / AlmaLinux / Rocky Linux
+**Opción B — Clonar el repositorio y ejecutar desde allí:**
 
 ```bash
-sudo dnf install -y \
-    webkit2gtk3-devel \
-    gtk3-devel \
-    librsvg2-devel \
-    libayatana-appindicator3-devel \
-    libmpv-devel
-
-# 2. Clonar el repositorio
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
 cd acryl
-
-# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
-npm install
-npm run tauri:dev
+./scripts/install.sh
 ```
 
-#### 🟦 openSUSE / SUSE Linux Enterprise
+El script hace lo siguiente:
+
+1. Detecta el gestor de paquetes (`apt`, `pacman`, `dnf`, `zypper` o `apk`).
+2. Instala las dependencias de sistema (`libwebkit2gtk`, `libgtk-3`, `librsvg2`, `libmpv`, etc.).
+3. Instala Node.js (≥ 22) y Rust/Cargo (≥ 1.90) si faltan o están desactualizados.
+4. Clona el repositorio (o lo actualiza si ya existe).
+5. Instala dependencias de Node.js y compila con Tauri (`.deb`, AppImage o `.rpm`).
+6. Instala el paquete generado y crea el archivo `.desktop` en
+   `~/.local/share/applications`.
+
+Al terminar, busca **Acryl** en el menú de aplicaciones o ejecuta `acryl`.
+
+> **Nota:** el script usa `sudo` para instalar dependencias de sistema y el paquete generado. La entrada `.desktop` y el icono se instalan a nivel de usuario (`~/.local`), sin necesidad de root.
+
+---
+
+### 🗑️ Cómo desinstalar
+
+Si ya no necesitas Acryl, ejecuta el desinstalador:
+
+**Opción A — Ejecutar directamente (sin clonar):**
 
 ```bash
-sudo zypper install -y \
-    libwebkit2gtk-4_0-devel \
-    gtk3-devel \
-    librsvg2-devel \
-    libayatana-appindicator3-devel \
-    libmpv-devel
-
-# 2. Clonar el repositorio
-git clone https://github.com/Angel-p-v/app-media-manager.git acryl
-cd acryl
-
-# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
-npm install
-npm run tauri:dev
+curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/scripts/uninstall.sh | bash
 ```
 
-#### 🟦 Alpine Linux
+**Opción B — Clonar el repositorio y ejecutar desde allí:**
 
 ```bash
-sudo apk add \
-    webkit2gtk-dev \
-    gtk+3-dev \
-    librsvg-dev \
-    libayatana-appindicator3-dev \
-    libmpv-dev
-
-# 2. Clonar el repositorio
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
 cd acryl
-
-# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
-npm install
-npm run tauri:dev
+./scripts/uninstall.sh
 ```
+
+El desinstalador elimina:
+
+- La entrada `.desktop` de `~/.local/share/applications`.
+- El icono de `~/.local/share/icons/hicolor/scalable/apps/`.
+- El binario AppImage de `~/.local/bin/` (si se usó como fallback).
+- El paquete nativo (`.deb` o `.rpm`) si fue instalado con el script.
+
+**No borra** el código fuente clonado ni la base de datos de tu biblioteca (`acril.db`), para que no pierdas tus medios indexados.
+
+---
 
 ### Instaladores nativos
 
-Una vez compilado, los instaladores se generan en:
+Una vez compilado, los instaladores también se generan en:
 
 ```
 src-tauri/target/release/bundle/
 ```
 
 Formatos disponibles: `.deb`, AppImage, `.rpm`.
+
+---
+
+### Modo desarrollo
+
+Si quieres ejecutar la aplicación en modo desarrollo (sin instalar):
+
+```bash
+git clone https://github.com/Angel-p-v/app-media-manager.git acryl
+cd acryl
+npm install
+npm run tauri:dev
+```
 
 ---
 
@@ -311,6 +293,9 @@ app-media-manager/
 ├── LICENSE                   Licencia MIT
 ├── README.md                 Este archivo
 └── package.json              Scripts raíz que delegan a frontend/
+├── scripts/                  Scripts de instalación y desinstalación
+│   ├── install.sh            Instalador automático
+│   └── uninstall.sh          Desinstalador
 ```
 
 ---
