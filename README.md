@@ -75,30 +75,36 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘   │
 │                               │                                             │
 │                               ▼                                             │
-│                    ┌─────────────────────────┐                             │
-│                    │     Base de datos       │                             │
-│                    │     SQLite (WAL + FTS5) │                             │
-│                    │     ┌─────────────┐     │                             │
-│                    │     │   acryl.db  │     │                             │
-│                    │     │             │     │                             │
-│                    │     │  ┌─────┐   │     │                             │
-│                    │     │  │media│   │     │                             │
-│                    │     │  └─────┘   │     │                             │
-│                    │     │  ┌─────┐   │     │                             │
-│                    │     │  │files│   │     │                             │
-│                    │     │  └─────┘   │     │                             │
-│                    │     │  ┌─────┐   │     │                             │
-│                    │     │  │playb│   │     │                             │
-│                    │     │  │ack_ │   │     │                             │
-│                    │     │  │h    │   │     │                             │
-│                    │     │  └─────┘   │     │                             │
-│                    │     │  ┌─────┐   │     │                             │
-│                    │     │  │migra│   │     │                             │
-│                    │     │  │tion │   │     │                             │
-│                    │     │  └─────┘   │     │                             │
-│                    │     └─────────────┘     │                             │
-│                    └─────────────────────────┘                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+│                    ┌─────────────────────────────────────────┐              │
+│                    │           BASE DE DATOS SQLite           │              │
+│                    │  ┌─────────────┐  ┌─────────────┐  ┌─────────┐  │      │
+│                    │  │   media     │  │   files     │  │ playback  │  │      │
+│                    │  │   ┌─────┐   │  │   ┌─────┐   │  │   history   │  │      │
+│                    │  │   │ id  │   │  │   │ id  │   │  │   ┌─────┐   │  │      │
+│                    │  │   │ title│   │  │   │ media_id│   │  │ media_id│   │  │      │
+│                    │  │   │ year │   │  │   │ season│   │  │   │played_at│   │  │      │
+│                    │  │   │ type │   │  │   │ episode│   │  │   │ position│   │  │      │
+│                    │  │   │ folder│   │  │   │ title│   │  │   │ duration│   │  │      │
+│                    │  │   │ path │   │  │   │ file_path│   │  │   └─────┘   │  │      │
+│                    │  │   │ poster│   │  │   │ size   │   │  │             │  │      │
+│                    │  │   │_path │   │  │   │_bytes │   │  │             │  │      │
+│                    │  │   │ synopsis│   │  │   │mtime│   │  │             │  │      │
+│                    │  │   │_path │   │  │   │_ms │   │  │             │  │      │
+│                    │  │   │is_fav│   │  │   │ indexed│   │  │             │  │      │
+│                    │  │   │_ite │   │  │   │_at │   │  │             │  │      │
+│                    │  │   │is_watc│   │  │   │ │   │   │  │             │  │      │
+│                    │  │   │_hed │   │  │   │ │   │   │  │             │  │      │
+│                    │  │   │metadata│   │  │   │ │   │   │  │             │  │      │
+│                    │  │   │_fetched│   │  │   │ │   │   │  │             │  │      │
+│                    │  │   │_at   │   │  │   │ │   │   │  │             │  │      │
+│                    │  │   └─────┘   │  │   │ │   │   │  │             │  │      │
+│                    │  └─────────────┘  │   │ │   │   │  │             │  │      │
+│                    │                   │   │ │   │   │  │             │  │      │
+│                    │                   │   └─────┘   │  │             │  │      │
+│                    │                   └─────────────┘  │             │  │      │
+│                    └─────────────────────────────────────┘             │      │
+│                                                                          │      │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Flujo de datos
@@ -122,14 +128,14 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 
 ### Dependencias de sistema (Linux)
 
-| Paquete | Propósito |
-|---------|-----------|
-| `libwebkit2gtk-4.0-dev` | WebView del sistema (Tauri) |
-| `libgtk-3-dev` | Interfaz gráfica (Tauri) |
-| `librsvg2-dev` | Renderizado de SVG (Tauri) |
-| `libayatana-appindicator3-dev` | Indicadores de bandeja (opcional) |
-| `libmpv-dev` | Reproducción de vídeo integrado |
-| `xvfb` | Servidor virtual X11 (solo pruebas E2E) |
+| Paquete | Propósito | Distribución |
+|---------|-----------|--------------|
+| `libwebkit2gtk-4.0-dev` | WebView del sistema (Tauri) | Todas |
+| `libgtk-3-dev` | Interfaz gráfica (Tauri) | Todas |
+| `librsvg2-dev` | Renderizado de SVG (Tauri) | Todas |
+| `libayatana-appindicator3-dev` | Indicadores de bandeja (opcional) | Todas |
+| `libmpv-dev` | Reproducción de vídeo integrado | Todas |
+| `xvfb` | Servidor virtual X11 (solo pruebas E2E) | Todas |
 
 ### Herramientas de desarrollo
 
@@ -144,69 +150,11 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 
 ## 📦 Instalación
 
-### Instalación completa (un solo bloque)
+### Instalación por distribución
 
-Copia y pega este bloque completo en tu terminal. Detecta automáticamente tu distribución, instala las dependencias del sistema, clona el repositorio, instala dependencias de Node.js y compila la aplicación en modo desarrollo:
+Elige tu distribución y ejecuta el bloque correspondiente:
 
-```bash
-# Detectar distribución e instalar dependencias del sistema
-if command -v apt-get &>/dev/null; then
-  # Debian / Ubuntu / Mint / Pop!_OS
-  sudo apt-get update -qq && sudo apt-get install -y -qq \
-    libwebkit2gtk-4.0-dev \
-    libgtk-3-dev \
-    librsvg2-dev \
-    libayatana-appindicator3-dev \
-    libmpv-dev
-elif command -v dnf &>/dev/null; then
-  # Fedora / RHEL / CentOS / AlmaLinux / Rocky Linux
-  sudo dnf install -y \
-    webkit2gtk3-devel \
-    gtk3-devel \
-    librsvg2-devel \
-    libayatana-appindicator3-devel \
-    libmpv-devel
-elif command -v pacman &>/dev/null; then
-  # Arch Linux / Manjaro / EndeavourOS
-  sudo pacman -Sy --needed \
-    webkit2gtk \
-    gtk3 \
-    librsvg \
-    libayatana-appindicator \
-    libmpv
-elif command -v zypper &>/dev/null; then
-  # openSUSE / SUSE Linux Enterprise
-  sudo zypper install -y \
-    libwebkit2gtk-4_0-devel \
-    gtk3-devel \
-    librsvg2-devel \
-    libayatana-appindicator3-devel \
-    libmpv-devel
-elif command -v apk &>/dev/null; then
-  # Alpine Linux
-  sudo apk add \
-    webkit2gtk-dev \
-    gtk+3-dev \
-    librsvg-dev \
-    libayatana-appindicator3-dev \
-    libmpv-dev
-else
-  echo "Distribución no reconocida. Instala manualmente: libwebkit2gtk, libgtk-3, librsvg2, libayatana-appindicator3, libmpv"
-  exit 1
-fi
-
-# Clonar el repositorio
-git clone https://github.com/Angel-p-v/app-media-manager.git acryl
-cd acryl
-
-# Instalar dependencias de Node.js y ejecutar en modo desarrollo
-npm install
-npm run tauri:dev
-```
-
-### Instalación por distribución (paso a paso)
-
-#### 🟦 apt (Debian / Ubuntu / Mint / Pop!_OS)
+#### 🟦 Debian / Ubuntu / Mint / Pop!_OS
 
 ```bash
 sudo apt-get update -qq && sudo apt-get install -y -qq \
@@ -215,6 +163,7 @@ sudo apt-get update -qq && sudo apt-get install -y -qq \
     librsvg2-dev \
     libayatana-appindicator3-dev \
     libmpv-dev
+
 # 2. Clonar el repositorio
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
 cd acryl
@@ -224,7 +173,7 @@ npm install
 npm run tauri:dev
 ```
 
-#### 🟦 pacman (Arch Linux / Manjaro / EndeavourOS)
+#### 🟦 Arch Linux / Manjaro / EndeavourOS
 
 ```bash
 sudo pacman -Sy --needed \
@@ -233,6 +182,7 @@ sudo pacman -Sy --needed \
     librsvg \
     libayatana-appindicator \
     libmpv
+
 # 2. Clonar el repositorio
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
 cd acryl
@@ -242,7 +192,7 @@ npm install
 npm run tauri:dev
 ```
 
-#### 🟦 dnf (Fedora / RHEL / CentOS / AlmaLinux / Rocky Linux)
+#### 🟦 Fedora / RHEL / CentOS / AlmaLinux / Rocky Linux
 
 ```bash
 sudo dnf install -y \
@@ -251,6 +201,7 @@ sudo dnf install -y \
     librsvg2-devel \
     libayatana-appindicator3-devel \
     libmpv-devel
+
 # 2. Clonar el repositorio
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
 cd acryl
@@ -260,7 +211,7 @@ npm install
 npm run tauri:dev
 ```
 
-#### 🟦 zypper (openSUSE / SUSE Linux Enterprise)
+#### 🟦 openSUSE / SUSE Linux Enterprise
 
 ```bash
 sudo zypper install -y \
@@ -269,6 +220,7 @@ sudo zypper install -y \
     librsvg2-devel \
     libayatana-appindicator3-devel \
     libmpv-devel
+
 # 2. Clonar el repositorio
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
 cd acryl
@@ -278,7 +230,7 @@ npm install
 npm run tauri:dev
 ```
 
-#### 🟦 apk (Alpine Linux)
+#### 🟦 Alpine Linux
 
 ```bash
 sudo apk add \
@@ -287,6 +239,7 @@ sudo apk add \
     librsvg-dev \
     libayatana-appindicator3-dev \
     libmpv-dev
+
 # 2. Clonar el repositorio
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
 cd acryl
