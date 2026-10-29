@@ -95,7 +95,7 @@ src-tauri/                ← Rust
 ### Hito 5 — Empaquetado Linux (Semanas 14–15)
 - Instalador nativo Linux (`.deb`, AppImage o `.rpm`).
 - Icono de aplicación, entrada de menú, archivo `.desktop`.
-- **Criterio de aceptación:** se instala y ejecuta en Linux sin dependencias manuales de Rust/Node.
+- **Criterio de aceptación:** se instala y ejecuta en Linux sin dependencias manuales de Rust/Node. ✅ cumplido
 
 ---
 
@@ -135,14 +135,14 @@ src-tauri/                ← Rust
 |------|-----------|--------|
 | Hito 1 | Prototipo mínimo: ventana Tauri, lista desde SQLite, póster, búsqueda | ✅ completado |
 | Hito 2 | Capa de dominio en Rust (db, library, metadata) | ✅ completado |
-| Hito 3 | Reproductor integrado (libmpv/GStreamer) | pendiente |
-| Hito 4 | UI completa | pendiente |
-| Hito 5 | Empaquetado Linux | pendiente |
+| Hito 3 | Reproductor integrado (libmpv) | ✅ completado |
+| Hito 4 | UI completa (detalles, favoritos, visto, navegación) | ✅ completado |
+| Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ✅ completado |
 
 ## 9. Próximo paso inmediato
 
-Comenzar el Hito 3: bindings a `libmpv` (o GStreamer) desde Rust para
-reproductor integrado dentro de la ventana de la app.
+Todos los hitos del plan están completados. El proyecto está listo para
+publicación en GitHub Releases con instaladores nativos Linux.
 
 ---
 
