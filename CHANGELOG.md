@@ -6,6 +6,28 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 versionado [SemVer](https://semver.org/lang/es/). A partir de `v1.0.0`, release-please
 mantiene este archivo a partir de los commits convencionales.
 
+## [3.4.0](https://github.com/Angel-p-v/app-media-manager/compare/v3.3.0...v3.4.0) (2026-10-29)
+
+
+### Features
+
+* **backend:** esqueleto del backend Tauri (Rust) para el Hito 1 ([f21a877](https://github.com/Angel-p-v/app-media-manager/commit/f21a87751b1495259ab9d0d99f9579780236428e))
+* **ci-cd:** tests E2E y CI/CD completo ([#9](https://github.com/Angel-p-v/app-media-manager/issues/9)) ([929ef07](https://github.com/Angel-p-v/app-media-manager/commit/929ef077ca91ad89e32ccdf0a42dcd24c360b0d4))
+* **db:** comandos Tauri para listar medios desde SQLite (Hito 1) ([644f970](https://github.com/Angel-p-v/app-media-manager/commit/644f9706efe2165f6ae15aabba7f88b814a60d4a))
+* Hito 2 — capa de dominio en Rust (db + comandos Tauri) ([#2](https://github.com/Angel-p-v/app-media-manager/issues/2)) ([de8630c](https://github.com/Angel-p-v/app-media-manager/commit/de8630c6a4e3db1dc100c6890646f19ae027cd31))
+* **hito-3:** reproductor integrado con libmpv ([#5](https://github.com/Angel-p-v/app-media-manager/issues/5)) ([98557c7](https://github.com/Angel-p-v/app-media-manager/commit/98557c712569adc399fab9c59ea949814826b4ea))
+* **hito-4:** UI completa - detalles, favoritos, visto y navegación ([#6](https://github.com/Angel-p-v/app-media-manager/issues/6)) ([fceec7c](https://github.com/Angel-p-v/app-media-manager/commit/fceec7ccef134948cae11f9db6e3ab38be676e3e))
+* **hito-5:** empaquetado Linux con instaladores nativos ([#8](https://github.com/Angel-p-v/app-media-manager/issues/8)) ([c5765e1](https://github.com/Angel-p-v/app-media-manager/commit/c5765e1dc4e0aa9e38c2047d8c0d95e4b78ed432))
+* **ui:** esqueleto del frontend React + TypeScript + Vite (Hito 1) ([6ab5cbb](https://github.com/Angel-p-v/app-media-manager/commit/6ab5cbbcafa36cdaf8b02c2e01ac0dc8f2e7d323))
+* **ui:** lista de medios, busqueda y poster (Hito 1 - prototipo minimo) ([7473261](https://github.com/Angel-p-v/app-media-manager/commit/74732615909c0322815d6b9fd2da014e00c78ef5))
+
+
+### Bug Fixes
+
+* **ci:** pasa verify en node 22/24/26, audit frontend y clippy Rust ([#10](https://github.com/Angel-p-v/app-media-manager/issues/10)) ([1378f27](https://github.com/Angel-p-v/app-media-manager/commit/1378f27efe322b394ba08566ba83dbbc1092a5e8))
+* **ci:** resuelve vulnerabilidades npm audit y advertencias clippy ([#7](https://github.com/Angel-p-v/app-media-manager/issues/7)) ([824420a](https://github.com/Angel-p-v/app-media-manager/commit/824420a9d1ae1f8f8fcb749e531f4faa063c0e8a))
+* **ui:** tipos de Node y skipLibCheck para que typecheck del frontend pase ([19dc882](https://github.com/Angel-p-v/app-media-manager/commit/19dc882f28345610259d6438e73429e52fa46652))
+
 ## [3.3.0](https://github.com/Angel-p-v/media-manager/compare/v3.2.0...v3.3.0) (2026-10-27)
 
 
