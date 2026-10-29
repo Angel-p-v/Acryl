@@ -9,16 +9,24 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+/// Ruta por defecto del directorio de datos de la aplicación (base de datos,
+/// copias de seguridad, caché). Respeta `XDG_DATA_HOME` o cae a
+/// `~/.local/share/acryl`.
+pub fn default_data_dir() -> PathBuf {
+    if let Ok(env) = std::env::var("XDG_DATA_HOME") {
+        return PathBuf::from(env).join("acryl");
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home).join(".local/share/acryl");
+    }
+    PathBuf::from("acryl-data")
+}
+
 /// Ruta por defecto del fichero de configuración.
 ///
-/// Se resuelve como `<CARGO_MANIFEST_DIR>/config.yaml` en desarrollo y
-/// como `<exe_dir>/config.yaml` en producción. El usuario puede
-// sobrescribirla con la variable de entorno `MEDIA_MANAGER_CONFIG`.
-/// Ruta por defecto del fichero de configuración.
-///
-/// Se resuelve como `<CARGO_MANIFEST_DIR>/config.yaml` en desarrollo y
-/// como `<exe_dir>/config.yaml` en producción. El usuario puede
-/// sobrescribirla con la variable de entorno `MEDIA_MANAGER_CONFIG`.
+/// Respeta `XDG_CONFIG_HOME` o cae a `~/.config/acryl/config.yaml`. El
+/// usuario puede sobrescribirla con la variable de entorno
+/// `MEDIA_MANAGER_CONFIG`.
 pub fn default_config_path() -> PathBuf {
     if let Ok(env) = std::env::var("MEDIA_MANAGER_CONFIG") {
         return PathBuf::from(env);
@@ -31,12 +39,13 @@ pub fn default_config_path() -> PathBuf {
         return Path::new(&manifest_dir).join("config.yaml");
     }
 
-    // En producción, junto al ejecutable.
-    if let Some(exe_dir) = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-    {
-        return exe_dir.join("config.yaml");
+    // En producción, usamos directorios estándar de usuario escribibles,
+    // nunca junto al ejecutable (un AppImage monta como solo lectura).
+    if let Ok(env) = std::env::var("XDG_CONFIG_HOME") {
+        return PathBuf::from(env).join("acryl/config.yaml");
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home).join(".config/acryl/config.yaml");
     }
 
     PathBuf::from("config.yaml")
@@ -76,15 +85,40 @@ pub struct ConfigState {
 impl ConfigState {
     /// Crea un nuevo estado de configuración cargando desde disco.
     /// Si el fichero no existe, se crea con los valores por defecto.
+    ///
+    /// Las rutas por defecto (config y base de datos) se resuelven en
+    /// directorios de usuario escribibles (`~/.config/acryl/` y
+    /// `~/.local/share/acryl/`), nunca junto al ejecutable, para evitar
+    /// fallos en sistemas de archivos de solo lectura (AppImage, Flatpak,
+    /// etc.).
     pub fn new() -> Result<Self, String> {
         let config_path = default_config_path();
+
+        // Asegurar que el directorio de configuración existe.
+        if let Some(parent) = config_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+
         let config = if config_path.exists() {
             Self::load_from_file(&config_path)?
         } else {
-            let config = AppConfig::default();
+            let mut config = AppConfig::default();
+            // Si db_path es el valor por defecto relativo, usar el directorio
+            // de datos del usuario (escriturable).
+            if config.db_path == "acryl.db" {
+                config.db_path = default_data_dir()
+                    .join("acryl.db")
+                    .to_string_lossy()
+                    .to_string();
+            }
             Self::save_to_file(&config_path, &config)?;
             config
         };
+
+        // Asegurar que el directorio de datos de la base de datos existe.
+        if let Some(parent) = Path::new(&config.db_path).parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
 
         Ok(Self {
             config: Mutex::new(config),
