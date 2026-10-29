@@ -1,0 +1,295 @@
+//! Repositorio de medios.
+
+use crate::db::file_repo::FileRepository;
+use rusqlite::{Connection, Result as RusqliteResult, params};
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Media {
+    pub id: i64,
+    pub r#type: String,
+    pub title: String,
+    pub sort_title: String,
+    pub year: Option<i32>,
+    pub folder_path: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub poster_path: Option<String>,
+    pub synopsis: Option<String>,
+    pub metadata_fetched_at: Option<String>,
+    pub is_favorite: bool,
+    pub is_watched: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct MediaInput {
+    pub r#type: String,
+    pub title: String,
+    pub sort_title: String,
+    pub year: Option<i32>,
+    pub folder_path: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ListMediaOptions {
+    pub r#type: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    pub order_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SearchMediaOptions {
+    pub r#type: Option<String>,
+    pub limit: Option<i64>,
+}
+
+pub struct MediaRepository<'a> {
+    conn: &'a mut Connection,
+}
+
+impl<'a> MediaRepository<'a> {
+    pub fn new(conn: &'a mut Connection) -> Self {
+        Self { conn }
+    }
+
+    pub fn upsert(&mut self, input: &MediaInput) -> RusqliteResult<Media> {
+        let insert_result = self.conn.execute(
+            "INSERT INTO media (type, title, sort_title, year, folder_path)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![input.r#type, input.title, input.sort_title, input.year, input.folder_path],
+        );
+
+        let id: i64 = match insert_result {
+            Ok(_) => self.conn.last_insert_rowid(),
+            Err(rusqlite::Error::SqliteFailure(_, _)) => {
+                self.conn.execute(
+                    "UPDATE media SET type = ?1, title = ?2, sort_title = ?3,
+                     year = ?4, updated_at = datetime('now')
+                     WHERE folder_path = ?5",
+                    params![input.r#type, input.title, input.sort_title, input.year, input.folder_path],
+                )?;
+                self.conn.query_row(
+                    "SELECT id FROM media WHERE folder_path = ?1",
+                    params![input.folder_path],
+                    |row| row.get(0),
+                )?
+            }
+            Err(e) => return Err(e),
+        };
+
+        self.find_by_id(id)?.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    pub fn find_by_id(&mut self, id: i64) -> RusqliteResult<Option<Media>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
+                    is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at
+             FROM media WHERE id = ?1",
+        )?;
+        let row = stmt.query_row(params![id], map_media_row);
+        match row {
+            Ok(media) => Ok(Some(media)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn list(&mut self, options: ListMediaOptions) -> RusqliteResult<Vec<Media>> {
+        let mut sql = String::from(
+            "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
+                    is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at
+             FROM media",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(ref t) = options.r#type {
+            sql.push_str(" WHERE type = ?");
+            params_vec.push(Box::new(t.clone()));
+        }
+
+        let order_clause = match options.order_by.as_deref().unwrap_or("title") {
+            "added" => "ORDER BY created_at DESC",
+            "recent" => "ORDER BY updated_at DESC",
+            _ => "ORDER BY sort_title ASC",
+        };
+        sql.push_str(order_clause);
+        sql.push_str(" LIMIT ?");
+        params_vec.push(Box::new(options.limit.unwrap_or(500)));
+        sql.push_str(" OFFSET ?");
+        params_vec.push(Box::new(options.offset.unwrap_or(0)));
+
+        let params_slice: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows: Vec<Media> = stmt
+            .query_map(params_slice.as_slice(), map_media_row)?
+            .filter_map(Result::ok)
+            .collect();
+
+        Ok(rows)
+    }
+
+    pub fn search(
+        &mut self,
+        query: &str,
+        options: SearchMediaOptions,
+    ) -> RusqliteResult<Vec<Media>> {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return self.list(ListMediaOptions {
+                r#type: options.r#type,
+                limit: options.limit,
+                ..Default::default()
+            });
+        }
+
+        let fts_query = to_fts_query(trimmed);
+        let mut results: Vec<Media> = Vec::new();
+
+        if !fts_query.is_empty() {
+            let mut sql = String::from(
+                "SELECT m.id, m.type, m.title, m.sort_title, m.year, m.folder_path,
+                        m.created_at, m.updated_at,
+                        m.is_favorite, m.is_watched, m.poster_path, m.synopsis,
+                        m.metadata_fetched_at
+                 FROM media m
+                 JOIN media_fts f ON f.rowid = m.id
+                 WHERE media_fts MATCH ?1",
+            );
+            let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(fts_query)];
+
+            if let Some(ref t) = options.r#type {
+                sql.push_str(" AND m.type = ?");
+                params.push(Box::new(t.clone()));
+            }
+
+            sql.push_str(" ORDER BY bm25(media_fts), m.sort_title LIMIT ?");
+            params.push(Box::new(options.limit.unwrap_or(20)));
+
+            let params_slice: Vec<&dyn rusqlite::ToSql> =
+                params.iter().map(|p| p.as_ref()).collect();
+            let mut stmt = self.conn.prepare(&sql)?;
+            let rows: Vec<Media> = stmt
+                .query_map(params_slice.as_slice(), map_media_row)?
+                .filter_map(Result::ok)
+                .collect();
+            results.extend(rows);
+        }
+
+        if results.is_empty() {
+            let like_pattern = format!("%{}%", escape_like(trimmed));
+            let mut sql = String::from(
+                "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
+                        is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at
+                 FROM media
+                 WHERE sort_title LIKE ?1",
+            );
+            let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(like_pattern)];
+
+            if let Some(ref t) = options.r#type {
+                sql.push_str(" AND m.type = ?");
+                params.push(Box::new(t.clone()));
+            }
+
+            sql.push_str(" ORDER BY sort_title ASC LIMIT ?");
+            params.push(Box::new(options.limit.unwrap_or(20)));
+
+            let params_slice: Vec<&dyn rusqlite::ToSql> =
+                params.iter().map(|p| p.as_ref()).collect();
+            let mut stmt = self.conn.prepare(&sql)?;
+            let rows: Vec<Media> = stmt
+                .query_map(params_slice.as_slice(), map_media_row)?
+                .filter_map(Result::ok)
+                .collect();
+            results.extend(rows);
+        }
+
+        Ok(results)
+    }
+
+    pub fn toggle_favorite(&mut self, id: i64) -> RusqliteResult<bool> {
+        self.conn.execute(
+            "UPDATE media SET is_favorite = NOT is_favorite, updated_at = datetime('now') WHERE id = ?1",
+            params![id],
+        )?;
+        let value: bool = self.conn.query_row(
+            "SELECT is_favorite FROM media WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+        Ok(value)
+    }
+
+    pub fn toggle_watched(&mut self, id: i64) -> RusqliteResult<bool> {
+        self.conn.execute(
+            "UPDATE media SET is_watched = NOT is_watched, updated_at = datetime('now') WHERE id = ?1",
+            params![id],
+        )?;
+        let value: bool = self.conn.query_row(
+            "SELECT is_watched FROM media WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+        Ok(value)
+    }
+
+    pub fn list_folders(&mut self) -> RusqliteResult<Vec<String>> {
+        let mut stmt = self.conn.prepare("SELECT folder_path FROM media ORDER BY sort_title")?;
+        let rows: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
+    }
+
+    pub fn list_files_by_media(&mut self, media_id: i64) -> RusqliteResult<Vec<crate::db::file_repo::MediaFile>> {
+        let mut file_repo = FileRepository::new(self.conn);
+        file_repo.list_by_media(media_id)
+    }
+}
+
+fn map_media_row(row: &rusqlite::Row<'_>) -> RusqliteResult<Media> {
+    Ok(Media {
+        id: row.get(0)?,
+        r#type: row.get(1)?,
+        title: row.get(2)?,
+        sort_title: row.get(3)?,
+        year: row.get(4)?,
+        folder_path: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
+        is_favorite: row.get(8)?,
+        is_watched: row.get(9)?,
+        poster_path: row.get(10)?,
+        synopsis: row.get(11)?,
+        metadata_fetched_at: row.get(12)?,
+    })
+}
+
+fn to_fts_query(query: &str) -> String {
+    let terms: Vec<&str> = query
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    if terms.is_empty() {
+        return String::new();
+    }
+
+    terms
+        .iter()
+        .map(|t| format!("\"{}\"*", t))
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
+fn escape_like(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|c| match c {
+            '\\' | '%' | '_' => format!("\\{}", c).into_bytes().to_vec(),
+            _ => vec![c as u8],
+        })
+        .map(|b| b as char)
+        .collect::<String>()
+}
