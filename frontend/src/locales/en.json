@@ -17,6 +17,7 @@
     "files": "Files ({count})",
     "noTitle": "No title",
     "play": "Play",
+    "syncMetadata": "Sync metadata",
     "favorite": {
       "add": "Add to favorites",
       "remove": "Remove from favorites",

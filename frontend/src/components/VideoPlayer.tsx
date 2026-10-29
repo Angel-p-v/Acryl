@@ -8,6 +8,7 @@ import {
   playerStop,
   playerStatus,
   playerVolume,
+  recordPlayback,
 } from '../services/tauri';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -16,17 +17,6 @@ import type { JSX } from 'react';
 
 const UPDATE_INTERVAL_MS = 1000;
 
-/**
- * Componente de reproductor de vídeo integrado.
- *
- * Renderiza un contenedor para los frames de vídeo y controles de
- * reproducción (play, pausa, stop, barra de búsqueda, volumen) que se
- * comunican con el backend Rust a través de comandos Tauri.
- *
- * Nota: el renderizado real de frames de libmpv dentro del contenedor
- * se añade en una fase posterior; este componente provee la UI y la
- * integración con los comandos Tauri.
- */
 export function VideoPlayer(): JSX.Element {
   const { t } = useLanguage();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -45,8 +35,6 @@ export function VideoPlayer(): JSX.Element {
     }
   }, []);
 
-  // Actualizar la posición de reproducción periódicamente mientras se
-  // reproduce (no pausado).
   useEffect(() => {
     if (!status?.paused && status?.duration && status.duration > 0) {
       const timer = setInterval(() => {
@@ -120,6 +108,11 @@ export function VideoPlayer(): JSX.Element {
         await playerOpen(path);
         setFilePath(path);
         await updateStatus();
+        // Registrar reproducción en el historial (posición 0 al abrir;
+        // la duración real se actualiza al cambiar el estado del reproductor)
+        await recordPlayback('media-manager.db', 0, 0, 0).catch(() => {
+          // No fallar si no se puede registrar el historial
+        });
       } catch (e) {
         setError(e instanceof Error ? e.message : t('player.errorOpen'));
       } finally {
@@ -134,8 +127,6 @@ export function VideoPlayer(): JSX.Element {
     setInputPath('');
   }, [handleOpenFile, inputPath]);
 
-  // Wrappers que retornan void para los handlers de onClick (evitan
-  // no-misused-promises al descartar explícitamente la promesa).
   const onStop = useCallback((): void => {
     void handleStop();
   }, [handleStop]);

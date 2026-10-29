@@ -17,6 +17,7 @@
     "files": "Archivos ({count})",
     "noTitle": "Sin título",
     "play": "Reproducir",
+    "syncMetadata": "Sincronizar metadatos",
     "favorite": {
       "add": "Marcar favorito",
       "remove": "Quitar favorito",

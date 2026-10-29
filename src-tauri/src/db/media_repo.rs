@@ -370,6 +370,89 @@ impl<'a> MediaRepository<'a> {
         let files = file_repo.list_by_media(id)?;
         Ok(Some(MediaDetails { media, files }))
     }
+
+    /// Actualiza los metadatos obtenidos de TMDB/TVDB en un título.
+    pub fn update_metadata(
+        &mut self,
+        id: i64,
+        poster_path: Option<&str>,
+        synopsis: Option<&str>,
+    ) -> RusqliteResult<()> {
+        self.conn.execute(
+            "UPDATE media
+             SET poster_path = ?1, synopsis = ?2, metadata_fetched_at = datetime('now'),
+                 updated_at = datetime('now')
+             WHERE id = ?3",
+            params![poster_path, synopsis, id],
+        )?;
+        Ok(())
+    }
+
+    /// Registra una reproducción en el historial.
+    pub fn record_playback(
+        &mut self,
+        media_id: i64,
+        position: f64,
+        duration: f64,
+    ) -> RusqliteResult<()> {
+        self.conn.execute(
+            "INSERT INTO playback_history (media_id, played_at, position, duration)
+             VALUES (?1, datetime('now'), ?2, ?3)",
+            params![media_id, position, duration],
+        )?;
+        Ok(())
+    }
+
+    /// Lista el historial de reproducción (más recientes primero).
+    pub fn list_playback_history(
+        &mut self,
+        limit: Option<i64>,
+    ) -> RusqliteResult<Vec<PlaybackRecord>> {
+        let mut sql = String::from(
+            "SELECT ph.id, ph.media_id, m.title, ph.played_at, ph.position, ph.duration
+             FROM playback_history ph
+             JOIN media m ON m.id = ph.media_id
+             ORDER BY ph.played_at DESC",
+        );
+        if let Some(l) = limit {
+            sql.push_str(" LIMIT ?");
+            let mut stmt = self.conn.prepare(&sql)?;
+            let rows: Vec<PlaybackRecord> = stmt
+                .query_map(params![l], map_playback_row)?
+                .filter_map(Result::ok)
+                .collect();
+            Ok(rows)
+        } else {
+            let mut stmt = self.conn.prepare(&sql)?;
+            let rows: Vec<PlaybackRecord> = stmt
+                .query_map([], map_playback_row)?
+                .filter_map(Result::ok)
+                .collect();
+            Ok(rows)
+        }
+    }
+}
+
+/// Registro de reproducción individual.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PlaybackRecord {
+    pub id: i64,
+    pub media_id: i64,
+    pub title: String,
+    pub played_at: String,
+    pub position: f64,
+    pub duration: f64,
+}
+
+fn map_playback_row(row: &rusqlite::Row<'_>) -> RusqliteResult<PlaybackRecord> {
+    Ok(PlaybackRecord {
+        id: row.get(0)?,
+        media_id: row.get(1)?,
+        title: row.get(2)?,
+        played_at: row.get(3)?,
+        position: row.get(4)?,
+        duration: row.get(5)?,
+    })
 }
 
 /// Convierte una fila de SQLite a la entidad Media.

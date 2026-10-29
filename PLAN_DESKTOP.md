@@ -131,7 +131,7 @@ src-tauri/                ← Rust
 | Migración de datos SQLite | Leer el archivo `.db` existente directamente desde Rust, sin migración de datos |
 | Configuración YAML | Reemplazar `zod` por `serde` + `serde_yaml` en Rust |
 | Comunicación Rust↔TS | Comandos Tauri con tipado estricto en ambos extremos |
-| Metadatos externos | Rate limiting y caché TTL para llamadas a TMDB/TVDB; manejo de errores cuando no hay conexión |
+| Metadatos externos | TVmaze API (sin API key, plug-and-play); rate limiting 20 req/10s; manejo de errores cuando no hay conexión |
 | i18n | Estructura de archivos de traducción y selector de idioma persistente |
 
 ---
@@ -165,12 +165,12 @@ src-tauri/                ← Rust
 | Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ✅ completado |
 | Hito 6 | Configuración YAML en el backend | ✅ completado |
 | Hito 7 | Internacionalización (i18n) de la UI | ✅ completado |
-| Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ⏳ pendiente |
+| Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ✅ completado |
 | Hito 9 | Publicación automática en GitHub Releases | ⏳ pendiente |
 
 ## 9. Próximo paso inmediato
 
-El siguiente hito a implementar es el **Hito 8 — Metadatos automáticos TMDB/TVDB + historial de reproducción**, seguido del Hito 9 (publicación en releases).
+El siguiente hito a implementar es el **Hito 9 — Publicación automática en GitHub Releases**.
 
 ---
 

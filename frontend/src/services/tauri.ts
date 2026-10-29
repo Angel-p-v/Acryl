@@ -140,3 +140,65 @@ export async function toggleWatched(
     media_id: mediaId,
   });
 }
+
+/**
+ * Sincroniza los metadatos de un medio desde TMDB/TVDB mediante
+ * `sync_metadata_cmd`. Devuelve los metadatos obtenidos.
+ */
+export interface SyncMetadataResult {
+  readonly title?: string;
+  readonly synopsis?: string;
+  readonly poster_path?: string;
+  readonly release_date?: string;
+  readonly vote_average?: number;
+}
+
+export async function syncMetadata(
+  dbPath: string = DEFAULT_DB_PATH,
+  mediaId: number
+): Promise<SyncMetadataResult> {
+  return await invoke<SyncMetadataResult>('sync_metadata_cmd', {
+    db_path: dbPath,
+    media_id: mediaId,
+  });
+}
+
+/**
+ * Registra una reproducción en el historial mediante
+ * `record_playback_cmd`.
+ */
+export async function recordPlayback(
+  dbPath: string = DEFAULT_DB_PATH,
+  mediaId: number,
+  position: number,
+  duration: number
+): Promise<void> {
+  await invoke('record_playback_cmd', {
+    db_path: dbPath,
+    media_id: mediaId,
+    position,
+    duration,
+  });
+}
+
+/**
+ * Obtiene el historial de reproducción mediante `get_playback_history_cmd`.
+ */
+export interface PlaybackRecord {
+  readonly id: number;
+  readonly media_id: number;
+  readonly title: string;
+  readonly played_at: string;
+  readonly position: number;
+  readonly duration: number;
+}
+
+export async function getPlaybackHistory(
+  dbPath: string = DEFAULT_DB_PATH,
+  limit?: number
+): Promise<readonly PlaybackRecord[]> {
+  return await invoke<PlaybackRecord[]>('get_playback_history_cmd', {
+    db_path: dbPath,
+    limit,
+  });
+}
