@@ -59,30 +59,30 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 
 ```mermaid
 graph TD
-    Usuario((Usuario))
+    Usuario[[Usuario]]
     Frontend[Frontend<br/>React + TS]
     Commands[Commands<br/>Rust + Tauri]
     Decision{¿Consulta<br/>o reproduce?}
     SQLite[(SQLite<br/>acryl.db)]
-    MPV[libmpv<br/>FFI]
+    MPV[[libmpv<br/>FFI]]
     TVmaze[TVmaze<br/>API pública]
 
-    Usuario -->|busca / reproduce| Frontend
+    Usuario -->|busca| Frontend
     Frontend -->|invoke| Commands
     Commands --> Decision
     Decision -->|consulta| SQLite
     Decision -->|reproduce| MPV
     SQLite -->|datos| Frontend
     MPV -->|frames| Frontend
-    Commands -.->|sincroniza opcional| TVmaze
+    Commands -.->|sincroniza| TVmaze
     TVmaze -.->|metadatos| Decision
     Frontend -->|resultado| Usuario
 
-    classDef usuario fill:#f3f4f6,stroke:#4f46e5,stroke-width:2px
-    classDef frontend fill:#dbeafe,stroke:#2563eb,stroke-width:2px
-    classDef backend fill:#dcfce7,stroke:#059669,stroke-width:2px
-    classDef db fill:#e0e7ff,stroke:#4f46e5,stroke-width:2px
-    classDef ext fill:#fef3c7,stroke:#b45309,stroke-width:2px,stroke-dasharray: 5 5
+    classDef usuario fill:#e0e7ff,stroke:#6366f1,stroke-width:1px
+    classDef frontend fill:#f0fdf4,stroke:#10b981,stroke-width:1px
+    classDef backend fill:#fffbeb,stroke:#f59e0b,stroke-width:1px
+    classDef db fill:#fce7f3,stroke:#ec4899,stroke-width:1px
+    classDef ext fill:#f3f4f6,stroke:#9ca3af,stroke-width:1px,stroke-dasharray: 3 3
 
     class Usuario usuario
     class Frontend frontend
