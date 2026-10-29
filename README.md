@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/docs/assets/logo.svg" alt="Acryl" width="200"/>
+  <img src="src-tauri/icons/acryl.svg" alt="Acryl" width="200"/>
 </p>
 
 <h1 align="center">Acryl</h1>
@@ -58,8 +58,8 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza mantenibilidad, pruebas y seguridad:
 
 ```text
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         FRONTEND (React + TypeScript)                       │
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         FRONTEND (React + TypeScript)                   │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
 │  │   SearchBar  │  │  MediaList   │  │ MediaDetails │  │  VideoPlayer │   │
 │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘   │
@@ -73,13 +73,15 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 │  │   Commands   │  │   Config     │  │   Metadata   │  │   Player     │   │
 │  │  (adaptador) │  │   (YAML)     │  │   (TVmaze)   │  │   (libmpv)   │   │
 │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                      │
-│  │   MediaRepo  │  │   FileRepo   │  │   Playback   │                      │
-│  │   (SQLite)   │  │   (SQLite)   │  │   History    │                      │
-│  └──────────────┘  └──────────────┘  └──────────────┘                      │
 │                               │                                             │
 │                               ▼                                             │
-│                    SQLite (WAL + FTS5)  ──▶  acryl.db                       │
+│                    ┌─────────────────────────┐                             │
+│                    │     Base de datos       │                             │
+│                    │     SQLite (WAL + FTS5) │                             │
+│                    │     ┌─────────────┐     │                             │
+│                    │     │   acryl.db  │     │                             │
+│                    │     └─────────────┘     │                             │
+│                    └─────────────────────────┘                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -87,7 +89,7 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 
 1. El usuario busca o navega por medios en el frontend (React + TypeScript).
 2. El frontend invoca un comando Tauri que llega al backend Rust.
-3. El backend consulta SQLite y devuelve los resultados al frontend.
+3. El backend consulta **una única base de datos SQLite** (`acryl.db`) y devuelve los resultados al frontend.
 4. Para la reproducción, el backend utiliza libmpv vía FFI para abrir y controlar el archivo de vídeo dentro de la misma ventana.
 5. Los metadatos pueden sincronizarse con TVmaze (API pública, sin API key) para obtener pósteres y sinopsis automáticamente.
 
@@ -126,51 +128,67 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 
 ## 📦 Instalación
 
-### Instalación completa (un solo bloque)
+### Instalación completa (un solo bloque de copia y pega)
 
-Copia y pega este bloque en tu terminal. Instala las dependencias del sistema, clona el repositorio, instala dependencias de Node.js y compila la aplicación en modo desarrollo:
+Copia y pega este bloque completo en tu terminal. Detecta automáticamente tu distribución, instala las dependencias del sistema, clona el repositorio, instala dependencias de Node.js y ejecuta la aplicación en modo desarrollo:
 
 ```bash
-# Detectar distribución e instalar dependencias del sistema
+# 1. Instalar dependencias del sistema según tu distribución
 if command -v apt-get &>/dev/null; then
   # Debian / Ubuntu / Mint / Pop!_OS
-  sudo apt-get update && sudo apt-get install -y \
-    libwebkit2gtk-4.0-dev libgtk-3-dev librsvg2-dev \
-    libayatana-appindicator3-dev libmpv-dev
+  sudo apt-get update -qq && sudo apt-get install -y -qq \
+    libwebkit2gtk-4.0-dev \
+    libgtk-3-dev \
+    librsvg2-dev \
+    libayatana-appindicator3-dev \
+    libmpv-dev
 elif command -v dnf &>/dev/null; then
   # Fedora / RHEL / CentOS / AlmaLinux / Rocky Linux
   sudo dnf install -y \
-    webkit2gtk3-devel gtk3-devel librsvg2-devel \
-    libayatana-appindicator3-devel libmpv-devel
+    webkit2gtk3-devel \
+    gtk3-devel \
+    librsvg2-devel \
+    libayatana-appindicator3-devel \
+    libmpv-devel
 elif command -v pacman &>/dev/null; then
   # Arch Linux / Manjaro / EndeavourOS
   sudo pacman -Sy --needed \
-    webkit2gtk gtk3 librsvg libayatana-appindicator libmpv
+    webkit2gtk \
+    gtk3 \
+    librsvg \
+    libayatana-appindicator \
+    libmpv
 elif command -v zypper &>/dev/null; then
-  # openSUSE
+  # openSUSE / SUSE Linux Enterprise
   sudo zypper install -y \
-    libwebkit2gtk-4_0-devel gtk3-devel librsvg2-devel \
-    libayatana-appindicator3-devel libmpv-devel
+    libwebkit2gtk-4_0-devel \
+    gtk3-devel \
+    librsvg2-devel \
+    libayatana-appindicator3-devel \
+    libmpv-devel
 elif command -v apk &>/dev/null; then
   # Alpine Linux
   sudo apk add \
-    webkit2gtk-dev gtk+3-dev librsvg-dev \
-    libayatana-appindicator3-dev libmpv-dev
+    webkit2gtk-dev \
+    gtk+3-dev \
+    librsvg-dev \
+    libayatana-appindicator3-dev \
+    libmpv-dev
 else
   echo "Distribución no reconocida. Instala manualmente: libwebkit2gtk, libgtk-3, librsvg2, libayatana-appindicator3, libmpv"
   exit 1
 fi
 
-# Clonar repositorio
+# 2. Clonar el repositorio
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
 cd acryl
 
-# Instalar dependencias de Node.js y compilar
+# 3. Instalar dependencias de Node.js y ejecutar en modo desarrollo
 npm install
 npm run tauri:dev
 ```
 
-> **Nota:** Si prefieres no instalar dependencias globalmente, puedes usar `npx` o un contenedor Docker. Los instaladores nativos (`.deb`, AppImage, `.rpm`) se generan con `npm run tauri:build`.
+> **Nota:** Si prefieres no instalar dependencias globalmente, puedes usar un contenedor Docker. Los instaladores nativos (`.deb`, AppImage, `.rpm`) se generan con `npm run tauri:build`.
 
 ### Instaladores nativos
 
@@ -224,7 +242,9 @@ app-media-manager/
 │   ├── Cargo.toml
 │   ├── Cargo.lock
 │   ├── build.rs              Configuración de compilación (enlaza libmpv)
-│   └── tauri.conf.json       Configuración de Tauri (ventana, seguridad, bundle)
+│   ├── tauri.conf.json       Configuración de Tauri (ventana, seguridad, bundle)
+│   └── resources/
+│       └── acryl.desktop     Entrada .desktop para Linux
 ├── PLAN_DESKTOP.md           Plan de migración y hitos del proyecto
 ├── AGENTS.md                 Instrucciones para el desarrollo
 ├── CONTRIBUTING.md           Flujo de trabajo y Pull Requests
