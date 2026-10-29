@@ -58,29 +58,51 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza mantenibilidad, pruebas y seguridad:
 
 ```text
-                         BASE DE DATOS SQLite (acryl.db)
+                         ARQUITECTURA DE CAPAS
 
-┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│     media        │     │   media_files    │     │ playback_history │
-│──────────────────│     │──────────────────│     │──────────────────│
-│ id (PK)          │     │ id (PK)          │     │ id (PK)          │
-│ type             │─────┤ media_id (FK)    │─────┤ media_id (FK)    │
-│ title            │     │ season           │     │ played_at        │
-│ sort_title       │     │ episode          │     │ position         │
-│ year             │     │ title            │     │ duration         │
-│ folder_path      │     │ file_path (UQ)   │     │                  │
-│ poster_path      │     │ size_bytes       │     │                  │
-│ synopsis         │     │ mtime_ms         │     │                  │
-│ is_favorite      │     │ indexed_at       │     │                  │
-│ is_watched       │     └──────────────────┘     └──────────────────┘
-│ metadata_fetched_│
-│ _at              │
-└──────────────────┘
-         ▲
-         │
-         └── media_fts (FTS5 virtual table sobre media.title)
+┌──────────────────────────────────────────────────────────────────────┐
+│                      FRONTEND (React + TypeScript)                   │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
+│  │   SearchBar │  │  MediaList  │  │ MediaDetails│  │ VideoPlayer │  │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  │
+│                          │              │              │              │
+│                          └──────────────┴──────────────┘              │
+│                              │  invoke (Tauri IPC)                    │
+│                              ▼                                        │
+└──────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                      BACKEND (Rust + Tauri v2)                       │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
+│  │ Commands    │  │ Config      │  │ Metadata    │  │ Player      │  │
+│  │ (adaptador) │  │ (YAML)      │  │ (TVmaze)    │  │ (libmpv)    │  │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  │
+│                              │                                        │
+│                              ▼                                        │
+└──────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                    BASE DE DATOS SQLite (acryl.db)                   │
+│  ┌─────────────┐  ┌──────────────────┐  ┌──────────────────┐        │
+│  │    media    │  │   media_files    │  │ playback_history │        │
+│  │ (id, title, │  │ (id, media_id→   │  │ (id, media_id→   │        │
+│  │  type, …)   │  │  media.id)       │  │  media.id)       │        │
+│  └─────────────┘  └──────────────────┘  └──────────────────┘        │
+│                              ▲                                        │
+│                              │ media_fts (FTS5 sobre media.title)    │
+│                              └──────────────────────────────────────┘
+│  Además: tabla schema_migrations (versión, nombre)                   │
+└──────────────────────────────────────────────────────────────────────┘
 
-Además: tabla interna schema_migrations (versión, nombre) para controlar las migraciones.
+Flujo de datos:
+
+1. Usuario interactúa con el Frontend (React + TypeScript).
+2. El Frontend invoca un comando Tauri (IPC) que llega al Backend Rust.
+3. El Backend consulta SQLite (acryl.db) o usa libmpv para reproducir vídeo.
+4. Los resultados vuelven al Frontend a través de Tauri IPC.
+5. Los metadatos pueden sincronizarse con TVmaze (API pública, sin API key).
 ```
 
 ### Flujo de datos
