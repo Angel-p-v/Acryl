@@ -3,9 +3,10 @@
 //! Cada comando abre la base de datos SQLite, ejecuta la operación a través
 //! de los repositorios de `db::` y cierra la conexión. No hay estado global.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{State, command};
 
+use crate::config::ConfigState;
 use crate::db::{
     FileRepository, ListMediaOptions, MediaRepository, SearchMediaOptions, close_db, open_db,
 };
@@ -268,4 +269,62 @@ pub fn toggle_watched_cmd(db_path: String, media_id: i64) -> Result<bool, String
 
     close_db(conn);
     Ok(value)
+}
+
+/// Respuesta de obtención de configuración.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ConfigResponse {
+    pub db_path: String,
+    pub language: String,
+    pub auto_sync_metadata: bool,
+    pub default_player: String,
+}
+
+/// Comando: obtiene la configuración actual de la aplicación.
+#[command]
+pub fn config_get_cmd(state: State<'_, ConfigState>) -> Result<ConfigResponse, String> {
+    let config = state.config.lock().map_err(|e| e.to_string())?;
+    Ok(ConfigResponse {
+        db_path: config.db_path.clone(),
+        language: config.language.clone(),
+        auto_sync_metadata: config.auto_sync_metadata,
+        default_player: config.default_player.clone(),
+    })
+}
+
+/// Comando: actualiza la configuración de la aplicación y la persiste en disco.
+#[command]
+pub fn config_set_cmd(
+    state: State<'_, ConfigState>,
+    db_path: Option<String>,
+    language: Option<String>,
+    auto_sync_metadata: Option<bool>,
+    default_player: Option<String>,
+) -> Result<ConfigResponse, String> {
+    let mut config = state.config.lock().map_err(|e| e.to_string())?;
+
+    if let Some(v) = db_path {
+        config.db_path = v;
+    }
+    if let Some(v) = language {
+        config.language = v;
+    }
+    if let Some(v) = auto_sync_metadata {
+        config.auto_sync_metadata = v;
+    }
+    if let Some(v) = default_player {
+        config.default_player = v;
+    }
+
+    let config_clone = config.clone();
+    drop(config);
+
+    ConfigState::save_to_file(&state.config_path, &config_clone).map_err(|e| e.to_string())?;
+
+    Ok(ConfigResponse {
+        db_path: config_clone.db_path,
+        language: config_clone.language,
+        auto_sync_metadata: config_clone.auto_sync_metadata,
+        default_player: config_clone.default_player,
+    })
 }
