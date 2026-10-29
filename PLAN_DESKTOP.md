@@ -129,9 +129,19 @@ src-tauri/                ← Rust
 
 ---
 
-## 8. Próximo paso inmediato
+## 8. Estado de hitos
 
-Crear el esqueleto del proyecto Tauri en el repositorio y comenzar el Hito 1 (prototipo mínimo).
+| Hito | Contenido | Estado |
+|------|-----------|--------|
+| Hito 1 | Prototipo mínimo: ventana Tauri, lista desde SQLite, póster, búsqueda | ✅ completado |
+| Hito 2 | Capa de dominio en Rust (db, library, metadata) | pendiente |
+| Hito 3 | Reproductor integrado (libmpv/GStreamer) | pendiente |
+| Hito 4 | UI completa | pendiente |
+| Hito 5 | Empaquetado Linux | pendiente |
+
+## 9. Próximo paso inmediato
+
+Comenzar el Hito 2: puerto de `core/db` a `rusqlite`/`sqlx` y comandos Tauri que expongan la lógica de negocio al frontend.
 
 ---
 
