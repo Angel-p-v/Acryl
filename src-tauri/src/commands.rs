@@ -230,3 +230,42 @@ pub fn list_files_by_media_cmd(
     close_db(conn);
     Ok(files)
 }
+
+/// Comando: obtiene el detalle completo de un medio (título + archivos).
+#[command]
+pub fn get_media_details_cmd(
+    db_path: String,
+    media_id: i64,
+) -> Result<Option<crate::db::media_repo::MediaDetails>, String> {
+    let mut conn = open_db(&db_path).map_err(|e| e.to_string())?;
+    let mut repo = MediaRepository::new(&mut conn);
+
+    let details = repo.get_details(media_id).map_err(|e| e.to_string())?;
+
+    close_db(conn);
+    Ok(details)
+}
+
+/// Comando: invierte el estado de favorito de un medio. Devuelve el nuevo valor.
+#[command]
+pub fn toggle_favorite_cmd(db_path: String, media_id: i64) -> Result<bool, String> {
+    let mut conn = open_db(&db_path).map_err(|e| e.to_string())?;
+    let mut repo = MediaRepository::new(&mut conn);
+
+    let value = repo.toggle_favorite(media_id).map_err(|e| e.to_string())?;
+
+    close_db(conn);
+    Ok(value)
+}
+
+/// Comando: invierte el estado de visto de un medio. Devuelve el nuevo valor.
+#[command]
+pub fn toggle_watched_cmd(db_path: String, media_id: i64) -> Result<bool, String> {
+    let mut conn = open_db(&db_path).map_err(|e| e.to_string())?;
+    let mut repo = MediaRepository::new(&mut conn);
+
+    let value = repo.toggle_watched(media_id).map_err(|e| e.to_string())?;
+
+    close_db(conn);
+    Ok(value)
+}
