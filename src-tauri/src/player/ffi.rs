@@ -2,6 +2,11 @@
 //!
 //! Solo se declaran las funciones que usamos. `mpv_handle` es opaco para
 //! nosotros, por lo que lo modelamos como un puntero raw a `c_void`.
+//!
+//! Las constantes y tipos declarados forman parte de la API pública de FFI
+//! y se mantienen aunque aún no se usen todos.
+
+#![allow(dead_code)]
 
 use std::os::raw::{c_char, c_double, c_int, c_void};
 

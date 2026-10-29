@@ -10,19 +10,20 @@ use std::os::raw::{c_int, c_void};
 
 /// Errores del reproductor mpv.
 #[derive(Debug, thiserror::Error)]
+#[allow(clippy::enum_variant_names)]
 pub enum PlayerError {
     #[error("no se pudo crear el contexto de mpv")]
-    CreateFailed,
+    Create,
     #[error("fallo al inicializar mpv (código {0})")]
-    InitFailed(i32),
+    Init(i32),
     #[error("fallo al establecer opción '{0}' (código {1})")]
-    OptionFailed(String, i32),
+    Option(String, i32),
     #[error("fallo al ejecutar comando '{0}' (código {1})")]
-    CommandFailed(String, i32),
+    Command(String, i32),
     #[error("fallo al obtener propiedad '{0}' (código {1})")]
-    PropertyFailed(String, i32),
+    Property(String, i32),
     #[error("fallo al convertir ruta a CString: {0}")]
-    CStringFailed(#[from] std::ffi::NulError),
+    CString(#[from] std::ffi::NulError),
 }
 
 /// Reproductor de vídeo basado en libmpv.
@@ -43,7 +44,7 @@ impl MpvPlayer {
     pub fn new(wid: Option<u64>) -> Result<Self, PlayerError> {
         let handle = unsafe { mpv_create() };
         if handle.is_null() {
-            return Err(PlayerError::CreateFailed);
+            return Err(PlayerError::Create);
         }
 
         // Desactivar la salida a terminal (no necesitamos consola en la app).
@@ -61,11 +62,11 @@ impl MpvPlayer {
 
         // Helper privado para establecer opciones como string.
         fn set_option_string(ctx: MpvHandle, name: &str, value: &str) -> Result<(), PlayerError> {
-            let c_name = CString::new(name).map_err(PlayerError::CStringFailed)?;
-            let c_value = CString::new(value).map_err(PlayerError::CStringFailed)?;
+            let c_name = CString::new(name).map_err(PlayerError::CString)?;
+            let c_value = CString::new(value).map_err(PlayerError::CString)?;
             let rc = unsafe { mpv_set_option_string(ctx, c_name.as_ptr(), c_value.as_ptr()) };
             if rc != 0 {
-                return Err(PlayerError::OptionFailed(name.to_string(), rc));
+                return Err(PlayerError::Option(name.to_string(), rc));
             }
             Ok(())
         }
@@ -75,7 +76,7 @@ impl MpvPlayer {
             unsafe {
                 mpv_terminate_destroy(handle);
             }
-            return Err(PlayerError::InitFailed(rc));
+            return Err(PlayerError::Init(rc));
         }
 
         Ok(Self { handle })
@@ -84,10 +85,10 @@ impl MpvPlayer {
     /// Carga y comienza a reproducir un archivo de vídeo.
     pub fn load_file(&self, path: &str) -> Result<(), PlayerError> {
         let command = format!("loadfile {}", path);
-        let c_command = CString::new(command.clone()).map_err(PlayerError::CStringFailed)?;
+        let c_command = CString::new(command.clone()).map_err(PlayerError::CString)?;
         let rc = unsafe { mpv_command_string(self.handle, c_command.as_ptr()) };
         if rc != 0 {
-            return Err(PlayerError::CommandFailed(command, rc));
+            return Err(PlayerError::Command(command, rc));
         }
         Ok(())
     }
@@ -104,9 +105,9 @@ impl MpvPlayer {
 
     /// Detiene la reproducción y cierra el archivo actual.
     pub fn stop(&self) -> Result<(), PlayerError> {
-        let rc = unsafe { mpv_command_string(self.handle, b"stop\0".as_ptr() as *const i8) };
+        let rc = unsafe { mpv_command_string(self.handle, c"stop".as_ptr()) };
         if rc != 0 {
-            return Err(PlayerError::CommandFailed("stop".to_string(), rc));
+            return Err(PlayerError::Command("stop".to_string(), rc));
         }
         Ok(())
     }
@@ -114,10 +115,10 @@ impl MpvPlayer {
     /// Busca a una posición (segundos). Positivo = adelante, negativo = atrás.
     pub fn seek(&self, seconds: f64) -> Result<(), PlayerError> {
         let command = format!("seek {}", seconds);
-        let c_command = CString::new(command.clone()).map_err(PlayerError::CStringFailed)?;
+        let c_command = CString::new(command.clone()).map_err(PlayerError::CString)?;
         let rc = unsafe { mpv_command_string(self.handle, c_command.as_ptr()) };
         if rc != 0 {
-            return Err(PlayerError::CommandFailed(command, rc));
+            return Err(PlayerError::Command(command, rc));
         }
         Ok(())
     }
@@ -150,7 +151,7 @@ impl MpvPlayer {
     // --- helpers internos ---
 
     fn set_property_flag(&self, name: &str, value: bool) -> Result<(), PlayerError> {
-        let c_name = CString::new(name).map_err(PlayerError::CStringFailed)?;
+        let c_name = CString::new(name).map_err(PlayerError::CString)?;
         let flag: c_int = if value { 1 } else { 0 };
         let rc = unsafe {
             mpv_set_property(
@@ -161,13 +162,13 @@ impl MpvPlayer {
             )
         };
         if rc != 0 {
-            return Err(PlayerError::PropertyFailed(name.to_string(), rc));
+            return Err(PlayerError::Property(name.to_string(), rc));
         }
         Ok(())
     }
 
     fn set_property_double(&self, name: &str, value: f64) -> Result<(), PlayerError> {
-        let c_name = CString::new(name).map_err(PlayerError::CStringFailed)?;
+        let c_name = CString::new(name).map_err(PlayerError::CString)?;
         let rc = unsafe {
             mpv_set_property(
                 self.handle,
@@ -177,13 +178,13 @@ impl MpvPlayer {
             )
         };
         if rc != 0 {
-            return Err(PlayerError::PropertyFailed(name.to_string(), rc));
+            return Err(PlayerError::Property(name.to_string(), rc));
         }
         Ok(())
     }
 
     fn get_property_double(&self, name: &str) -> Result<f64, PlayerError> {
-        let c_name = CString::new(name).map_err(PlayerError::CStringFailed)?;
+        let c_name = CString::new(name).map_err(PlayerError::CString)?;
         let mut value: f64 = 0.0;
         let rc = unsafe {
             mpv_get_property(
@@ -194,13 +195,13 @@ impl MpvPlayer {
             )
         };
         if rc != 0 {
-            return Err(PlayerError::PropertyFailed(name.to_string(), rc));
+            return Err(PlayerError::Property(name.to_string(), rc));
         }
         Ok(value)
     }
 
     fn get_property_flag(&self, name: &str) -> Result<bool, PlayerError> {
-        let c_name = CString::new(name).map_err(PlayerError::CStringFailed)?;
+        let c_name = CString::new(name).map_err(PlayerError::CString)?;
         let mut value: c_int = 0;
         let rc = unsafe {
             mpv_get_property(
@@ -211,7 +212,7 @@ impl MpvPlayer {
             )
         };
         if rc != 0 {
-            return Err(PlayerError::PropertyFailed(name.to_string(), rc));
+            return Err(PlayerError::Property(name.to_string(), rc));
         }
         Ok(value != 0)
     }
