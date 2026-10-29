@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
-import type { Media } from '../types/media';
+import type { Media, PlayerStatus } from '../types/media';
 
 const DEFAULT_DB_PATH = 'media-manager.db';
 
@@ -46,4 +46,55 @@ export async function searchMedia(
     limit: opts.limit,
   });
   return result;
+}
+
+/**
+ * Crea el reproductor (si no existe) y carga un archivo de vídeo a través
+ * del comando Tauri `player_open_cmd`.
+ */
+export async function playerOpen(filePath: string): Promise<void> {
+  await invoke('player_open_cmd', { file_path: filePath });
+}
+
+/**
+ * Reanuda o inicia la reproducción mediante `player_play_cmd`.
+ */
+export async function playerPlay(): Promise<void> {
+  await invoke('player_play_cmd');
+}
+
+/**
+ * Pausa la reproducción mediante `player_pause_cmd`.
+ */
+export async function playerPause(): Promise<void> {
+  await invoke('player_pause_cmd');
+}
+
+/**
+ * Detiene la reproducción y cierra el archivo actual mediante
+ * `player_stop_cmd`.
+ */
+export async function playerStop(): Promise<void> {
+  await invoke('player_stop_cmd');
+}
+
+/**
+ * Busca a una posición (segundos) mediante `player_seek_cmd`.
+ */
+export async function playerSeek(seconds: number): Promise<void> {
+  await invoke('player_seek_cmd', { seconds });
+}
+
+/**
+ * Establece el volumen (0.0 a 100.0) mediante `player_volume_cmd`.
+ */
+export async function playerVolume(volume: number): Promise<void> {
+  await invoke('player_volume_cmd', { volume });
+}
+
+/**
+ * Obtiene el estado actual del reproductor mediante `player_status_cmd`.
+ */
+export async function playerStatus(): Promise<PlayerStatus> {
+  return await invoke<PlayerStatus>('player_status_cmd');
 }
