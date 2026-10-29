@@ -6,6 +6,24 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 versionado [SemVer](https://semver.org/lang/es/). A partir de `v1.0.0`, release-please
 mantiene este archivo a partir de los commits convencionales.
 
+## [0.2.0](https://github.com/Angel-p-v/app-media-manager/compare/v0.1.0...v0.2.0) (2026-10-29)
+
+
+### Features
+
+* añadir archivo acryl.desktop para empaquetado Linux ([c429c68](https://github.com/Angel-p-v/app-media-manager/commit/c429c68cbaf1375ee6167452d18bb93c234970b6))
+* **hito-6:** configuración YAML en el backend ([#16](https://github.com/Angel-p-v/app-media-manager/issues/16)) ([7886cea](https://github.com/Angel-p-v/app-media-manager/commit/7886ceacac821c2e7da797adaacabfa4e9e5003f))
+* **hito-7:** internacionalización (i18n) de la UI ([#17](https://github.com/Angel-p-v/app-media-manager/issues/17)) ([af65d36](https://github.com/Angel-p-v/app-media-manager/commit/af65d36ac7e93535cc9a6d2cd14735a2a9b57446))
+* **hito-8:** metadatos automáticos TMDB/TVDB + historial de reproducción ([#18](https://github.com/Angel-p-v/app-media-manager/issues/18)) ([6634b5a](https://github.com/Angel-p-v/app-media-manager/commit/6634b5a81ddf33dd888c80c16bb9bcd1caf68b47))
+* **hito-9:** publicación automática en GitHub Releases ([#19](https://github.com/Angel-p-v/app-media-manager/issues/19)) ([aef3e88](https://github.com/Angel-p-v/app-media-manager/commit/aef3e88f5ab5249161b1e4e2cf9031ccf9eafd24))
+* renombra proyecto a Acryl ([2823564](https://github.com/Angel-p-v/app-media-manager/commit/28235641229218ac92eee7f6b98bb3b8a189e33f))
+
+
+### Bug Fixes
+
+* **ci:** corrige marcadores de conflicto en metadata/mod.rs y formatea MediaDetails.tsx ([4d4b649](https://github.com/Angel-p-v/app-media-manager/commit/4d4b649853e75dfcb5f47169f3f37f8859f843ad))
+* **release-please:** corrige versión inicial y bootstrap-sha ([#14](https://github.com/Angel-p-v/app-media-manager/issues/14)) ([08be678](https://github.com/Angel-p-v/app-media-manager/commit/08be67806e6d958a7999b75723d3b3698ab7a68b))
+
 ## [3.3.0](https://github.com/Angel-p-v/media-manager/compare/v3.2.0...v3.3.0) (2026-10-27)
 
 
