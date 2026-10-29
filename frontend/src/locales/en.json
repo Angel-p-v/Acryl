@@ -51,5 +51,14 @@
     "label": "Language",
     "spanish": "Spanish",
     "english": "English"
+  },
+  "index": {
+    "folder": {
+      "title": "Index media folder",
+      "placeholder": "Folder path with videos",
+      "button": "Index",
+      "indexing": "Indexing…",
+      "result": "{media} media, {files} files in {folders} folders"
+    }
   }
 }

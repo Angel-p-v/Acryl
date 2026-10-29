@@ -202,3 +202,21 @@ export async function getPlaybackHistory(
     limit,
   });
 }
+
+/**
+ * Indexa una carpeta de medios mediante `index_folder_cmd`.
+ * Devuelve cuántos medios y archivos se agregaron.
+ */
+export async function indexFolder(
+  dbPath: string = DEFAULT_DB_PATH,
+  folderPath: string
+): Promise<{
+  readonly media_added: number;
+  readonly files_added: number;
+  readonly folders_processed: number;
+}> {
+  return await invoke<{ media_added: number; files_added: number; folders_processed: number }>(
+    'index_folder_cmd',
+    { db_path: dbPath, folder_path: folderPath },
+  );
+}

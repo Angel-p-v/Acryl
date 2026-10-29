@@ -51,5 +51,14 @@
     "label": "Idioma",
     "spanish": "Español",
     "english": "English"
+  },
+  "index": {
+    "folder": {
+      "title": "Indexar carpeta de medios",
+      "placeholder": "Ruta de la carpeta con vídeos",
+      "button": "Indexar",
+      "indexing": "Indexando…",
+      "result": "{media} medios, {files} archivos en {folders} carpetas"
+    }
   }
 }
