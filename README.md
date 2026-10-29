@@ -57,53 +57,7 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 
 media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza mantenibilidad, pruebas y seguridad:
 
-```text
-                         ARQUITECTURA DE CAPAS
-
-┌──────────────────────────────────────────────────────────────────────┐
-│                      FRONTEND (React + TypeScript)                   │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
-│  │   SearchBar │  │  MediaList  │  │ MediaDetails│  │ VideoPlayer │  │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  │
-│                          │              │              │              │
-│                          └──────────────┴──────────────┘              │
-│                              │  invoke (Tauri IPC)                    │
-│                              ▼                                        │
-└──────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                      BACKEND (Rust + Tauri v2)                       │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
-│  │ Commands    │  │ Config      │  │ Metadata    │  │ Player      │  │
-│  │ (adaptador) │  │ (YAML)      │  │ (TVmaze)    │  │ (libmpv)    │  │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  │
-│                              │                                        │
-│                              ▼                                        │
-└──────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                    BASE DE DATOS SQLite (acryl.db)                   │
-│  ┌─────────────┐  ┌──────────────────┐  ┌──────────────────┐        │
-│  │    media    │  │   media_files    │  │ playback_history │        │
-│  │ (id, title, │  │ (id, media_id→   │  │ (id, media_id→   │        │
-│  │  type, …)   │  │  media.id)       │  │  media.id)       │        │
-│  └─────────────┘  └──────────────────┘  └──────────────────┘        │
-│                              ▲                                        │
-│                              │ media_fts (FTS5 sobre media.title)    │
-│                              └──────────────────────────────────────┘
-│  Además: tabla schema_migrations (versión, nombre)                   │
-└──────────────────────────────────────────────────────────────────────┘
-
-Flujo de datos:
-
-1. Usuario interactúa con el Frontend (React + TypeScript).
-2. El Frontend invoca un comando Tauri (IPC) que llega al Backend Rust.
-3. El Backend consulta SQLite (acryl.db) o usa libmpv para reproducir vídeo.
-4. Los resultados vuelven al Frontend a través de Tauri IPC.
-5. Los metadatos pueden sincronizarse con TVmaze (API pública, sin API key).
-```
+![Arquitectura de Acryl: capas Frontend → Backend → Base de datos SQLite](./docs/assets/architecture.svg)
 
 ### Flujo de datos
 
