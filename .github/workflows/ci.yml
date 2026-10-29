@@ -66,10 +66,115 @@ jobs:
       - name: Install system dependencies (Tauri/Linux)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libwebkit2gtk-4.0-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y -qq \
+            libwebkit2gtk-4.0-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
       - run: cargo fmt --check
         working-directory: src-tauri
       - run: cargo clippy --all-targets
         working-directory: src-tauri
+      - run: cargo build
+        working-directory: src-tauri
       - run: cargo test
         working-directory: src-tauri
+
+  build-tauri:
+    name: build (Tauri instaladores Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: [verify-frontend, verify-rust]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '>=22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: cd frontend && npm ci
+      - run: cd frontend && npm run build
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Instalar dependencias de sistema de Tauri (Linux)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libwebkit2gtk-4.0-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Construir instaladores con Tauri
+        run: cargo tauri build
+        working-directory: src-tauri
+
+      - name: Listar artifacts generados
+        run: find src-tauri/target/release/bundle -type f | sort
+
+      - name: Subir artifacts de build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: tauri-bundles
+          path: src-tauri/target/release/bundle/
+          retention-days: 7
+
+  e2e:
+    name: e2e (flujos críticos de la aplicación)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [build-tauri]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '>=22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: cd frontend && npm ci
+
+      - uses: actions/download-artifact@649575e1e5b9e71ab93592de98095c12763e13b3 # v4
+        with:
+          name: tauri-bundles
+          path: src-tauri/target/release/bundle/
+
+      - name: Instalar dependencias del sistema para E2E
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libwebkit2gtk-4.0-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            xvfb
+
+      - name: Compilar la aplicación Tauri
+        run: cargo tauri build
+        working-directory: src-tauri
+
+      - name: Iniciar la aplicación Tauri con xvfb y ejecutar pruebas E2E
+        run: |
+          cd src-tauri
+          # Iniciar la aplicación en background con xvfb
+          ./target/release/media-manager &
+          APP_PID=$!
+          # Esperar a que la aplicación inicie (máximo 30 segundos)
+          for i in $(seq 1 30); do
+            if pgrep -f "media-manager" > /dev/null; then
+              echo "Aplicación iniciada (PID: $APP_PID)"
+              break
+            fi
+            sleep 1
+          done
+          # Ejecutar pruebas E2E
+          cd ../frontend
+          npm run test:e2e
+          E2E_EXIT_CODE=$?
+          # Detener la aplicación
+          kill $APP_PID 2>/dev/null || true
+          wait $APP_PID 2>/dev/null || true
+          exit $E2E_EXIT_CODE
+
