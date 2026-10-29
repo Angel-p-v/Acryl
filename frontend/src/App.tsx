@@ -1,6 +1,7 @@
-import type { JSX } from 'react';
 import { SearchBar } from './components/SearchBar';
 import './index.css';
+
+import type { JSX } from 'react';
 
 const DEFAULT_DB_PATH = 'media-manager.db';
 
