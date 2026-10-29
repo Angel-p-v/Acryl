@@ -159,12 +159,12 @@ buscador de aplicaciones.
 
 ```bash
 # 1. Descargar y ejecutar el instalador
-curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/scripts/install.sh | bash
 
 # 2. O clonar primero y ejecutar desde el repositorio
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
 cd acryl
-./install.sh
+./scripts/install.sh
 ```
 
 El script hace lo siguiente:
@@ -201,6 +201,24 @@ cd acryl
 npm install
 npm run tauri:dev
 ```
+
+### Desinstalación
+
+Si ya no necesitas Acryl, ejecuta el desinstalador desde el repositorio clonado:
+
+```bash
+cd acryl
+./scripts/uninstall.sh
+```
+
+El desinstalador elimina:
+
+- La entrada `.desktop` de `~/.local/share/applications`.
+- El icono de `~/.local/share/icons/hicolor/scalable/apps/`.
+- El binario AppImage de `~/.local/bin/` (si se usó como fallback).
+- El paquete nativo (`.deb` o `.rpm`) si fue instalado con el script.
+
+**No borra** el código fuente clonado ni la base de datos de tu biblioteca (`acril.db`), para que no pierdas tus medios indexados.
 
 ---
 
@@ -254,7 +272,9 @@ app-media-manager/
 ├── LICENSE                   Licencia MIT
 ├── README.md                 Este archivo
 └── package.json              Scripts raíz que delegan a frontend/
-├── install.sh                Instalador automático (detecta gestor de paquetes, dependencias, .desktop)
+├── scripts/                  Scripts de instalación y desinstalación
+│   ├── install.sh            Instalador automático
+│   └── uninstall.sh          Desinstalador
 ```
 
 ---
