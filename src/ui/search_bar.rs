@@ -1,12 +1,11 @@
 //! Barra de búsqueda de medios.
 
-#![allow(clippy::arc_with_non_send_sync)]
-
-use crate::core::library::LibraryService;
+use crate::db::media_repo::{MediaRepository, SearchMediaOptions};
+use crate::db::{close_db, open_db};
 use gtk4::prelude::*;
 use gtk4::{Box, Entry, Label, Orientation};
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 type MediaSelectCallback = std::boxed::Box<dyn Fn(i64)>;
 
@@ -15,7 +14,7 @@ pub struct SearchBar {
     entry: Entry,
     results_label: Label,
     db_path: String,
-    on_media_select: Arc<Mutex<Option<MediaSelectCallback>>>,
+    on_media_select: Rc<RefCell<Option<MediaSelectCallback>>>,
 }
 
 impl SearchBar {
@@ -41,7 +40,7 @@ impl SearchBar {
             entry,
             results_label,
             db_path: db_path.to_string(),
-            on_media_select: Arc::new(Mutex::new(None)),
+            on_media_select: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -53,7 +52,7 @@ impl SearchBar {
     where
         F: Fn(i64) + 'static,
     {
-        self.on_media_select = Arc::new(Mutex::new(Some(std::boxed::Box::new(f))));
+        *self.on_media_select.borrow_mut() = Some(std::boxed::Box::new(f));
         self.setup_search_handler();
     }
 
@@ -73,19 +72,40 @@ impl SearchBar {
             let db_path = db_path.clone();
             let on_select = on_select.clone();
 
-            let results =
-                LibraryService::search_media(&db_path, &query, None, Some(20)).unwrap_or_default();
+            // Búsqueda en hilo principal: SQLite local es rápido, no bloquea perceptiblemente.
+            let mut conn = match open_db(&db_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error abriendo BD para búsqueda: {}", e);
+                    return;
+                }
+            };
+            let mut repo = MediaRepository::new(&mut conn);
+            let results = repo
+                .search(
+                    &query,
+                    SearchMediaOptions {
+                        r#type: None,
+                        limit: Some(20),
+                    },
+                )
+                .unwrap_or_else(|e| {
+                    eprintln!("Error en búsqueda: {}", e);
+                    Vec::new()
+                });
+            close_db(conn);
 
             let count = results.len();
             results_label.set_label(&format!("{} resultados", count));
 
             for m in results.iter() {
-                let m_id = m.id;
-                let title = m.title.clone();
-                if let Some(cb) = &*on_select.lock().unwrap() {
-                    cb(m_id);
-                }
-                println!("Seleccionado: {} (id={})", title, m_id);
+                println!("Resultado: {} (id={})", m.title, m.id);
+            }
+
+            if let Some(cb) = &*on_select.borrow()
+                && let Some(first) = results.first()
+            {
+                cb(first.id);
             }
         });
     }

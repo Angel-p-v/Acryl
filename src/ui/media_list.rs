@@ -1,42 +1,103 @@
-//! Componente que muestra una lista de medios con sus pósters.
+//! Componente que muestra una lista de medios en tarjetas tipo Jellyfin.
 
 use crate::db::media_repo::Media;
 use gtk4::prelude::*;
-use gtk4::{Box, Label, Orientation, ScrolledWindow};
+use gtk4::{Box, FlowBox, GestureClick, Label, Orientation, ScrolledWindow};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::ui::poster::Poster;
 
+/// Tarjeta individual de un medio (portada + título debajo, estilo Jellyfin).
+struct MediaCard {
+    widget: Box,
+}
+
+impl MediaCard {
+    fn new(media: Media, on_select: Rc<dyn Fn(i64)>) -> Self {
+        let card = Box::new(Orientation::Vertical, 5);
+        card.set_halign(gtk4::Align::Center);
+        card.set_valign(gtk4::Align::Start);
+        card.set_size_request(200, 280);
+        card.set_margin_top(10);
+        card.set_margin_bottom(10);
+        card.set_margin_start(10);
+        card.set_margin_end(10);
+
+        let poster = Poster::new(&media.title, &media.poster_path);
+        card.append(poster.widget());
+
+        let title_label = Label::new(Some(&media.title));
+        title_label.set_wrap(true);
+        title_label.set_max_width_chars(20);
+        title_label.set_halign(gtk4::Align::Center);
+        title_label.add_css_class("card-title");
+        card.append(&title_label);
+
+        // Año si está disponible
+        if let Some(year) = media.year {
+            let year_label = Label::new(Some(&format!("{}", year)));
+            year_label.add_css_class("card-year");
+            year_label.set_halign(gtk4::Align::Center);
+            card.append(&year_label);
+        }
+
+        // Usar GestureClick para que toda la tarjeta sea clickeable
+        let click = GestureClick::new();
+        let media_id = media.id;
+        click.connect_pressed(move |_, _, _, _| {
+            on_select(media_id);
+        });
+        card.add_controller(click);
+
+        Self { widget: card }
+    }
+}
+
+/// Componente que muestra una lista de medios en tarjetas tipo Jellyfin.
 pub struct MediaList {
-    box_: Box,
+    content: Box,
+    flowbox: FlowBox,
     media: Rc<RefCell<Vec<Media>>>,
     on_media_select: Option<Rc<dyn Fn(i64)>>,
 }
 
-impl Default for MediaList {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl MediaList {
     pub fn new() -> Self {
-        let box_ = Box::new(Orientation::Vertical, 10);
-        box_.set_margin_top(10);
-        box_.set_margin_bottom(10);
-        box_.set_margin_start(10);
-        box_.set_margin_end(10);
+        let content = Box::new(Orientation::Vertical, 0);
+        content.set_vexpand(true);
+        content.set_hexpand(true);
+
+        let flowbox = FlowBox::new();
+        flowbox.set_hexpand(true);
+        flowbox.set_vexpand(true);
+        flowbox.set_valign(gtk4::Align::Start);
+        flowbox.set_halign(gtk4::Align::Start);
+        flowbox.set_max_children_per_line(6);
+        flowbox.set_min_children_per_line(1);
+        flowbox.set_row_spacing(16);
+        flowbox.set_column_spacing(16);
+        flowbox.set_homogeneous(false);
+
+        let scrolled = ScrolledWindow::new();
+        scrolled.set_hexpand(true);
+        scrolled.set_vexpand(true);
+        scrolled.set_hscrollbar_policy(gtk4::PolicyType::Automatic);
+        scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
+        scrolled.set_child(Some(&flowbox));
+
+        content.append(&scrolled);
 
         Self {
-            box_,
+            content,
+            flowbox,
             media: Rc::new(RefCell::new(Vec::new())),
             on_media_select: None,
         }
     }
 
     pub fn widget(&self) -> &Box {
-        &self.box_
+        &self.content
     }
 
     pub fn set_media(&mut self, media: Vec<Media>) {
@@ -45,23 +106,18 @@ impl MediaList {
     }
 
     pub fn refresh(&self) {
-        while let Some(child) = self.box_.first_child() {
-            self.box_.remove(&child);
+        // Remover todos los hijos existentes del FlowBox
+        while let Some(child) = self.flowbox.first_child() {
+            self.flowbox.remove(&child);
         }
-
-        let scrolled = ScrolledWindow::new();
-        scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
-        scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
-        scrolled.set_vexpand(true);
-        self.box_.append(&scrolled);
 
         let media = self.media.borrow();
-        for m in media.iter() {
-            let card = create_media_card(m.clone(), self.on_media_select.clone());
-            scrolled.set_child(Some(&card));
+        if let Some(on_select) = &self.on_media_select {
+            for m in media.iter() {
+                let card = MediaCard::new(m.clone(), on_select.clone());
+                self.flowbox.insert(&card.widget, -1);
+            }
         }
-
-        scrolled.set_visible(true);
     }
 
     pub fn on_select<F>(&mut self, f: F)
@@ -73,36 +129,8 @@ impl MediaList {
     }
 }
 
-fn create_media_card(media: Media, on_select: Option<Rc<dyn Fn(i64)>>) -> gtk4::Box {
-    let card = Box::new(Orientation::Vertical, 5);
-    card.set_margin_top(5);
-    card.set_margin_bottom(5);
-    card.set_margin_start(5);
-    card.set_margin_end(5);
-    card.set_size_request(150, 220);
-
-    let poster = Poster::new(&media.title, &media.poster_path);
-    card.append(poster.widget());
-
-    let label = Label::new(Some(&media.title));
-    label.set_wrap(true);
-    label.set_max_width_chars(15);
-    card.append(&label);
-
-    let btn = gtk4::Button::new();
-    btn.set_hexpand(true);
-    btn.set_vexpand(true);
-    btn.add_css_class("flat");
-
-    let media_id = media.id;
-    if let Some(on_select) = &on_select {
-        let on_select = on_select.clone();
-        btn.connect_clicked(move |_| {
-            on_select(media_id);
-        });
+impl Default for MediaList {
+    fn default() -> Self {
+        Self::new()
     }
-
-    card.append(&btn);
-
-    card
 }

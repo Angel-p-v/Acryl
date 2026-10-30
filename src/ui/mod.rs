@@ -5,6 +5,7 @@ pub mod media_details;
 pub mod media_list;
 pub mod poster;
 pub mod search_bar;
+pub mod settings_window;
 pub mod video_player;
 
 pub use main_window::MainWindow;

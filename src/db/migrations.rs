@@ -83,6 +83,12 @@ CREATE TABLE IF NOT EXISTS playback_history (
 CREATE INDEX IF NOT EXISTS idx_playback_history_media ON playback_history(media_id);
 "#;
 
+const MEDIA_PARENT_ID_SQL: &str = r#"
+ALTER TABLE media ADD COLUMN parent_id INTEGER REFERENCES media(id);
+
+CREATE INDEX IF NOT EXISTS idx_media_parent ON media(parent_id);
+"#;
+
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -93,5 +99,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 2,
         name: "media-state-and-history",
         sql: MEDIA_STATE_AND_HISTORY_SQL,
+    },
+    Migration {
+        version: 3,
+        name: "media-parent-id",
+        sql: MEDIA_PARENT_ID_SQL,
     },
 ];

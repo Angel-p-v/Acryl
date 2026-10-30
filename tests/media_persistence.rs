@@ -49,6 +49,7 @@ fn upsert_y_list_media() {
                 sort_title: "matrix".to_string(),
                 year: Some(1999),
                 folder_path: "/media/matrix".to_string(),
+                parent_id: None,
             })
             .expect("upsert media 1");
         let m2 = repo
@@ -58,6 +59,7 @@ fn upsert_y_list_media() {
                 sort_title: "breaking bad".to_string(),
                 year: Some(2008),
                 folder_path: "/media/bb".to_string(),
+                parent_id: None,
             })
             .expect("upsert media 2");
         (m1, m2)
@@ -118,6 +120,7 @@ fn upsert_es_idempotente_por_folder_path() {
             sort_title: "matrix".to_string(),
             year: None,
             folder_path: "/media/matrix".to_string(),
+            parent_id: None,
         })
         .expect("upsert 1")
     };
@@ -130,6 +133,7 @@ fn upsert_es_idempotente_por_folder_path() {
             sort_title: "matrix".to_string(),
             year: Some(1999),
             folder_path: "/media/matrix".to_string(),
+            parent_id: None,
         })
         .expect("upsert 2")
     };
@@ -163,6 +167,7 @@ fn archivos_por_medio() {
             sort_title: "pelicula".to_string(),
             year: None,
             folder_path: "/media/pelicula".to_string(),
+            parent_id: None,
         })
         .expect("upsert media")
     };
@@ -215,6 +220,7 @@ fn toggle_favorite_y_watched() {
             sort_title: "test".to_string(),
             year: None,
             folder_path: "/media/test".to_string(),
+            parent_id: None,
         })
         .expect("upsert")
     };
@@ -264,6 +270,7 @@ fn record_playback_inserta_historial() {
             sort_title: "test".to_string(),
             year: None,
             folder_path: "/media/test".to_string(),
+            parent_id: None,
         })
         .expect("upsert")
     };
@@ -298,6 +305,7 @@ fn get_details_devuelve_media_con_archivos() {
             sort_title: "con archivos".to_string(),
             year: None,
             folder_path: "/media/con-archivos".to_string(),
+            parent_id: None,
         })
         .expect("upsert media")
     };
