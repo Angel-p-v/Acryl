@@ -116,9 +116,8 @@ src-tauri/                ← Rust
 - **Criterio de aceptación:** al buscar un medio sin metadatos, la app los rellena automáticamente desde TMDB/TVDB; al reproducir un video se registra en el historial.
 
 ### Hito 9 — Publicación automática en GitHub Releases (Semanas 24–25)
-- Configurar `release.yml` y `release-please.yml` para generar releases automáticos.
-- Subir artefactos `.deb`, AppImage y `.rpm` a GitHub Releases con checksums y notas de release.
-- **Criterio de aceptación:** al hacer push de un tag, se genera un release en GitHub con los instaladores listos para descargar.
+- Eliminado: Acryl no publica releases automáticos. La única forma de instalar es clonando el repositorio y ejecutando `scripts/install.sh`.
+- **Criterio de aceptación:** N/A (no aplica).
 
 ---
 
