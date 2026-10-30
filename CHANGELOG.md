@@ -6,6 +6,59 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 versionado [SemVer](https://semver.org/lang/es/). A partir de `v1.0.0`, release-please
 mantiene este archivo a partir de los commits convencionales.
 
+## [0.3.0](https://github.com/Angel-p-v/Acryl/compare/v0.2.0...v0.3.0) (2026-10-30)
+
+
+### Features
+
+* añadir archivo acryl.desktop para empaquetado Linux ([c429c68](https://github.com/Angel-p-v/Acryl/commit/c429c68cbaf1375ee6167452d18bb93c234970b6))
+* **app:** agregar UI para indexar carpetas y corregir renderizado ([a38951a](https://github.com/Angel-p-v/Acryl/commit/a38951ab37e47c70382ca7a6ec634d21688a497b))
+* **diagnose:** añadir script de diagnóstico para fallos de inicio ([3ebef49](https://github.com/Angel-p-v/Acryl/commit/3ebef49bca35e07d6f5345b8c38c5ee2438fa925))
+* **diagnose:** añadir script para pantalla en blanco ([b074c34](https://github.com/Angel-p-v/Acryl/commit/b074c3421b3d85caf2b3c85e63f5f4e93c2134b5))
+* **gtk4:** Hito E.2 - UI completa con navegación, detalles, favoritos y reproducción ([#41](https://github.com/Angel-p-v/Acryl/issues/41)) ([8e1dc08](https://github.com/Angel-p-v/Acryl/commit/8e1dc08c41b8f09844b3d59d9c50bf811dc9a73c))
+* **gtk4:** Hito E.3 - Reproductor integrado con GtkMediaFile ([#42](https://github.com/Angel-p-v/Acryl/issues/42)) ([603aadd](https://github.com/Angel-p-v/Acryl/commit/603aaddea66dbc7bd859271df8a2a9ce3fe31b35))
+* **gtk4:** Hito E.4 - Empaquetado nativo simplificado (solo install.sh + .desktop) ([#52](https://github.com/Angel-p-v/Acryl/issues/52)) ([86d0219](https://github.com/Angel-p-v/Acryl/commit/86d0219fd26650e51f6f93592004aa06b4cf4122))
+* **gtk4:** Hito E.4+E.5 - Eliminar frontend/Tauri, empaquetado nativo Rust puro ([#43](https://github.com/Angel-p-v/Acryl/issues/43)) ([89a94fd](https://github.com/Angel-p-v/Acryl/commit/89a94fd6866fbdba1bf1a396cab262a5749586e4))
+* **hito-6:** configuración YAML en el backend ([#16](https://github.com/Angel-p-v/Acryl/issues/16)) ([7886cea](https://github.com/Angel-p-v/Acryl/commit/7886ceacac821c2e7da797adaacabfa4e9e5003f))
+* **hito-7:** internacionalización (i18n) de la UI ([#17](https://github.com/Angel-p-v/Acryl/issues/17)) ([af65d36](https://github.com/Angel-p-v/Acryl/commit/af65d36ac7e93535cc9a6d2cd14735a2a9b57446))
+* **hito-8:** metadatos automáticos TMDB/TVDB + historial de reproducción ([#18](https://github.com/Angel-p-v/Acryl/issues/18)) ([6634b5a](https://github.com/Angel-p-v/Acryl/commit/6634b5a81ddf33dd888c80c16bb9bcd1caf68b47))
+* **hito-9:** publicación automática en GitHub Releases ([#19](https://github.com/Angel-p-v/Acryl/issues/19)) ([aef3e88](https://github.com/Angel-p-v/Acryl/commit/aef3e88f5ab5249161b1e4e2cf9031ccf9eafd24))
+* **install:** añadir script de instalación automática y actualizar README ([#24](https://github.com/Angel-p-v/Acryl/issues/24)) ([c257c92](https://github.com/Angel-p-v/Acryl/commit/c257c92556820928f98d94a42b3ccbab5134b713))
+* **migration:** documentar migración a GTK4/Libadwaita en README y PLAN_DESKTOP ([26b213a](https://github.com/Angel-p-v/Acryl/commit/26b213a19a9e1fc43dc57956a9fc85bd19f20fe2))
+* **migration:** migración a GTK4/Libadwaita (Hito E.1) ([#39](https://github.com/Angel-p-v/Acryl/issues/39)) ([7522659](https://github.com/Angel-p-v/Acryl/commit/7522659e1832df6403164627ab36d98fd922e530))
+* README completo con diagrama de una sola BD y bloques de instalación por distro ([89b6d95](https://github.com/Angel-p-v/Acryl/commit/89b6d952a8c9bbba5257f64799afa29a113a8548))
+* **readme,install:** uninstaller --purge y diagramas de arquitectura y BD ([#26](https://github.com/Angel-p-v/Acryl/issues/26)) ([782450b](https://github.com/Angel-p-v/Acryl/commit/782450b70d9765ce0ae0532aaef95112d6dae222))
+* **readme:** diagrama de BD como una sola tabla, bloques de instalación por distro ([a2d5595](https://github.com/Angel-p-v/Acryl/commit/a2d5595fd63d2b0f2ef6ca90962cef2c65cdcb69))
+* renombra a Acryl con logo, diagrama de flujo y README completo ([5ee7600](https://github.com/Angel-p-v/Acryl/commit/5ee7600a864e5d1a8f2521d95e0fb01a36da9914))
+* renombra proyecto a Acryl ([2823564](https://github.com/Angel-p-v/Acryl/commit/28235641229218ac92eee7f6b98bb3b8a189e33f))
+* **ui:** aplicar mejoras de UI y correcciones de arquitectura ([5e879a4](https://github.com/Angel-p-v/Acryl/commit/5e879a45774f24e91428437085513c49d92911de))
+
+
+### Bug Fixes
+
+* .desktop funciona y app no se cierra sola ([#54](https://github.com/Angel-p-v/Acryl/issues/54)) ([16edad1](https://github.com/Angel-p-v/Acryl/commit/16edad113efe8b287748316f27bd97188e2742b0))
+* app se cerraba sola - migraciones idempotentes y launcher sin timeout ([dd42a4c](https://github.com/Angel-p-v/Acryl/commit/dd42a4ce9b6c65903877f32adc9c4b6cebf60873))
+* **app-ready:** crear BD vacía, comando indexar carpeta y corregir Wayland ([#36](https://github.com/Angel-p-v/Acryl/issues/36)) ([6e79c2b](https://github.com/Angel-p-v/Acryl/commit/6e79c2bd99ef7992d4ff14e90ba1bb018c63f32d))
+* **app:** corregir renderizado en blanco, DB vacía y indexación de medios ([917fd08](https://github.com/Angel-p-v/Acryl/commit/917fd08b55a5f52ae7e230dd58bd51ec873bdff8))
+* **build:** corregir rutas de compilación frontend y tauri ([b3c3102](https://github.com/Angel-p-v/Acryl/commit/b3c310243f706294b941ed513e93867b6623e413))
+* **build:** corregir rutas de compilación para que funcione desde cualquier directorio ([8abf948](https://github.com/Angel-p-v/Acryl/commit/8abf9485a2f63c36a0aacbcf61f29fff6ca49b70))
+* **build:** tauri build funciona correctamente ([3c481cc](https://github.com/Angel-p-v/Acryl/commit/3c481cc90362017c09f9285a834830c7279b28c2))
+* **ci:** corrige marcadores de conflicto en metadata/mod.rs y formatea MediaDetails.tsx ([4d4b649](https://github.com/Angel-p-v/Acryl/commit/4d4b649853e75dfcb5f47169f3f37f8859f843ad))
+* **config:** rutas de configuración y BD en directorios de usuario escribibles ([#34](https://github.com/Angel-p-v/Acryl/issues/34)) ([0570d1d](https://github.com/Angel-p-v/Acryl/commit/0570d1d34e2c86d02ee3bb9f9c7ba6ccde338f12))
+* **install:** .desktop entry ahora funciona correctamente ([2545cdb](https://github.com/Angel-p-v/Acryl/commit/2545cdb97ee3e50293f7a918a2bba034ce7d51e2))
+* **install:** corregir nombres de paquetes para todas las distribuciones ([#28](https://github.com/Angel-p-v/Acryl/issues/28)) ([7c637cf](https://github.com/Angel-p-v/Acryl/commit/7c637cf01d3c103b7e6dc21ad50dbec5f51ced7f))
+* **install:** corregir paquetes Arch y manejo de cambios git locales ([#30](https://github.com/Angel-p-v/Acryl/issues/30)) ([afcac99](https://github.com/Angel-p-v/Acryl/commit/afcac99addb15ecf6738dca0128324229efd10d4))
+* **install:** quitar nodejs de paquetes sistema y npm install en frontend ([#32](https://github.com/Angel-p-v/Acryl/issues/32)) ([dab394d](https://github.com/Angel-p-v/Acryl/commit/dab394d5744cdc222bd065856bfc3ef558f193a9))
+* **install:** reescribir install.sh para funcionar con arquitectura GTK4/Rust ([e3a4a06](https://github.com/Angel-p-v/Acryl/commit/e3a4a0645aa7433eaeca3a0c09f1bf148d0e44c7))
+* lanzador con captura de errores para diagnosticar pantalla en blanco ([aa995d7](https://github.com/Angel-p-v/Acryl/commit/aa995d7db6258d63501e2d171833780026a6580b))
+* **launcher:** priorizar Wayland y pausar al fallar para diagnóstico ([21cc8b3](https://github.com/Angel-p-v/Acryl/commit/21cc8b3267038f37f906aea8e2d443222daee337))
+* **readme:** corregir imagen rota y diagrama Mermaid ([5b5ceaa](https://github.com/Angel-p-v/Acryl/commit/5b5ceaa4b57317414510486a9be596628d173dd4))
+* **readme:** corregir imagen rota y diagrama Mermaid ([bc6ee87](https://github.com/Angel-p-v/Acryl/commit/bc6ee874d93d20a552187d2038b84f82e91f305b))
+* **readme:** restaurar imagen del logo y arreglar diagrama Mermaid ([536cbbd](https://github.com/Angel-p-v/Acryl/commit/536cbbd5e8460470878e64bbeb88931e97ecd246))
+* **readme:** restaurar imagen del logo y arreglar diagrama Mermaid ([14c6651](https://github.com/Angel-p-v/Acryl/commit/14c6651074797f13ef02bf07d45846cfaabcaf73))
+* **release-please:** corrige versión inicial y bootstrap-sha ([#14](https://github.com/Angel-p-v/Acryl/issues/14)) ([08be678](https://github.com/Angel-p-v/Acryl/commit/08be67806e6d958a7999b75723d3b3698ab7a68b))
+* wrapper robusto para ejecutar Acryl con X11 automáticamente ([452284d](https://github.com/Angel-p-v/Acryl/commit/452284dca6fae24fda5faecf8f48f9c9f5f4b5d3))
+
 ## [0.2.0](https://github.com/Angel-p-v/Acryl/compare/v0.1.0...v0.2.0) (2026-10-29)
 
 
