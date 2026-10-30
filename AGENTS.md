@@ -34,7 +34,7 @@ El stack está fijado. No cambies tecnologías, versiones principales ni arquite
 | Backend / UI | Rust, edición 2024 | Ownership correcto, errores controlados, API segura |
 | Interfaz gráfica | GTK4 + Libadwaita (gdk-rs) | Renderizado nativo, sin WebView, soporte Wayland/Hyprland |
 | Base de datos | SQLite + `rusqlite` | Consultas parametrizadas, migraciones y FTS5, WAL |
-| Reproducción | GtkMediaFile (GTK4) | Reproducción integrada dentro de la ventana GTK4 |
+| Reproducción | mpv (proceso externo) | Delegación de reproducción a reproductor externo `mpv` |
 | Configuración | YAML + Serde | Deserialización y validación explícitas |
 | Pósters / imágenes | `gdk-pixbuf` / `cairo` | Renderizado nativo dentro de GTK4 |
 | Tests backend | Cargo | Unitarios, integración y regresión |
@@ -109,7 +109,7 @@ No existen las carpetas `frontend/` ni `src-tauri/` ni un `package.json` en la r
 
 ### 4.1. Separación de responsabilidades
 
-1. El dominio no depende de la UI, de GTK ni de GtkMediaFile directamente en capas superiores.
+1. El dominio no depende de la UI, de GTK ni de `mpv` directamente en capas superiores.
 2. La UI no ejecuta SQL ni accede directamente al sistema de archivos mediante llamadas sueltas.
 3. El acceso a SQLite se concentra en la capa de persistencia (`src/db/`).
 4. La lógica de negocio reside en `src/core/` y es llamada directamente desde la UI (sin serialización JSON intermedia ni comandos Tauri).
@@ -232,7 +232,7 @@ Aplica las convenciones oficiales de Rust y los patrones recomendados por el eco
 - No conviertas punteros en referencias sin demostrar las garantías necesarias.
 - Gestiona explícitamente la adquisición y liberación de recursos nativos.
 - Implementa `Drop` cuando corresponda y evita liberaciones dobles, use-after-free y fugas.
-- Para GtkMediaFile, comprueba los requisitos de inicialización, destrucción, callbacks y afinidad de hilos.
+- Para `mpv`, comprueba los requisitos de inicialización, destrucción, callbacks, afinidad de hilos y gestión de procesos externos.
 - No invoques funciones nativas después de destruir sus recursos.
 
 ### 6.5. Dependencias y compilación
@@ -290,6 +290,7 @@ La aplicación debe seguir el principio de mínimo privilegio.
 - No consideres la UI una frontera de seguridad confiable.
 - No construyas comandos de shell con datos de usuario.
 - Evita ejecutar procesos externos; cualquier excepción debe estar justificada y restringida.
+- **Excepción aprobada:** `mpv` se ejecuta como proceso externo mediante `std::process::Command` para la reproducción de vídeo, ya que es la solución más robusta y ampliamente soportada para reproducir contenido multimedia en Linux. Esta excepción está documentada y justificada por la falta de fiabilidad de GtkMediaFile con ciertos codecs y formatos.
 - No expongas rutas arbitrarias, operaciones de borrado ni ejecución de comandos a través de interfaces genéricas.
 - Protege contra traversal de directorios y accesos no autorizados.
 - No incluyas secretos, tokens, contraseñas o datos personales en el código, los logs o los commits.
@@ -636,7 +637,7 @@ Presta especial atención a:
 - Renderizado de listas e imágenes.
 - Decodificación de pósteres con gdk-pixbuf.
 - Memoria y copias innecesarias.
-- Operaciones nativas de reproducción con GtkMediaFile.
+- Operaciones nativas de reproducción con `mpv`.
 
 Evita bloquear la interfaz, cargar colecciones completas cuando no sea necesario o repetir consultas costosas en cada renderizado.
 

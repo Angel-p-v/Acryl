@@ -210,9 +210,15 @@ impl MainWindow {
             .media_details
             .borrow_mut()
             .on_play_episode(move |file_path| {
+                println!("[DEBUG] on_play_episode llamado con: {}", file_path);
                 let w = this_clone.borrow();
                 w.video_player.borrow_mut().load_file(&file_path);
+                println!("[DEBUG] load_file completado, cambiando a stack 'player'");
                 w.stack.set_visible_child_name("player");
+                println!(
+                    "[DEBUG] stack visible child: {:?}",
+                    w.stack.visible_child_name()
+                );
             });
 
         // Callback: al hacer clic en "Abrir" de una temporada, navegar a los detalles de esa temporada.
