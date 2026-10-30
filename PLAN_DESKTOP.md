@@ -263,9 +263,10 @@ src/                      ← Rust puro (binario único)
 - **Criterio de aceptación:** se reproduce un archivo de video dentro de la ventana GTK4
 
 #### Hito E.4 — Empaquetado nativo Linux (Semanas 9–10)
-- Instalador nativo (`.deb`, `.rpm`, AppImage) sin Tauri
-- Icono de aplicación, entrada de menú, archivo `.desktop`
-- **Criterio de aceptación:** se instala y ejecuta en Linux sin dependencias de Node.js/Rust/Node
+- `install.sh` crea la entrada `.desktop` en `~/.local/share/applications/` para ejecutar Acryl desde el menú de aplicaciones
+- Icono de aplicación instalado en `~/.local/share/icons/hicolor/scalable/apps/`
+- Lanzador con captura de errores instalado en `~/.local/bin/acryl-launcher`
+- **Criterio de aceptación:** al ejecutar `./scripts/install.sh` en Linux limpio, Acryl se instala y es ejecutable desde el menú de aplicaciones/herramientas de búsqueda, sin dependencias de Node.js/Rust en el sistema de destino. No hay releases de GitHub ni paquetes `.deb`/`.rpm`/AppImage.
 
 #### Hito E.5 — Limpieza y documentación (Semana 11)
 - Eliminar código de frontend (React, TypeScript, Vite)
