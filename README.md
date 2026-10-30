@@ -11,9 +11,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Angel-p-v/app-media-manager/releases/latest">
-    <img src="https://img.shields.io/github/v/release/Angel-p-v/app-media-manager?label=latest%20release&style=for-the-badge" alt="Latest Release"/>
-  </a>
   <a href="https://github.com/Angel-p-v/app-media-manager/actions/workflows/ci.yml">
     <img src="https://img.shields.io/github/actions/workflow/status/Angel-p-v/app-media-manager/ci.yml?branch=main&style=for-the-badge" alt="CI Status"/>
   </a>
@@ -25,9 +22,6 @@
   </a>
   <a href="https://gtk.org/">
     <img src="https://img.shields.io/badge/gtk-4.x-497975?style=for-the-badge" alt="GTK4"/>
-  </a>
-  <a href="https://github.com/Angel-p-v/app-media-manager/releases">
-    <img src="https://img.shields.io/github/downloads/Angel-p-v/app-media-manager/total?style=for-the-badge" alt="Downloads"/>
   </a>
 </p>
 
@@ -52,7 +46,7 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 | ▶️ **Reproducción integrada** | Reproduce archivos de vídeo dentro de la aplicación sin reproductores externos |
 | ⚙️ **Configuración YAML** | Ajustes persistentes en archivo YAML (idioma, ruta de base de datos, reproductor predeterminado) |
 | 🌐 **Idiomas** | Interfaz disponible en español e inglés |
-| 📦 **Instaladores Linux** | Genera paquetes `.deb`, AppImage y `.rpm` para instalación nativa |
+| 📦 **Instalación** | Clona el repositorio y ejecuta `./scripts/install.sh` |
 
 ---
 
@@ -138,20 +132,8 @@ graph TD
 
 ### 🚀 Cómo instalar
 
-Acryl incluye un script que detecta tu gestor de paquetes, instala las
-dependencias del sistema y de desarrollo, clona el repositorio, compila la
-aplicación y crea la entrada `.desktop` para que la encuentres en el
-buscador de aplicaciones.
-
-Elige una de las dos opciones:
-
-**Opción A — Ejecutar directamente (sin clonar):**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/scripts/install.sh | bash
-```
-
-**Opción B — Clonar el repositorio y ejecutar desde allí:**
+Acryl no tiene releases publicados. La única forma de instalarlo es clonando
+el repositorio y ejecutando el script de instalación:
 
 ```bash
 git clone https://github.com/Angel-p-v/app-media-manager.git acryl
@@ -161,17 +143,20 @@ cd acryl
 
 El script hace lo siguiente:
 
-1. Detecta el gestor de paquetes (`apt`, `pacman`, `dnf`, `zypper` o `apk`).
+1. Detecta tu gestor de paquetes (`apt`, `pacman`, `dnf`, `zypper` o `apk`).
 2. Instala las dependencias de sistema (`libgtk-4`, `libadwaita-1`, `librsvg2`, `gdk-pixbuf2`, etc.).
 3. Instala Rust/Cargo (≥ 1.90) si falta o está desactualizado.
-4. Clona el repositorio (o lo actualiza si ya existe).
-5. Compila la aplicación con `cargo build --release`.
-6. Instala el binario generado y crea el archivo `.desktop` en
-   `~/.local/share/applications`.
+4. Compila la aplicación con `cargo build --release`.
+5. Instala el binario en `~/.local/bin/acryl`.
+6. Crea la entrada `.desktop` en `~/.local/share/applications/` para que puedas
+   buscar y ejecutar Acryl desde el menú de aplicaciones.
+7. Instala el lanzador con captura de errores.
 
 Al terminar, busca **Acryl** en el menú de aplicaciones o ejecuta `acryl`.
 
-> **Nota:** el script usa `sudo` para instalar dependencias de sistema y el paquete generado. La entrada `.desktop` y el icono se instalan a nivel de usuario (`~/.local`), sin necesidad de root. **No requiere Node.js ni npm.**
+> **Nota:** el script usa `sudo` para instalar dependencias de sistema. La entrada
+> `.desktop` y el icono se instalan a nivel de usuario (`~/.local`), sin necesidad
+> de root. **No requiere Node.js ni npm.**
 
 ---
 
@@ -207,8 +192,7 @@ El desinstalador elimina:
 
 - La entrada `.desktop` de `~/.local/share/applications`.
 - El icono de `~/.local/share/icons/hicolor/scalable/apps/`.
-- El binario AppImage de `~/.local/bin/` (si se usó como fallback).
-- El paquete nativo (`.deb` o `.rpm`) si fue instalado con el script.
+- El binario de `~/.local/bin/acryl` y el lanzador de `~/.local/bin/acryl-launcher`.
 
 **Por defecto no borra** el código fuente clonado ni la base de datos de tu biblioteca (`acril.db`), para que no pierdas tus medios indexados.
 
@@ -230,7 +214,7 @@ cd acryl
 
 ---
 
-### Instaladores nativos
+### Binario compilado
 
 Una vez compilado, el binario se genera en:
 

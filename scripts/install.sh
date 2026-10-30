@@ -304,7 +304,11 @@ create_desktop_entry() {
   fi
 
   local desktop_file="$DESKTOP_DIR/$APP_NAME.desktop"
-  cat > "$desktop_file" <<EOF
+  if [[ -f "$project_dir/acryl.desktop" ]]; then
+    install -Dm644 "$project_dir/acryl.desktop" "$desktop_file"
+  else
+    # Fallback si no existe el archivo estático
+    cat > "$desktop_file" <<EOF
 [Desktop Entry]
 Name=Acryl
 GenericName=Gestor de contenido multimedia
@@ -317,6 +321,7 @@ Categories=AudioVideo;Player;
 MimeType=video/mp4;video/mkv;video/avi;video/webm;video/quicktime;
 Keywords=media;video;movie;series;anime;library;
 EOF
+  fi
 
   chmod +x "$desktop_file"
 
