@@ -3,10 +3,10 @@
 # diagnose-blank-v2.sh — Diagnóstico avanzado para pantalla en blanco
 #
 # Comprueba:
-#   1. Si los archivos del build frontend existen
-#   2. Si el WebView puede cargar archivos file://
-#   3. Variables de entorno de WebKit para depuración
-#   4. Ejecutar con diferentes configuraciones de GTK/WebKit
+#   1. Si el binario compilado existe
+#   2. Si GTK puede renderizar la ventana
+#   3. Variables de entorno de GTK para depuración
+#   4. Ejecutar con diferentes configuraciones de GTK
 #
 # Uso:
 #   ./scripts/diagnose-blank-v2.sh
@@ -15,7 +15,7 @@ set -euo pipefail
 
 readonly APP_NAME="acryl"
 readonly APP_BIN="$HOME/.local/bin/$APP_NAME"
-readonly BUILD_DIR="$HOME/Projects/Acryl/frontend/build"
+readonly RELEASE_DIR="$HOME/Projects/Acryl/target/release"
 readonly DESKTOP_FILE="$HOME/.local/share/applications/$APP_NAME.desktop"
 
 info()  { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
@@ -122,11 +122,11 @@ echo "============================================================"
 echo
 echo "Si ninguna prueba mostró la aplicación:"
 echo
-echo "1. Verificar que webkit2gtk-4.1 está instalado:"
-echo "   pacman -Qs webkit2gtk"
+echo "1. Verificar que GTK4 y Libadwaita están instalados:"
+echo "   pacman -Qs gtk4 libadwaita"
 echo
-echo "2. Probar ejecutar directamente el binario del bundle:"
-echo "   /home/coronel/Projects/Acryl/src-tauri/target/release/acryl"
+echo "2. Probar ejecutar directamente el binario:"
+echo "   /home/coronel/Projects/Acryl/target/release/acryl"
 echo
 echo "3. Verificar si el problema es de permisos en /tmp:"
 echo "   ls -la /tmp/ | grep acryl"

@@ -37,7 +37,7 @@
 
 **Acryl** es una aplicación de escritorio nativa para Linux que te permite indexar, buscar y reproducir tu colección local de películas, series y anime —todo dentro de la propia aplicación, sin depender de reproductores externos ni servicios en la nube.
 
-Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice de búsqueda de texto completo (FTS5) y la reproducción de vídeo integrada mediante libmpv.
+Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice de búsqueda de texto completo (FTS5) y la reproducción de vídeo integrada mediante GtkMediaFile (GTK4).
 
 ---
 
@@ -67,7 +67,7 @@ graph TD
     Logic[["Lógica: Rust puro"]]
     Decision{{"¿Consulta o reproduce?"}}
     SQLite[["SQLite: acryl.db"]]
-    MPV[["libmpv: FFI"]]
+    MPV[["GtkMediaFile (GTK4)"]]
     TVmaze[["TVmaze: API pública"]]
 
     Usuario -->|busca| UI
@@ -100,7 +100,7 @@ graph TD
 1. El usuario busca o navega por medios en la UI (GTK4 / Libadwaita, Rust).
 2. La UI llama directamente a funciones Rust del backend.
 3. El backend consulta **una única base de datos SQLite** (`acryl.db`) y devuelve los resultados a la UI.
-4. Para la reproducción, el backend utiliza libmpv vía FFI para abrir y controlar el archivo de vídeo dentro de la misma ventana GTK4.
+4. Para la reproducción, el backend utiliza GtkMediaFile integrada en GTK4 para abrir y controlar el archivo de vídeo dentro de la misma ventana.
 5. Los metadatos pueden sincronizarse con TVmaze (API pública, sin API key) para obtener pósteres y sinopsis automáticamente.
 
 ### Principios de diseño
@@ -122,7 +122,7 @@ graph TD
 | `libadwaita-1-dev` | Componentes de UI (Libadwaita) | Todas |
 | `librsvg2-dev` | Renderizado de SVG | Todas |
 | `libayatana-appindicator3-dev` | Indicadores de bandeja (opcional) | Todas |
-| `libmpv-dev` | Reproducción de vídeo integrado | Todas |
+| `libgtk-4-dev` (incluye GtkMediaFile) | Reproducción de vídeo integrado | Todas |
 | `libgdk-pixbuf2.0-dev` | Decodificación de imágenes (pósters) | Todas |
 
 ### Herramientas de desarrollo
@@ -162,7 +162,7 @@ cd acryl
 El script hace lo siguiente:
 
 1. Detecta el gestor de paquetes (`apt`, `pacman`, `dnf`, `zypper` o `apk`).
-2. Instala las dependencias de sistema (`libgtk-4`, `libadwaita-1`, `librsvg2`, `libmpv`, `gdk-pixbuf2`, etc.).
+2. Instala las dependencias de sistema (`libgtk-4`, `libadwaita-1`, `librsvg2`, `gdk-pixbuf2`, etc.).
 3. Instala Rust/Cargo (≥ 1.90) si falta o está desactualizado.
 4. Clona el repositorio (o lo actualiza si ya existe).
 5. Compila la aplicación con `cargo build --release`.
@@ -273,7 +273,7 @@ app-media-manager/
 │   ├── main.rs               Punto de entrada de la aplicación GTK4
 │   ├── core/                 ← Lógica de negocio (library, metadata, db)
 │   ├── db/                   SQLite, repositorios, migraciones, FTS5
-│   ├── player/               Bindings a libmpv (reproducción integrada)
+│   ├── player/               Reproducción con GtkMediaFile (GTK4)
 │   ├── config/               Gestión de configuración YAML
 │   ├── ui/                   Interfaz GTK4 / Libadwaita
 │   │   ├── main_window.rs    Ventana principal
@@ -349,7 +349,7 @@ Acryl utiliza las siguientes dependencias principales. Todas son de código abie
 
 | Paquete | Propósito | Licencia |
 |---------|-----------|----------|
-| `libmpv` | Reproducción de vídeo | GPLv2+ / LGPL |
+| `gtk4` | Reproducción de vídeo integrada (GtkMediaFile) | LGPL |
 | `libgtk-4` | Interfaz gráfica | LGPL |
 | `libadwaita-1` | Componentes de UI | LGPL |
 | `librsvg2` | Renderizado SVG | LGPL |

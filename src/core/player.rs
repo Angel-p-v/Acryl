@@ -1,4 +1,4 @@
-//! Servicio de reproductor: bindings a libmpv.
+//! Servicio de reproductor: reproducción integrada con GtkMediaFile (GTK4).
 
 use crate::db::{MediaRepository, close_db, open_db};
 
@@ -20,8 +20,8 @@ impl PlayerService {
 
         close_db(conn);
 
-        // Aquí se abriría el archivo con libmpv vía FFI
-        // Por ahora solo registramos la intención de reproducir
+        // La reproducción real se gestiona desde la UI con GtkMediaFile (GTK4).
+        // Aquí solo registramos la intención de reproducir en el historial.
         eprintln!("Reproduciendo: {}", file_path);
 
         Ok(())

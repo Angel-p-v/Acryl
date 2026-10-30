@@ -5,7 +5,7 @@
 # Comprueba:
 #   1. Si la base de datos SQLite tiene medios indexados
 #   2. Si hay logs de la aplicación con errores
-#   3. Si el WebView/GTK funciona correctamente
+#   3. Si GTK funciona correctamente
 #   4. Si la ventana se está renderizando (proceso activo)
 #
 # Uso:
@@ -134,9 +134,9 @@ fi
 echo
 
 # -----------------------------------------------------------------------------
-# 5. WebView / GTK
+# 5. GTK / librerías del ejecutable
 # -----------------------------------------------------------------------------
-info "Comprobando WebView (GTK/WebKit)..."
+info "Comprobando GTK y librerías del ejecutable..."
 if have ldd && command -v "$APP_NAME" >/dev/null 2>&1; then
   BIN=$(command -v "$APP_NAME")
   MISSING=$(ldd "$BIN" 2>/dev/null | grep "not found" || true)
@@ -173,14 +173,9 @@ echo
 echo "Ejecuta la aplicación desde la terminal para ver errores en tiempo real:"
 echo "  RUST_BACKTRACE=1 $HOME/.local/bin/$APP_NAME"
 echo
-echo "Si usas el modo desarrollo:"
-echo "  cd /home/coronel/Projects/Acryl"
-echo "  npm run tauri:dev"
-echo
 echo "Si la base de datos está vacía, indexa medios desde la aplicación o:"
 echo "  sqlite3 ~/.local/share/acryl/acryl.db '.tables'"
 echo
-echo "Si no aparece nada aunque haya medios, puede ser un problema de"
-echo "WebView (webkit2gtk) con Wayland. Intenta:"
-echo "  GDK_BACKEND=x11 $HOME/.local/bin/$APP_NAME"
+echo "Si no aparece nada aunque haya medios, ejecuta con backtrace para ver errores de GTK4:"
+echo "  RUST_BACKTRACE=1 GDK_BACKEND=x11 $HOME/.local/bin/$APP_NAME"
 echo

@@ -88,7 +88,7 @@ echo "------------------------------------------------------------"
 echo
 if [[ $? -eq 124 ]]; then
   ok "La aplicación se ejecutó durante 5 segundos sin cerrarse (timeout)."
-  echo "  Si no apareció ventana, puede ser un problema de WebView/pantalla."
+  echo "  Si no apareció ventana, puede ser un problema de GTK/pantalla."
 elif [[ $? -eq 139 ]]; then
   error "La aplicación falló con SIGSEGV (segmentation fault)."
 elif [[ $? -ne 0 ]]; then
@@ -167,7 +167,7 @@ echo
 echo "1. Si hay librerías faltantes (paso 2): instálalas con tu gestor."
 echo "2. Si la ejecución directa falla (paso 3): copia el mensaje de error."
 echo "3. Si no aparece ventana pero no hay error: puede ser un problema"
-echo "   de WebView (webkit2gtk) o de servidor de pantalla (X11/Wayland)."
+echo "   de GTK o de servidor de pantalla (X11/Wayland)."
 echo
 echo "Por favor, comparte la salida de este script (especialmente los pasos"
 echo "2 y 3) para poder identificar el error exacto."

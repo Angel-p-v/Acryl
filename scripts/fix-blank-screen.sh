@@ -59,14 +59,15 @@ fi
 echo
 
 echo "============================================================"
-echo "  Prueba 3: Modo desarrollo (ver errores de consola)"
+echo "  Prueba 3: Ejecutar desde terminal para ver errores"
 echo "============================================================"
 echo
-echo "Ejecutar: cd /home/coronel/Projects/Acryl && npm run tauri:dev"
+echo "Ejecutar: RUST_BACKTRACE=1 $APP_BIN"
+echo "(Revisa la salida de la terminal para ver errores de GTK4)"
 echo
-read -p "¿Quieres abrir el modo desarrollo? (s/N): " resp
+read -p "¿Quieres probar esta opción? (s/N): " resp
 if [[ "$resp" =~ ^[sS]$ ]]; then
-  cd /home/coronel/Projects/Acryl && npm run tauri:dev
+  RUST_BACKTRACE=1 "$APP_BIN"
 fi
 echo
 
@@ -74,10 +75,7 @@ echo "============================================================"
 echo "  Si nada funciona"
 echo "============================================================"
 echo
-echo "El problema es que WebKit2GTK (usado por Tauri) no renderiza"
-echo "correctamente en Wayland/Hyprland. Esto es un problema conocido."
-echo
-echo "Soluciones alternativas:"
+echo "Si la aplicación no se abre o queda en blanco, prueba:"
 echo
 echo "1. Usar un servidor X11 (Xorg) en lugar de Wayland"
 echo "2. Usar XWayland: GDK_BACKEND=x11 ~/.local/bin/acryl"
