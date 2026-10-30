@@ -1,13 +1,17 @@
 //! Servicio de descarga y caché de pósters.
 //!
 //! Descarga pósters desde APIs públicas (listadas en https://github.com/public-apis/public-apis)
-//! y los almacena en caché en disco bajo ~/.cache/acryl/posters/.
+//! y los almacena en caché en disco bajo `~/.local/share/acryl/cache/posters/`.
 //! Las descargas se realizan en segundo plano para no bloquear la UI de GTK4.
 
 use crate::config::default_data_dir;
 use reqwest::Client;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+/// Tiempo máximo para descargar un póster.
+const POSTER_TIMEOUT_SECS: u64 = 20;
 
 /// Directorio de caché de pósters.
 fn poster_cache_dir() -> PathBuf {
@@ -34,6 +38,7 @@ pub fn poster_cache_path(poster_url: &str) -> PathBuf {
     let ext = Path::new(poster_url)
         .extension()
         .and_then(|e| e.to_str())
+        .filter(|ext| ext.chars().all(|c| c.is_ascii_alphanumeric()))
         .unwrap_or("jpg");
 
     poster_cache_dir().join(format!("{}.{}", hash, ext))
@@ -58,9 +63,12 @@ pub struct PosterService {
 impl PosterService {
     /// Crea un nuevo servicio con el cliente HTTP por defecto.
     pub fn new() -> Self {
-        Self {
-            client: Client::new(),
-        }
+        let client = Client::builder()
+            .timeout(Duration::from_secs(POSTER_TIMEOUT_SECS))
+            .user_agent(concat!("acryl/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .unwrap_or_default();
+        Self { client }
     }
 
     /// Descarga un póster de forma asíncrona usando tokio.
@@ -139,6 +147,12 @@ mod tests {
         let path1 = poster_cache_path("https://example.com/a.jpg");
         let path2 = poster_cache_path("https://example.com/b.jpg");
         assert_ne!(path1, path2);
+    }
+
+    #[test]
+    fn poster_cache_path_sanea_extensiones_no_seguras() {
+        let path = poster_cache_path("https://example.com/poster.jpg?token=abc");
+        assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("jpg"));
     }
 
     #[test]

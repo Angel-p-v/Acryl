@@ -30,6 +30,57 @@ pub fn build_mpv_args(file_path: &str, socket_path: &str) -> Vec<String> {
     ]
 }
 
+/// Construye los argumentos para abrir mpv como reproductor independiente.
+pub fn build_mpv_launch_args(file_path: &str) -> Vec<String> {
+    vec![
+        "--force-window=immediate".to_string(),
+        "--".to_string(),
+        file_path.to_string(),
+    ]
+}
+
+/// Lanza mpv en su propia ventana para reproducir un archivo.
+///
+/// El proceso se espera en un hilo secundario para evitar dejar procesos
+/// zombie cuando mpv termina.
+pub fn launch_mpv(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let is_url = file_path.starts_with("http://") || file_path.starts_with("https://");
+    if !is_url && file_path != "-" && !std::path::Path::new(file_path).exists() {
+        return Err(format!("archivo no encontrado: {}", file_path).into());
+    }
+
+    let mut child = Command::new(MPV_COMMAND)
+        .args(build_mpv_launch_args(file_path))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .stdin(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("no se pudo lanzar '{}': {}", MPV_COMMAND, e))?;
+
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+
+    Ok(())
+}
+
+/// Lanza mpv y registra la reproducción en el historial si se conoce el medio.
+pub fn play_external(
+    db_path: &str,
+    media_id: Option<i64>,
+    file_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    launch_mpv(file_path)?;
+
+    if let Some(media_id) = media_id
+        && let Err(error) = PlayerService::open(db_path, media_id, file_path)
+    {
+        eprintln!("No se pudo registrar la reproducción: {}", error);
+    }
+
+    Ok(())
+}
+
 /// Ejecuta un comando JSON contra el socket IPC de mpv y devuelve la primera
 /// línea de respuesta (si la hay).
 fn mpv_request(
@@ -320,6 +371,25 @@ mod tests {
                 "/ruta/video.mkv",
             ]
         );
+    }
+
+    #[test]
+    fn build_mpv_launch_args_separa_opciones_de_la_ruta() {
+        let args = build_mpv_launch_args("/ruta/con espacios/video.mkv");
+        assert_eq!(
+            args,
+            vec![
+                "--force-window=immediate",
+                "--",
+                "/ruta/con espacios/video.mkv",
+            ]
+        );
+    }
+
+    #[test]
+    fn launch_mpv_falla_limpiamente_si_el_archivo_no_existe() {
+        let resultado = launch_mpv("/ruta/que/no/existe.mp4");
+        assert!(resultado.is_err());
     }
 
     #[test]

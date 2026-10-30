@@ -3,7 +3,7 @@
 
 use acryl::db::connection::open_db;
 use acryl::db::file_repo::{FileRepository, MediaFileInput};
-use acryl::db::media_repo::{ListMediaOptions, MediaInput, MediaRepository};
+use acryl::db::media_repo::{ListMediaOptions, MediaInput, MediaRepository, SearchMediaOptions};
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -334,4 +334,168 @@ fn get_details_devuelve_media_con_archivos() {
     assert_eq!(details.media.id, media.id);
     assert_eq!(details.files.len(), 1);
     assert_eq!(details.files[0].title.as_deref(), Some("video.mp4"));
+}
+
+#[test]
+fn busqueda_encuentra_medios_recien_insertados() {
+    let (db_path, _dir) = temp_db();
+
+    {
+        let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "series".to_string(),
+            title: "Black Torch".to_string(),
+            sort_title: "black torch".to_string(),
+            year: None,
+            folder_path: "/media/black-torch".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert media");
+    }
+
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("reabrir BD");
+    let mut repo = MediaRepository::new(&mut conn);
+    let results = repo
+        .search(
+            "Black Torch",
+            SearchMediaOptions {
+                r#type: None,
+                limit: Some(10),
+            },
+        )
+        .expect("buscar media");
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].title, "Black Torch");
+}
+
+#[test]
+fn busqueda_usa_like_cuando_el_indice_fts_esta_vacio() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "series".to_string(),
+            title: "Black Torch".to_string(),
+            sort_title: "black torch".to_string(),
+            year: None,
+            folder_path: "/media/black-torch".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert media");
+    }
+
+    // Simula un índice FTS vacío para forzar el camino LIKE.
+    conn.execute("INSERT INTO media_fts(media_fts) VALUES ('delete-all')", [])
+        .expect("vaciar índice FTS");
+
+    let mut repo = MediaRepository::new(&mut conn);
+    let results = repo
+        .search(
+            "black",
+            SearchMediaOptions {
+                r#type: None,
+                limit: Some(10),
+            },
+        )
+        .expect("buscar media con fallback LIKE");
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].title, "Black Torch");
+}
+
+#[test]
+fn migracion_repara_triggers_fts_de_una_bd_existente() {
+    let (db_path, _dir) = temp_db();
+
+    {
+        let conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+        conn.execute_batch(
+            "DROP TRIGGER IF EXISTS media_fts_insert;
+             DROP TRIGGER IF EXISTS media_fts_delete;
+             DROP TRIGGER IF EXISTS media_fts_update;
+             DELETE FROM schema_migrations WHERE version = 5;",
+        )
+        .expect("simular BD antigua sin triggers FTS");
+
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path)
+             VALUES ('series', 'Legacy Show', 'legacy show', '/media/legacy')",
+            [],
+        )
+        .expect("insertar medio sin trigger FTS");
+    }
+
+    // Al reabrir, la migración 5 debe recrear los triggers y reconstruir el índice.
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("reabrir BD");
+    let triggers: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'trigger' AND name LIKE 'media_fts_%'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("contar triggers");
+    assert_eq!(triggers, 3);
+
+    let mut repo = MediaRepository::new(&mut conn);
+    let results = repo
+        .search(
+            "legacy",
+            SearchMediaOptions {
+                r#type: None,
+                limit: Some(10),
+            },
+        )
+        .expect("buscar medio antiguo");
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].title, "Legacy Show");
+}
+
+#[test]
+fn update_metadata_actualiza_anio_poster_y_sinopsis() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let media = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "series".to_string(),
+            title: "Solo Leveling".to_string(),
+            sort_title: "solo leveling".to_string(),
+            year: None,
+            folder_path: "/media/solo-leveling".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert media")
+    };
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.update_metadata(
+            media.id,
+            Some(2024),
+            Some("https://example.com/poster.jpg"),
+            Some("Sinopsis de prueba"),
+        )
+        .expect("actualizar metadatos");
+    }
+
+    let updated = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.find_by_id(media.id)
+            .expect("buscar media")
+            .expect("media existente")
+    };
+
+    assert_eq!(updated.year, Some(2024));
+    assert_eq!(
+        updated.poster_path.as_deref(),
+        Some("https://example.com/poster.jpg")
+    );
+    assert_eq!(updated.synopsis.as_deref(), Some("Sinopsis de prueba"));
+    assert!(updated.metadata_fetched_at.is_some());
 }

@@ -107,6 +107,30 @@ CREATE INDEX IF NOT EXISTS idx_media_streams_file ON media_streams(file_path);
 CREATE INDEX IF NOT EXISTS idx_media_streams_type ON media_streams(stream_type);
 "#;
 
+/// Repara los triggers de FTS5 que nunca llegaron a crearse en bases de datos
+/// antiguas (el runner anterior dividía el SQL por `;` y rompía los triggers)
+/// y reconstruye el índice para que las búsquedas existentes funcionen.
+const FTS_TRIGGERS_REPAIR_SQL: &str = r#"
+DROP TRIGGER IF EXISTS media_fts_insert;
+DROP TRIGGER IF EXISTS media_fts_delete;
+DROP TRIGGER IF EXISTS media_fts_update;
+
+CREATE TRIGGER media_fts_insert AFTER INSERT ON media BEGIN
+  INSERT INTO media_fts(rowid, title) VALUES (new.id, new.title);
+END;
+
+CREATE TRIGGER media_fts_delete AFTER DELETE ON media BEGIN
+  INSERT INTO media_fts(media_fts, rowid, title) VALUES ('delete', old.id, old.title);
+END;
+
+CREATE TRIGGER media_fts_update AFTER UPDATE ON media BEGIN
+  INSERT INTO media_fts(media_fts, rowid, title) VALUES ('delete', old.id, old.title);
+  INSERT INTO media_fts(rowid, title) VALUES (new.id, new.title);
+END;
+
+INSERT INTO media_fts(media_fts) VALUES ('rebuild');
+"#;
+
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -127,5 +151,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 4,
         name: "media-streams",
         sql: MEDIA_STREAMS_SQL,
+    },
+    Migration {
+        version: 5,
+        name: "fts-triggers-repair",
+        sql: FTS_TRIGGERS_REPAIR_SQL,
     },
 ];

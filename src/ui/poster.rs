@@ -62,14 +62,10 @@ impl Poster {
 
     /// Establece la URL del póster y lo carga desde caché si está disponible.
     pub fn set_poster_url(&mut self, poster_url: &str) {
-        #[allow(clippy::collapsible_if)]
-        if let Some(cache_path) = cached_path(poster_url) {
-            if let Ok(pixbuf) = GtkPixbuf::from_file_at_scale(&cache_path, 150, 200, true) {
-                self.image.set_from_pixbuf(Some(&pixbuf));
-            }
-        }
-        // Si no está en caché, se queda vacío (placeholder). La descarga
-        // asíncrona se implementará en un hito posterior.
+        let pixbuf = cached_path(poster_url)
+            .and_then(|cache_path| GtkPixbuf::from_file_at_scale(&cache_path, 150, 200, true).ok());
+
+        self.image.set_from_pixbuf(pixbuf.as_ref());
     }
 }
 

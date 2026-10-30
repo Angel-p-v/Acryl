@@ -13,6 +13,7 @@ pub struct MediaDetails {
     media_id: i64,
     poster: crate::ui::poster::Poster,
     title_label: Label,
+    info_label: Label,
     synopsis_label: Label,
     favorite_button: Button,
     watched_button: Button,
@@ -44,6 +45,11 @@ impl MediaDetails {
         title_label.set_hexpand(true);
         title_label.set_wrap(true);
 
+        let info_label = Label::new(None);
+        info_label.set_halign(gtk4::Align::Start);
+        info_label.set_hexpand(true);
+        info_label.add_css_class("dim-label");
+
         let synopsis_label = Label::new(None);
         synopsis_label.set_halign(gtk4::Align::Start);
         synopsis_label.set_hexpand(true);
@@ -69,6 +75,7 @@ impl MediaDetails {
         box_.append(&back_button);
         box_.append(poster.widget());
         box_.append(&title_label);
+        box_.append(&info_label);
         box_.append(&synopsis_label);
         box_.append(&content_container);
         box_.append(&favorite_button);
@@ -81,6 +88,7 @@ impl MediaDetails {
             media_id,
             poster,
             title_label,
+            info_label,
             synopsis_label,
             favorite_button,
             watched_button,
@@ -125,9 +133,21 @@ impl MediaDetails {
     pub fn set_media(&mut self, media: &Media) {
         self.media_id = media.id;
         self.title_label
-            .set_markup(&format!("<b>{}</b>", media.title));
+            .set_markup(&format!("<b>{}</b>", escape_markup(&media.title)));
+        let type_label = match media.r#type.as_str() {
+            "series" => "Serie",
+            "anime" => "Anime",
+            "movie" => "Película",
+            other => other,
+        };
+        let info_label = match media.year {
+            Some(year) => format!("{} · {}", type_label, year),
+            None => type_label.to_string(),
+        };
+        self.info_label.set_label(&info_label);
         self.synopsis_label
             .set_label(&media.synopsis.clone().unwrap_or_default());
+        self.poster.set_title(&media.title);
         self.poster
             .set_poster_url(media.poster_path.as_deref().unwrap_or(""));
 
@@ -203,7 +223,7 @@ impl MediaDetails {
                 let season_label = Label::new(Some(&season.title));
                 season_label.set_halign(gtk4::Align::Start);
                 season_label.set_hexpand(true);
-                season_label.set_markup(&format!("<b>{}</b>", season.title));
+                season_label.set_markup(&format!("<b>{}</b>", escape_markup(&season.title)));
                 row.append(&season_label);
 
                 let open_btn = Button::with_label("Abrir");
@@ -403,4 +423,8 @@ impl MediaDetails {
     {
         self.on_play_episode = Some(Rc::new(f));
     }
+}
+
+fn escape_markup(text: &str) -> String {
+    gtk4::glib::markup_escape_text(text).to_string()
 }

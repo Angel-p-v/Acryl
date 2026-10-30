@@ -159,7 +159,7 @@ src-tauri/                ← Rust
 |------|-----------|--------|
 | Hito 1 | Prototipo mínimo: ventana Tauri, lista desde SQLite, póster, búsqueda | ✅ completado |
 | Hito 2 | Capa de dominio en Rust (db, library, metadata) | ✅ completado |
-| Hito 3 | Reproductor integrado (mpv, proceso externo) | ✅ completado |
+| Hito 3 | Reproductor con `mpv` (proceso externo) | ✅ completado |
 | Hito 4 | UI completa (detalles, favoritos, visto, navegación) | ✅ completado |
 | Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ✅ completado |
 | Hito 6 | Configuración YAML en el backend | ✅ completado |
@@ -227,16 +227,15 @@ Se convierte en:
 
 ```
 src/                      ← Rust puro (binario único)
-  ├── core/               ← Lógica de negocio (library, metadata, db)
+  ├── core/               ← Lógica de negocio (library, metadata, player, poster_service)
   ├── db/                 ← rusqlite, migraciones, FTS5
-  ├── player/             ← integración con `mpv` (proceso externo vía `std::process::Command`)
   ├── config/             ← serde + YAML
   ├── ui/                 ← GTK4 / Libadwaita (ventana, widgets, vistas)
   │   ├── main_window.rs  ← Ventana principal
   │   ├── search_bar.rs   ← Barra de búsqueda
-  │   ├── media_list.rs   ← Lista de medios
+  │   ├── media_list.rs   ← Galería de medios
   │   ├── media_details.rs│ Vista de detalles
-  │   ├── video_player.rs ← Reproductor embebido
+  │   ├── settings_window.rs ← Vista de ajustes
   │   └── poster.rs       ← Renderizado de pósters con gdk-pixbuf
   └── main.rs             ← Punto de entrada GTK4
 ```
@@ -256,7 +255,7 @@ src/                      ← Rust puro (binario único)
 - Historial de reproducción
 - **Criterio de aceptación:** flujo completo: indexar → buscar → ver detalles → reproducir
 
-#### Hito E.3 — Reproductor integrado con mpv (proceso externo) (Semanas 7–8)
+#### Hito E.3 — Reproductor con mpv (proceso externo) (Semanas 7–8)
 - Integración con `mpv` como proceso externo desde la ventana GTK4 (`std::process::Command`)
 - Controles: play, pause, stop, next, prev, seek, volumen (enviados a `mpv`)
 - **Criterio de aceptación:** se reproduce un archivo de video usando `mpv` como proceso externo
@@ -381,7 +380,7 @@ LICENSE                   ← Se mantiene
 |------|-----------|--------|
 | Hito 1 | Prototipo mínimo: ventana Tauri, lista desde SQLite, póster, búsqueda | ✅ completado |
 | Hito 2 | Capa de dominio en Rust (db, library, metadata) | ✅ completado |
-| Hito 3 | Reproductor integrado (mpv, proceso externo) | ✅ completado |
+| Hito 3 | Reproductor con `mpv` (proceso externo) | ✅ completado |
 | Hito 4 | UI completa (detalles, favoritos, visto, navegación) | ✅ completado |
 | Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ✅ completado |
 | Hito 6 | Configuración YAML en el backend | ✅ completado |
@@ -390,21 +389,21 @@ LICENSE                   ← Se mantiene
 | Hito 9 | Publicación automática en GitHub Releases | ✅ completado |
 | **Hito E.1** | Prototipo mínimo GTK4 (ventana, lista, póster, búsqueda) | ✅ completado |
 | **Hito E.2** | UI completa GTK4 (detalles, favoritos, visto, navegación) | ✅ completado |
-| **Hito E.3** | Reproductor integrado con `mpv` (proceso externo) en GTK4 | ✅ completado |
+| **Hito E.3** | Reproductor con `mpv` (proceso externo) en GTK4 | ✅ completado |
 | **Hito E.4** | Empaquetado nativo Linux sin Tauri | ✅ completado |
 | **Hito E.5** | Limpieza y documentación (eliminar frontend/Tauri) | ✅ completado |
 
 ---
 
-### Hito F.1 — Reproducción de episodios desde la vista de detalles (Semanas 1–2)
-- Conectar los botones "▶ Reproducir" de cada episodio en la vista de detalles al reproductor integrado (`VideoPlayer`)
-- Al hacer clic en un episodio, cargar su archivo en el reproductor y navegar a la vista de reproducción
-- **Criterio de aceptación:** al hacer clic en el botón de reproducción de cualquier episodio, el video se reproduce dentro de la ventana de la aplicación
+### Hito F.1 — Reproducción de episodios desde la vista de detalles (Semanas 1–2) ✅
+- Conectar los botones "▶ Reproducir" de cada episodio al reproductor `mpv` (proceso externo)
+- Al hacer clic en un episodio, lanzar `mpv` con su archivo y registrar la reproducción en el historial
+- **Criterio de aceptación:** al hacer clic en el botón de reproducción de cualquier episodio, `mpv` abre el vídeo en su propia ventana
 
-### Hito F.2 — Controles de reproducción integrados (Semanas 3–4)
-- Controles funcionales en el reproductor: play, pausa, stop, seek, volumen
-- Mostrar información de reproducción (tiempo actual, duración)
-- **Criterio de aceptación:** se puede pausar, reanudar, detener y ajustar el volumen de un video en reproducción
+### Hito F.2 — Controles de reproducción (Semanas 3–4) ✅
+- Los controles (play, pausa, stop, seek, volumen, pistas) los proporciona `mpv` de forma nativa
+- La aplicación no duplica controles ni mantiene un reproductor embebido
+- **Criterio de aceptación:** se puede pausar, reanudar, detener y ajustar el volumen desde la ventana de `mpv`
 
 ---
 
@@ -418,8 +417,8 @@ Objetivo: interfaz visual bonita con Libadwaita + CSS, renderizado de pósters d
 
 | Hito | Contenido | Estado |
 |------|-----------|--------|
-| **Hito G.1** | Infraestructura de datos masivos: tabla `media_streams`, índices, extracción con `ffprobe`, consultas paginadas | Pendiente |
-| **Hito G.2** | Galería de pósters virtualizada con `GtkListView` y descarga asíncrona desde APIs públicas (`public-apis`) | Pendiente |
+| **Hito G.1** | Infraestructura de datos masivos: tabla `media_streams`, índices, extracción con `ffprobe`, consultas paginadas | ✅ completado |
+| **Hito G.2** | Galería de pósters con caché local y descarga asíncrona desde TVmaze | ✅ completado |
 | **Hito G.3** | UI moderna con Libadwaita y CSS de GTK4 (`AdwStatusPage`, `AdwToast`, `AdwClamp`) | Pendiente |
 | **Hito G.4** | Selección de pistas audio / subtítulos y reproducción con `mpv` aplicando `--aid` / `--sid` | Pendiente |
 | **Hito G.5** | Pruebas de estrés con colección grande y ajuste de rendimiento | Pendiente |
