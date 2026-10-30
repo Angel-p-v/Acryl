@@ -1,12 +1,14 @@
 //! Barra de búsqueda de medios.
 
+#![allow(clippy::arc_with_non_send_sync)]
+
 use crate::core::library::LibraryService;
 use gtk4::prelude::*;
 use gtk4::{Box, Entry, Label, Orientation};
 use std::sync::Arc;
 use std::sync::Mutex;
 
-type MediaSelectCallback = std::boxed::Box<dyn Fn(i64) + Send>;
+type MediaSelectCallback = std::boxed::Box<dyn Fn(i64)>;
 
 pub struct SearchBar {
     box_: Box,
@@ -49,7 +51,7 @@ impl SearchBar {
 
     pub fn on_select<F>(&mut self, f: F)
     where
-        F: Fn(i64) + Send + 'static,
+        F: Fn(i64) + 'static,
     {
         self.on_media_select = Arc::new(Mutex::new(Some(std::boxed::Box::new(f))));
         self.setup_search_handler();

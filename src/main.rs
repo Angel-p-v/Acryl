@@ -23,7 +23,7 @@ fn main() {
     app.connect_activate(move |app| {
         let config = config.clone();
         let window = MainWindow::new(app, config);
-        window.widget().present();
+        window.borrow().widget().present();
     });
 
     app.run_with_args(&std::env::args().collect::<Vec<_>>());

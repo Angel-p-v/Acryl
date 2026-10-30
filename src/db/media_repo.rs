@@ -303,6 +303,18 @@ impl<'a> MediaRepository<'a> {
         let files = file_repo.list_by_media(media_id)?;
         Ok(Some(MediaDetails { media, files }))
     }
+
+    pub fn find_media_id_by_file(&mut self, file_path: &str) -> RusqliteResult<Option<i64>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT media_id FROM media_files WHERE file_path = ?1 LIMIT 1")?;
+        let row = stmt.query_row(params![file_path], |row| row.get(0));
+        match row {
+            Ok(id) => Ok(Some(id)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
