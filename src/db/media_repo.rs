@@ -18,6 +18,7 @@ pub struct Media {
     pub metadata_fetched_at: Option<String>,
     pub is_favorite: bool,
     pub is_watched: bool,
+    pub parent_id: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +28,7 @@ pub struct MediaInput {
     pub sort_title: String,
     pub year: Option<i32>,
     pub folder_path: String,
+    pub parent_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -54,14 +56,15 @@ impl<'a> MediaRepository<'a> {
 
     pub fn upsert(&mut self, input: &MediaInput) -> RusqliteResult<Media> {
         let insert_result = self.conn.execute(
-            "INSERT INTO media (type, title, sort_title, year, folder_path)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO media (type, title, sort_title, year, folder_path, parent_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 input.r#type,
                 input.title,
                 input.sort_title,
                 input.year,
-                input.folder_path
+                input.folder_path,
+                input.parent_id
             ],
         );
 
@@ -70,14 +73,15 @@ impl<'a> MediaRepository<'a> {
             Err(rusqlite::Error::SqliteFailure(_, _)) => {
                 self.conn.execute(
                     "UPDATE media SET type = ?1, title = ?2, sort_title = ?3,
-                     year = ?4, updated_at = datetime('now')
+                     year = ?4, updated_at = datetime('now'), parent_id = ?6
                      WHERE folder_path = ?5",
                     params![
                         input.r#type,
                         input.title,
                         input.sort_title,
                         input.year,
-                        input.folder_path
+                        input.folder_path,
+                        input.parent_id
                     ],
                 )?;
                 self.conn.query_row(
@@ -96,7 +100,7 @@ impl<'a> MediaRepository<'a> {
     pub fn find_by_id(&mut self, id: i64) -> RusqliteResult<Option<Media>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
-                    is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at
+                    is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at, parent_id
              FROM media WHERE id = ?1",
         )?;
         let row = stmt.query_row(params![id], map_media_row);
@@ -110,13 +114,16 @@ impl<'a> MediaRepository<'a> {
     pub fn list(&mut self, options: ListMediaOptions) -> RusqliteResult<Vec<Media>> {
         let mut sql = String::from(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
-                    is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at
+                    is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at, parent_id
              FROM media",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
+        // Solo mostrar medios padre (no temporadas) en la lista principal
+        sql.push_str(" WHERE parent_id IS NULL");
+
         if let Some(ref t) = options.r#type {
-            sql.push_str(" WHERE type = ?");
+            sql.push_str(" AND type = ?");
             params_vec.push(Box::new(t.clone()));
         }
 
@@ -165,10 +172,10 @@ impl<'a> MediaRepository<'a> {
                 "SELECT m.id, m.type, m.title, m.sort_title, m.year, m.folder_path,
                         m.created_at, m.updated_at,
                         m.is_favorite, m.is_watched, m.poster_path, m.synopsis,
-                        m.metadata_fetched_at
+                        m.metadata_fetched_at, m.parent_id
                  FROM media m
                  JOIN media_fts f ON f.rowid = m.id
-                 WHERE media_fts MATCH ?1",
+                 WHERE media_fts MATCH ?1 AND m.parent_id IS NULL",
             );
             let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(fts_query)];
 
@@ -196,7 +203,7 @@ impl<'a> MediaRepository<'a> {
                 "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                         is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at
                  FROM media
-                 WHERE sort_title LIKE ?1",
+                 WHERE sort_title LIKE ?1 AND parent_id IS NULL",
             );
             let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(like_pattern)];
 
@@ -245,6 +252,22 @@ impl<'a> MediaRepository<'a> {
             |row| row.get(0),
         )?;
         Ok(value)
+    }
+
+    /// Obtiene las temporadas (hijos) de una serie padre.
+    pub fn list_children(&mut self, parent_id: i64) -> RusqliteResult<Vec<Media>> {
+        let sql = String::from(
+            "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
+                    is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at, parent_id
+             FROM media WHERE parent_id = ?1 ORDER BY sort_title ASC",
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows: Vec<Media> = stmt
+            .query_map(params![parent_id], map_media_row)?
+            .filter_map(Result::ok)
+            .collect();
+
+        Ok(rows)
     }
 
     pub fn list_folders(&mut self) -> RusqliteResult<Vec<String>> {
@@ -339,6 +362,7 @@ fn map_media_row(row: &rusqlite::Row<'_>) -> RusqliteResult<Media> {
         poster_path: row.get(10)?,
         synopsis: row.get(11)?,
         metadata_fetched_at: row.get(12)?,
+        parent_id: row.get(13)?,
     })
 }
 

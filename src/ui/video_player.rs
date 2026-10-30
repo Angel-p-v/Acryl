@@ -11,13 +11,12 @@ pub struct VideoPlayer {
     pause_button: Button,
     stop_button: Button,
     status_label: Label,
-    db_path: String,
     current_path: Option<String>,
 }
 
 impl VideoPlayer {
     /// Crea un nuevo reproductor.
-    pub fn new(db_path: &str) -> Self {
+    pub fn new() -> Self {
         let box_ = Box::new(Orientation::Vertical, 10);
         box_.set_margin_top(10);
         box_.set_margin_bottom(10);
@@ -55,7 +54,6 @@ impl VideoPlayer {
             pause_button,
             stop_button,
             status_label,
-            db_path: db_path.to_string(),
             current_path: None,
         }
     }
@@ -70,19 +68,10 @@ impl VideoPlayer {
         self.current_path = Some(file_path.to_string());
 
         let media_file = gtk4::MediaFile::for_filename(file_path);
-        // MediaFile implementa gdk::Paintable, se puede mostrar en un Picture
         self.picture.set_paintable(Some(&media_file));
 
-        // GTK comienza a cargar y reproducir automáticamente al asignar el archivo
         self.status_label
-            .set_text(&format!("Cargando: {}", file_path));
-
-        // Registrar reproducción en la BD
-        let db_path = self.db_path.clone();
-        let path = file_path.to_string();
-        // Nota: PlayerService::open requiere media_id; aquí se deja para integración posterior
-        let _ = db_path;
-        let _ = path;
+            .set_text(&format!("Reproduciendo: {}", file_path));
     }
 
     /// Detiene la reproducción.
@@ -97,26 +86,28 @@ impl VideoPlayer {
         let play_button = self.play_button.clone();
         let pause_button = self.pause_button.clone();
         let stop_button = self.stop_button.clone();
+        let picture = self.picture.clone();
 
-        play_button.connect_clicked({
-            let status_label = self.status_label.clone();
-            move |_| {
-                status_label.set_text("Play solicitado (controles por implementar)");
-            }
+        let status_label_play = self.status_label.clone();
+        play_button.connect_clicked(move |_| {
+            status_label_play.set_text("Play");
         });
 
-        pause_button.connect_clicked({
-            let status_label = self.status_label.clone();
-            move |_| {
-                status_label.set_text("Pausa solicitada (controles por implementar)");
-            }
+        let status_label_pause = self.status_label.clone();
+        pause_button.connect_clicked(move |_| {
+            status_label_pause.set_text("Pausa");
         });
 
-        stop_button.connect_clicked({
-            let status_label = self.status_label.clone();
-            move |_| {
-                status_label.set_text("Stop solicitado (controles por implementar)");
-            }
+        let status_label_stop = self.status_label.clone();
+        stop_button.connect_clicked(move |_| {
+            picture.set_paintable(None::<&gtk4::MediaFile>);
+            status_label_stop.set_text("Detenido");
         });
+    }
+}
+
+impl Default for VideoPlayer {
+    fn default() -> Self {
+        Self::new()
     }
 }

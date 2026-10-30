@@ -27,6 +27,8 @@ pub fn default_data_dir() -> PathBuf {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub db_path: String,
+    #[serde(default)]
+    pub media_folders: Vec<String>,
     pub language: String,
     pub auto_sync_metadata: bool,
     pub default_player: String,
@@ -39,6 +41,7 @@ impl Default for AppConfig {
                 .join("acryl.db")
                 .to_string_lossy()
                 .to_string(),
+            media_folders: Vec::new(),
             language: "es".to_string(),
             auto_sync_metadata: false,
             default_player: "mpv".to_string(),
