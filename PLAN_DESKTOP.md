@@ -408,9 +408,27 @@ LICENSE                   ← Se mantiene
 
 ---
 
-## 16. Próximo paso inmediato
+## 16. Fase G — UI visual moderna, pósters, pistas de audio/subtítulos y datos masivos
 
-Implementar el **Hito F.1 — Reproducción de episodios desde la vista de detalles**. Crear la rama `feat/reproduccion-episodios` para el trabajo.
+Plan detallado en `docs/plan-ui-visual-pistas-escala-masiva.md`.
+
+Objetivo: interfaz visual bonita con Libadwaita + CSS, renderizado de pósters de alta resolución, detección y selección de pistas de audio y subtítulos, y arquitectura preparada para colecciones masivas (miles de medios, decenas de miles de archivos) sin bloquear la UI.
+
+### Hitos de la Fase G
+
+| Hito | Contenido | Estado |
+|------|-----------|--------|
+| **Hito G.1** | Infraestructura de datos masivos: tabla `media_streams`, índices, extracción con `ffprobe`, consultas paginadas | Pendiente |
+| **Hito G.2** | Galería de pósters virtualizada con `GtkListView` y descarga asíncrona desde TMDB/TVDB | Pendiente |
+| **Hito G.3** | UI moderna con Libadwaita y CSS de GTK4 (`AdwStatusPage`, `AdwToast`, `AdwClamp`) | Pendiente |
+| **Hito G.4** | Selección de pistas audio / subtítulos y reproducción con `mpv` aplicando `--aid` / `--sid` | Pendiente |
+| **Hito G.5** | Pruebas de estrés con colección grande y ajuste de rendimiento | Pendiente |
+
+---
+
+## 17. Próximo paso inmediato
+
+Crear la rama `feat/plan-ui-visual-pistas-escala-masiva` e iniciar el **Hito G.1** (infraestructura de datos masivos).
 
 ---
 
