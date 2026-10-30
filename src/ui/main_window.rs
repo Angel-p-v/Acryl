@@ -6,12 +6,12 @@ use crate::ui::media_details::MediaDetails;
 use crate::ui::media_list::MediaList;
 use crate::ui::search_bar::SearchBar;
 use crate::ui::settings_window::SettingsView;
-use crate::ui::video_player::VideoPlayer;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Orientation, Stack};
 use libadwaita::ApplicationWindow as AdwApplicationWindow;
 use libadwaita::prelude::*;
 use std::cell::RefCell;
+use std::process::Command;
 use std::rc::Rc;
 
 pub struct MainWindow {
@@ -21,7 +21,6 @@ pub struct MainWindow {
     settings_button: Button,
     media_list: MediaList,
     media_details: Rc<RefCell<MediaDetails>>,
-    video_player: Rc<RefCell<VideoPlayer>>,
     settings_view: SettingsView,
     db_path: String,
 }
@@ -71,14 +70,6 @@ impl MainWindow {
         media_details.borrow_mut().set_db_path(&db_path);
         stack.add_titled(media_details.borrow().widget(), Some("details"), "Detalles");
 
-        let video_player = Rc::new(RefCell::new(VideoPlayer::new()));
-        VideoPlayer::setup_controls(&video_player);
-        stack.add_titled(
-            video_player.borrow().widget(),
-            Some("player"),
-            "Reproductor",
-        );
-
         let settings_view = SettingsView::new(config.inner(), &db_path);
         stack.add_titled(settings_view.widget(), Some("settings"), "Ajustes");
 
@@ -93,7 +84,6 @@ impl MainWindow {
             settings_button,
             media_list,
             media_details,
-            video_player,
             settings_view,
             db_path: db_path.clone(),
         }));
@@ -201,18 +191,6 @@ impl MainWindow {
             .on_play(move || {
                 let w = this_clone.borrow();
                 w.play_file();
-            });
-
-        // Callback: al hacer clic en "▶ Reproducir" de un episodio, cargar el archivo en el reproductor
-        // y navegar a la vista de reproducción.
-        let this_clone = this.clone();
-        this.borrow_mut()
-            .media_details
-            .borrow_mut()
-            .on_play_episode(move |file_path| {
-                let w = this_clone.borrow();
-                w.video_player.borrow_mut().load_file(&file_path);
-                w.stack.set_visible_child_name("player");
             });
 
         // Callback: al hacer clic en "Abrir" de una temporada, navegar a los detalles de esa temporada.
@@ -329,8 +307,8 @@ impl MainWindow {
         close_db(conn);
 
         if let Some(f) = files.first() {
-            self.video_player.borrow_mut().load_file(&f.file_path);
-            self.stack.set_visible_child_name("player");
+            // Lanzar mpv como proceso externo (no bloquea la UI de GTK4).
+            let _ = Command::new("mpv").arg(&f.file_path).spawn();
         } else {
             eprintln!("No hay archivos para el medio {}", media_id);
         }
