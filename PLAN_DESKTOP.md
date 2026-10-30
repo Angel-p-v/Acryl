@@ -434,3 +434,62 @@ Crear la rama `feat/plan-ui-visual-pistas-escala-masiva` e iniciar el **Hito G.1
 ---
 
 *Nota: Este plan es un borrador inicial. A medida que se avanza en la implementación, se deben actualizar los hitos y criterios de aceptación.*
+
+---
+
+## 18. ⚠️ URGENTE: Implementación de gestión de carpetas y pósters
+
+### 18.1. Gestión de carpetas de medios
+
+**Comportamiento esperado:**
+
+- **Añadir carpeta:** El usuario debe poder seleccionar una carpeta (directorio) y que la aplicación escanee todos los archivos de vídeo, series y anime dentro de ella. Los medios deben agregarse a la biblioteca indexada en SQLite y ser visibles en la lista principal.
+
+- **Eliminar carpeta:** Cuando el usuario elimina una carpeta indexada, **todos los medios asociados deben ser removidos de la base de datos** y ya no aparecer en la aplicación. Esto incluye:
+  - Archivos de vídeo sueltos (mkv, mp4, avi, etc.)
+  - Series con temporadas y episodios
+  - Anime con episodios
+
+**Implementación requerida:**
+
+- Definir rutas absolutas de las carpetas indexadas en la tabla `media` o tabla separada de `folders`
+- Implementar trigger o evento en SQLite que elimine `media_files` y `media` relacionados cuando se elimine la carpeta
+- Validar que la eliminación sea irreversible o tener confirmación adecuada (modo --purge estilo uninstall.sh)
+- Mostrar indicador visual de carpetas indexadas y opción de "re-indexar" si el usuario mueve archivos
+
+### 18.2. Series con temporadas en carpeta padre
+
+**Problema detectado:**
+
+- Cuando una serie tiene sus temporadas dentro de la carpeta padre (ej: `/Series/Titulo/Temporada 1/`, `/Series/Titulo/Temporada 2/`), se ve un **hueco grande en blanco** entre el póster de la serie y la sinopsis en la vista de detalles.
+
+- **Causa:** El diseño actual no contempla el caso de series anidadas dentro de la misma raíz, por lo que el espacio entre el póster y el texto no está optimizado para esta estructura.
+
+**Solución propuesta:**
+
+- Redimensionar o reubicar el póster para que ocupe todo el espacio disponible arriba
+- Acortar o dar diseño diferente al área de sinopsis cuando la serie tiene temporadas anidadas
+- Opcional: Detectar automáticamente esta estructura y aplicar un layout compacto
+
+### 18.3. Mostrado de pósters (principal y de temporada)
+
+**Problema detectado:**
+
+- El póster principal de la serie y el póster de cada temporada muestra el **" póster por defecto"** cuando no hay imagen específica cargada.
+- Esto ocurre incluso cuando ya se tiene póster asignado en la base de datos para el nivel padre o temporada.
+
+**Solución propuesta:**
+
+- **Póster principal:** Si la serie tiene póster asignado, siempre debe mostrarse ese póster y **nunca** el por defecto, aun cuando se muestre la lista de temporadas.
+- **Póster de temporada:** Lo mismo para cada temporada individual - si tiene póster propio, mostrarlo; si no, no mostrar ninguno en lugar del placeholder por defecto.
+- Implementar validación en la consulta SQL o en el renderizado GTK4 para verificar `poster_path IS NOT NULL` antes de mostrar imagen placeholder.
+
+**Prioridad:** Alta - afecta la experiencia visual del usuario y la consistencia del UI.
+
+---
+
+*Nota: Este apartado es urgente porque afecta la funcionalidad básica de agregar/quitar contenido y la apariencia visual. Se solicita priorizar en la siguiente iteración de sprints.*
+
+---
+
+*Nota: Este plan es un borrador inicial. A medida que se avanza en la implementación, se deben actualizar los hitos y criterios de aceptación.*
