@@ -72,7 +72,7 @@ impl MainWindow {
         stack.add_titled(media_details.borrow().widget(), Some("details"), "Detalles");
 
         let video_player = Rc::new(RefCell::new(VideoPlayer::new()));
-        video_player.borrow_mut().setup_controls();
+        VideoPlayer::setup_controls(&video_player);
         stack.add_titled(
             video_player.borrow().widget(),
             Some("player"),
