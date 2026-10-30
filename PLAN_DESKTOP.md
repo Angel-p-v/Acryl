@@ -388,7 +388,7 @@ LICENSE                   ← Se mantiene
 | Hito 7 | Internacionalización (i18n) de la UI | ✅ completado |
 | Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ✅ completado |
 | Hito 9 | Publicación automática en GitHub Releases | ✅ completado |
-| **Hito E.1** | Prototipo mínimo GTK4 (ventana, lista, póster, búsqueda) | ⏳ pendiente |
+| **Hito E.1** | Prototipo mínimo GTK4 (ventana, lista, póster, búsqueda) | ✅ completado |
 | **Hito E.2** | UI completa GTK4 (detalles, favoritos, visto, navegación) | ⏳ pendiente |
 | **Hito E.3** | Reproductor integrado con libmpv en GTK4 | ⏳ pendiente |
 | **Hito E.4** | Empaquetado nativo Linux sin Tauri | ⏳ pendiente |
@@ -398,7 +398,7 @@ LICENSE                   ← Se mantiene
 
 ## 16. Próximo paso inmediato
 
-Crear el **ADR (Architecture Decision Record)** documentando la decisión de migrar de Tauri/WebView a GTK4/Libadwaita, y crear una rama `refactor/gtk4-migration` para el trabajo.
+Implementar el **Hito E.2 — UI completa GTK4**: vistas de detalles con póster grande, metadatos, sinopsis; favoritos; en curso; vistos/no vistos; navegación entre lista y detalles. Crear la rama `feat/gtk4-e2-ui-completa` para el trabajo.
 
 ---
 
