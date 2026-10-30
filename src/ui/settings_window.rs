@@ -3,7 +3,7 @@
 use crate::config::AppConfig;
 use crate::core::library::LibraryService;
 use gtk4::prelude::*;
-use gtk4::{Box, Button, ComboBoxText, Entry, Label, Orientation, ScrolledWindow};
+use gtk4::{Box, Button, ComboBoxText, Entry, Label, Orientation, ScrolledWindow, Spinner};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::process::Command;
@@ -25,8 +25,12 @@ pub struct SettingsView {
     language_combo: ComboBoxText,
     save_button: Button,
     cancel_button: Button,
+    metadata_button: Button,
+    metadata_spinner: Spinner,
+    metadata_status: Label,
     config: Rc<RefCell<AppConfig>>,
     on_save: Option<Rc<dyn Fn(AppConfig)>>,
+    on_refresh_metadata: Option<Rc<dyn Fn()>>,
 }
 
 impl SettingsView {
@@ -107,8 +111,46 @@ impl SettingsView {
         });
         language_section.append(&language_combo);
 
+        // --- Sección: Metadatos ---
+        let metadata_section = Box::new(Orientation::Vertical, 10);
+        metadata_section.set_hexpand(true);
+
+        let metadata_title = Label::new(Some("Metadatos"));
+        metadata_title.set_halign(gtk4::Align::Start);
+        metadata_title.add_css_class("subheading");
+        metadata_section.append(&metadata_title);
+
+        let metadata_label = Label::new(Some(
+            "Vuelve a consultar TVmaze y sobrescribe el título, el año, la sinopsis y el póster de todos los medios indexados.",
+        ));
+        metadata_label.set_halign(gtk4::Align::Start);
+        metadata_label.set_wrap(true);
+        metadata_section.append(&metadata_label);
+
+        let metadata_row = Box::new(Orientation::Horizontal, 10);
+        metadata_row.set_hexpand(true);
+
+        let metadata_button = Button::with_label("Actualizar todos los metadatos");
+        metadata_button.set_halign(gtk4::Align::Start);
+        metadata_row.append(&metadata_button);
+
+        let metadata_spinner = Spinner::new();
+        metadata_spinner.set_visible(false);
+        metadata_spinner.set_valign(gtk4::Align::Center);
+        metadata_row.append(&metadata_spinner);
+
+        metadata_section.append(&metadata_row);
+
+        let metadata_status = Label::new(None);
+        metadata_status.set_halign(gtk4::Align::Start);
+        metadata_status.set_wrap(true);
+        metadata_status.set_visible(false);
+        metadata_status.add_css_class("dim-label");
+        metadata_section.append(&metadata_status);
+
         content.append(&folders_section);
         content.append(&language_section);
+        content.append(&metadata_section);
 
         // --- Botones Guardar / Volver ---
         let button_box = Box::new(Orientation::Horizontal, 10);
@@ -231,8 +273,12 @@ impl SettingsView {
             language_combo,
             save_button,
             cancel_button,
+            metadata_button,
+            metadata_spinner,
+            metadata_status,
             config: config_clone,
             on_save: None,
+            on_refresh_metadata: None,
         }
     }
 
@@ -314,6 +360,32 @@ impl SettingsView {
                 cb(config.borrow().clone());
             }
         });
+    }
+
+    /// Establece el callback del botón de actualización de metadatos.
+    pub fn on_refresh_metadata<F>(&mut self, f: F)
+    where
+        F: Fn() + 'static,
+    {
+        let cb = Rc::new(f);
+        self.on_refresh_metadata = Some(cb.clone());
+        self.metadata_button.connect_clicked(move |_| {
+            cb();
+        });
+    }
+
+    /// Muestra u oculta el indicador de progreso y bloquea el botón mientras
+    /// la actualización está en curso.
+    pub fn set_metadata_refreshing(&self, refreshing: bool) {
+        self.metadata_spinner.set_spinning(refreshing);
+        self.metadata_spinner.set_visible(refreshing);
+        self.metadata_button.set_sensitive(!refreshing);
+    }
+
+    /// Actualiza el mensaje de estado de la sección de metadatos.
+    pub fn set_metadata_status(&self, text: &str) {
+        self.metadata_status.set_label(text);
+        self.metadata_status.set_visible(!text.is_empty());
     }
 
     /// Devuelve el botón Guardar para conectarlo desde MainWindow.

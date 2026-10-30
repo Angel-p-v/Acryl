@@ -95,7 +95,7 @@ graph TD
 2. La UI llama directamente a funciones Rust del backend.
 3. El backend consulta **una única base de datos SQLite** (`acryl.db`) y devuelve los resultados a la UI.
 4. Para la reproducción, el backend lanza `mpv` como proceso externo (`std::process::Command`) en su propia ventana; `mpv` gestiona play, pausa, seek, volumen y pistas.
-5. Los metadatos se sincronizan en segundo plano con TVmaze (API pública, sin API key) para obtener pósteres y sinopsis automáticamente.
+5. Los metadatos se sincronizan en segundo plano con TVmaze (API pública, sin API key) para obtener pósteres y sinopsis automáticamente. Desde Ajustes se puede forzar una actualización completa que vuelve a consultar TVmaze y sobrescribe los metadatos de todos los medios indexados.
 
 ### Principios de diseño
 
@@ -245,7 +245,8 @@ Una vez iniciada la aplicación:
 3. **Ver detalles**: Haz clic en cualquier medio para ver su póster, sinopsis, año y archivos indexados.
 4. **Marcar favorito/visto**: Usa los botones de estado en la vista de detalles.
 5. **Reproducir**: Pulsa "▶ Reproducir" en la vista de detalles o en un episodio concreto; el archivo se abrirá en `mpv`.
-6. **Cambiar idioma**: Usa el selector de idioma en la parte superior de la aplicación.
+6. **Actualizar metadatos**: En Ajustes, pulsa "Actualizar todos los metadatos" para volver a consultar TVmaze y sobrescribir título, año, sinopsis y póster de todos los medios indexados. La operación se ejecuta en segundo plano y pide confirmación.
+7. **Cambiar idioma**: Usa el selector de idioma en la parte superior de la aplicación.
 
 ---
 

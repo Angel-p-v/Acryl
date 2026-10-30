@@ -77,8 +77,25 @@ impl PosterService {
         &self,
         poster_url: &str,
     ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
-        // Si ya está en caché, devolver la ruta existente.
-        if let Some(cached) = cached_path(poster_url) {
+        self.download_async_impl(poster_url, false).await
+    }
+
+    /// Fuerza la descarga de un póster aunque ya exista en caché.
+    /// Sobrescribe el archivo cacheado con la versión actual del servidor.
+    pub async fn download_async_force(
+        &self,
+        poster_url: &str,
+    ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+        self.download_async_impl(poster_url, true).await
+    }
+
+    async fn download_async_impl(
+        &self,
+        poster_url: &str,
+        force: bool,
+    ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+        // Si ya está en caché y no se fuerza la descarga, devolver la ruta existente.
+        if !force && let Some(cached) = cached_path(poster_url) {
             return Ok(cached);
         }
 
@@ -101,6 +118,17 @@ impl PosterService {
 impl Default for PosterService {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Elimina de la caché el póster asociado a una URL.
+///
+/// Devuelve `Ok(true)` si se eliminó, `Ok(false)` si no existía.
+pub fn remove_cached(poster_url: &str) -> std::io::Result<bool> {
+    match fs::remove_file(poster_cache_path(poster_url)) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
     }
 }
 

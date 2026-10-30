@@ -1,5 +1,6 @@
 //! Ventana principal de Acryl con GTK4 / Libadwaita.
 
+use crate::core::metadata::RefreshMetadataResult;
 use crate::db::media_repo::ListMediaOptions;
 use crate::db::{MediaRepository, close_db, open_db};
 use crate::ui::media_details::MediaDetails;
@@ -7,7 +8,7 @@ use crate::ui::media_list::MediaList;
 use crate::ui::search_bar::SearchBar;
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
-use gtk4::{Box, Button, Orientation, Stack, glib};
+use gtk4::{Box, Button, Orientation, ScrolledWindow, Stack, glib};
 use libadwaita::ApplicationWindow as AdwApplicationWindow;
 use libadwaita::prelude::*;
 use std::cell::{Cell, RefCell};
@@ -70,7 +71,16 @@ impl MainWindow {
 
         let media_details = Rc::new(RefCell::new(MediaDetails::new(&db_path, 0)));
         media_details.borrow_mut().set_db_path(&db_path);
-        stack.add_titled(media_details.borrow().widget(), Some("details"), "Detalles");
+
+        // La vista de detalles puede crecer con la sinopsis y los episodios:
+        // se envuelve en un ScrolledWindow para que el póster grande no recorte
+        // el resto del contenido.
+        let details_scrolled = ScrolledWindow::new();
+        details_scrolled.set_hexpand(true);
+        details_scrolled.set_vexpand(true);
+        details_scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
+        details_scrolled.set_child(Some(media_details.borrow().widget()));
+        stack.add_titled(&details_scrolled, Some("details"), "Detalles");
 
         let settings_view = SettingsView::new(config.inner(), &db_path);
         stack.add_titled(settings_view.widget(), Some("settings"), "Ajustes");
@@ -158,6 +168,14 @@ impl MainWindow {
                 // Recargar medios después de guardar ajustes (pueden haber cambiado las carpetas).
                 Self::load_media(&this_clone, &db_path_for_reload);
                 Self::start_metadata_sync(&this_clone, db_path_for_reload.clone());
+            });
+
+        // Conectar botón de metadatos -> confirma y lanza la actualización forzada.
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .settings_view
+            .on_refresh_metadata(move || {
+                Self::confirm_metadata_refresh(&this_clone);
             });
 
         // Callbacks de la vista de detalles.
@@ -390,6 +408,104 @@ impl MainWindow {
         });
     }
 
+    /// Pide confirmación antes de sobrescribir todos los metadatos indexados.
+    fn confirm_metadata_refresh(this: &MainWindowRef) {
+        if this.borrow().metadata_sync_running.get() {
+            this.borrow()
+                .settings_view
+                .set_metadata_status("Ya hay una sincronización de metadatos en curso.");
+            return;
+        }
+
+        let dialog = gtk4::MessageDialog::builder()
+            .transient_for(&this.borrow().window)
+            .modal(true)
+            .message_type(gtk4::MessageType::Question)
+            .buttons(gtk4::ButtonsType::YesNo)
+            .text("¿Actualizar todos los metadatos?")
+            .secondary_text(
+                "Se consultará TVmaze y se sobrescribirán el título, el año, la sinopsis y el póster de todos los medios indexados. Esta acción no se puede deshacer.",
+            )
+            .build();
+
+        let this = this.clone();
+        dialog.connect_response(move |dialog, response| {
+            dialog.close();
+            if response == gtk4::ResponseType::Yes {
+                Self::start_metadata_refresh(&this);
+            }
+        });
+        dialog.present();
+    }
+
+    /// Fuerza la actualización de metadatos en segundo plano y muestra el
+    /// progreso en Ajustes sin bloquear la UI.
+    fn start_metadata_refresh(this: &MainWindowRef) {
+        if this.borrow().metadata_sync_running.get() {
+            this.borrow()
+                .settings_view
+                .set_metadata_status("Ya hay una sincronización de metadatos en curso.");
+            return;
+        }
+
+        let db_path = this.borrow().db_path.clone();
+        this.borrow().metadata_sync_running.set(true);
+        {
+            let w = this.borrow();
+            w.settings_view.set_metadata_refreshing(true);
+            w.settings_view
+                .set_metadata_status("Consultando TVmaze y actualizando metadatos...");
+        }
+
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = crate::core::metadata::MetadataService::refresh_all_metadata(&db_path);
+            let _ = sender.send(result);
+        });
+
+        let this = this.clone();
+        glib::timeout_add_local(Duration::from_millis(200), move || {
+            match receiver.try_recv() {
+                Ok(Ok(result)) => {
+                    {
+                        let w = this.borrow();
+                        w.metadata_sync_running.set(false);
+                        w.settings_view.set_metadata_refreshing(false);
+                        w.settings_view
+                            .set_metadata_status(&metadata_refresh_summary(&result));
+                    }
+                    if result.updated > 0 {
+                        Self::refresh_views(&this);
+                    }
+                    glib::ControlFlow::Break
+                }
+                Ok(Err(error)) => {
+                    {
+                        let w = this.borrow();
+                        w.metadata_sync_running.set(false);
+                        w.settings_view.set_metadata_refreshing(false);
+                        w.settings_view
+                            .set_metadata_status("No se pudieron actualizar los metadatos.");
+                        w.show_error(
+                            "No se pudieron actualizar los metadatos",
+                            &error.to_string(),
+                        );
+                    }
+                    glib::ControlFlow::Break
+                }
+                Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(TryRecvError::Disconnected) => {
+                    let w = this.borrow();
+                    w.metadata_sync_running.set(false);
+                    w.settings_view.set_metadata_refreshing(false);
+                    w.settings_view
+                        .set_metadata_status("La actualización se interrumpió inesperadamente.");
+                    glib::ControlFlow::Break
+                }
+            }
+        });
+    }
+
     fn refresh_views(this: &MainWindowRef) {
         let (db_path, visible, media_id) = {
             let w = this.borrow();
@@ -421,4 +537,29 @@ impl MainWindow {
     pub fn widget(&self) -> &AdwApplicationWindow {
         &self.window
     }
+}
+
+/// Resumen legible del resultado de una actualización forzada de metadatos.
+fn metadata_refresh_summary(result: &RefreshMetadataResult) -> String {
+    if result.total == 0 {
+        return "No hay medios indexados que actualizar.".to_string();
+    }
+
+    let mut summary = format!(
+        "Metadatos actualizados en {} de {} medios.",
+        result.updated, result.total
+    );
+    if result.failed > 0 {
+        summary.push_str(&format!(
+            " {} no se pudieron actualizar (sin resultados en TVmaze o error de red).",
+            result.failed
+        ));
+    }
+    if result.poster_failed > 0 {
+        summary.push_str(&format!(
+            " {} pósters no se pudieron descargar; se conservó el anterior.",
+            result.poster_failed
+        ));
+    }
+    summary
 }

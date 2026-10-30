@@ -499,3 +499,81 @@ fn update_metadata_actualiza_anio_poster_y_sinopsis() {
     assert_eq!(updated.synopsis.as_deref(), Some("Sinopsis de prueba"));
     assert!(updated.metadata_fetched_at.is_some());
 }
+
+#[test]
+fn overwrite_metadata_reemplaza_campos_y_actualiza_fts() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let media_id = {
+        let mut repo = MediaRepository::new(&mut conn);
+        let media = repo
+            .upsert(&MediaInput {
+                r#type: "series".to_string(),
+                title: "Zafiro Antiguo".to_string(),
+                sort_title: "zafiro antiguo".to_string(),
+                year: Some(2001),
+                folder_path: "/media/zafiro".to_string(),
+                parent_id: None,
+            })
+            .expect("upsert media");
+        repo.update_metadata(
+            media.id,
+            Some(2001),
+            Some("https://example.com/old.jpg"),
+            Some("Sinopsis antigua"),
+        )
+        .expect("guardar metadatos antiguos");
+        media.id
+    };
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.overwrite_metadata(
+            media_id,
+            "Esmeralda Nueva",
+            "esmeralda nueva",
+            Some(2025),
+            Some("https://example.com/new.jpg"),
+            Some("Sinopsis nueva"),
+        )
+        .expect("sobrescribir metadatos");
+    }
+
+    let mut repo = MediaRepository::new(&mut conn);
+    let media = repo
+        .find_by_id(media_id)
+        .expect("buscar media")
+        .expect("media existente");
+    assert_eq!(media.title, "Esmeralda Nueva");
+    assert_eq!(media.sort_title, "esmeralda nueva");
+    assert_eq!(media.year, Some(2025));
+    assert_eq!(
+        media.poster_path.as_deref(),
+        Some("https://example.com/new.jpg")
+    );
+    assert_eq!(media.synopsis.as_deref(), Some("Sinopsis nueva"));
+
+    let new_results = repo
+        .search(
+            "Esmeralda",
+            SearchMediaOptions {
+                r#type: None,
+                limit: Some(10),
+            },
+        )
+        .expect("buscar por el título nuevo");
+    assert_eq!(new_results.len(), 1);
+    assert_eq!(new_results[0].id, media_id);
+
+    let old_results = repo
+        .search(
+            "Zafiro",
+            SearchMediaOptions {
+                r#type: None,
+                limit: Some(10),
+            },
+        )
+        .expect("buscar por el título antiguo");
+    assert!(old_results.is_empty());
+}

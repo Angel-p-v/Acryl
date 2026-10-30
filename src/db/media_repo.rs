@@ -307,6 +307,29 @@ impl<'a> MediaRepository<'a> {
         Ok(())
     }
 
+    /// Sobrescribe todos los metadatos de un medio con los datos obtenidos de TVmaze.
+    ///
+    /// A diferencia de `update_metadata`, no conserva los valores anteriores: el
+    /// título, el título de ordenación, el año, el póster y la sinopsis se
+    /// reemplazan por los nuevos valores.
+    pub fn overwrite_metadata(
+        &mut self,
+        media_id: i64,
+        title: &str,
+        sort_title: &str,
+        year: Option<i32>,
+        poster_path: Option<&str>,
+        synopsis: Option<&str>,
+    ) -> RusqliteResult<()> {
+        self.conn.execute(
+            "UPDATE media SET title = ?1, sort_title = ?2, year = ?3, poster_path = ?4,
+             synopsis = ?5, metadata_fetched_at = datetime('now'), updated_at = datetime('now')
+             WHERE id = ?6",
+            params![title, sort_title, year, poster_path, synopsis, media_id],
+        )?;
+        Ok(())
+    }
+
     pub fn record_playback(
         &mut self,
         media_id: i64,
@@ -612,6 +635,46 @@ mod tests {
             .list_streams_by_file("/tmp/test/video.mkv")
             .expect("listar por archivo");
         assert_eq!(by_file.len(), 3);
+    }
+
+    #[test]
+    fn overwrite_metadata_reemplaza_todos_los_campos() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let media_id = setup_media_and_file(&mut conn);
+        let mut repo = MediaRepository::new(&mut conn);
+
+        repo.update_metadata(
+            media_id,
+            Some(1999),
+            Some("https://example.com/old.jpg"),
+            Some("Sinopsis antigua"),
+        )
+        .expect("guardar metadatos antiguos");
+
+        repo.overwrite_metadata(
+            media_id,
+            "Nuevo título",
+            "nuevo título",
+            Some(2024),
+            Some("https://example.com/new.jpg"),
+            Some("Sinopsis nueva"),
+        )
+        .expect("sobrescribir metadatos");
+
+        let media = repo
+            .find_by_id(media_id)
+            .expect("buscar medio")
+            .expect("el medio existe");
+        assert_eq!(media.title, "Nuevo título");
+        assert_eq!(media.sort_title, "nuevo título");
+        assert_eq!(media.year, Some(2024));
+        assert_eq!(
+            media.poster_path.as_deref(),
+            Some("https://example.com/new.jpg")
+        );
+        assert_eq!(media.synopsis.as_deref(), Some("Sinopsis nueva"));
+        assert!(media.metadata_fetched_at.is_some());
     }
 
     #[test]

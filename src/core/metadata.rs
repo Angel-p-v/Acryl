@@ -23,6 +23,21 @@ pub struct SyncMetadataResult {
     pub vote_average: Option<f64>,
 }
 
+/// Resumen de una actualización forzada de toda la biblioteca.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RefreshMetadataResult {
+    pub total: usize,
+    pub updated: usize,
+    pub failed: usize,
+    pub poster_failed: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SyncOutcome {
+    metadata: SyncMetadataResult,
+    poster_failed: bool,
+}
+
 /// Servicio de metadatos: sincroniza con TVmaze.
 pub struct MetadataService;
 
@@ -34,6 +49,16 @@ impl MetadataService {
         db_path: &str,
         media_id: i64,
     ) -> Result<SyncMetadataResult, Box<dyn std::error::Error>> {
+        Ok(Self::sync_metadata_impl(db_path, media_id, false)
+            .await?
+            .metadata)
+    }
+
+    async fn sync_metadata_impl(
+        db_path: &str,
+        media_id: i64,
+        force: bool,
+    ) -> Result<SyncOutcome, Box<dyn std::error::Error>> {
         let media = {
             let mut conn = open_db(db_path)?;
             let mut media_repo = MediaRepository::new(&mut conn);
@@ -47,31 +72,88 @@ impl MetadataService {
         let client = TvmazeClient::new();
         let fetched = sync_metadata(&media.r#type, &media.title, &client).await?;
 
+        // Al forzar, un resultado vacío no debe borrar los metadatos existentes.
+        if force && fetched.title.is_none() {
+            return Err(format!("TVmaze no devolvió resultados para '{}'", media.title).into());
+        }
+
         let year = fetched.release_date.as_deref().and_then(parse_year);
+        let new_title = fetched
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .unwrap_or(media.title.as_str());
+        let sort_title = new_title.to_lowercase();
+
+        let mut poster_path = fetched.poster_path.clone();
+        let mut poster_failed = false;
+
+        if let Some(poster_url) = poster_path.as_deref().filter(|url| !url.is_empty()) {
+            let poster_service = PosterService::new();
+            let download = if force {
+                poster_service.download_async_force(poster_url).await
+            } else {
+                poster_service.download_async(poster_url).await
+            };
+
+            match download {
+                Ok(_) => {
+                    if force
+                        && let Some(old_url) = media.poster_path.as_deref()
+                        && old_url != poster_url
+                        && let Err(error) = crate::core::poster_service::remove_cached(old_url)
+                    {
+                        eprintln!(
+                            "No se pudo eliminar el póster antiguo de '{}': {}",
+                            media.title, error
+                        );
+                    }
+                }
+                Err(error) => {
+                    poster_failed = true;
+                    eprintln!(
+                        "No se pudo descargar el póster de '{}': {}",
+                        media.title, error
+                    );
+                    // Al forzar, si el póster nuevo falla, se conserva el anterior.
+                    if force {
+                        poster_path = media.poster_path.clone();
+                    }
+                }
+            }
+        } else if force {
+            // TVmaze no ofrece póster: conservar el que ya hubiera.
+            poster_path = media.poster_path.clone();
+        }
+
         {
             let mut conn = open_db(db_path)?;
             let mut media_repo = MediaRepository::new(&mut conn);
-            media_repo.update_metadata(
-                media_id,
-                year,
-                fetched.poster_path.as_deref(),
-                fetched.synopsis.as_deref(),
-            )?;
+            if force {
+                media_repo.overwrite_metadata(
+                    media_id,
+                    new_title,
+                    &sort_title,
+                    year,
+                    poster_path.as_deref(),
+                    fetched.synopsis.as_deref(),
+                )?;
+            } else {
+                media_repo.update_metadata(
+                    media_id,
+                    year,
+                    poster_path.as_deref(),
+                    fetched.synopsis.as_deref(),
+                )?;
+            }
             close_db(conn);
         }
 
-        if let Some(poster_url) = fetched.poster_path.as_deref()
-            && !poster_url.is_empty()
-            && !is_cached(poster_url)
-            && let Err(error) = PosterService::new().download_async(poster_url).await
-        {
-            eprintln!(
-                "No se pudo descargar el póster de '{}': {}",
-                media.title, error
-            );
-        }
-
-        Ok(fetched)
+        Ok(SyncOutcome {
+            metadata: fetched,
+            poster_failed,
+        })
     }
 
     /// Sincroniza los medios que aún no tienen metadatos y descarga los pósters
@@ -81,16 +163,7 @@ impl MetadataService {
     pub fn sync_missing_metadata(
         db_path: &str,
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
-        let media = {
-            let mut conn = open_db(db_path)?;
-            let mut media_repo = MediaRepository::new(&mut conn);
-            let media = media_repo.list(ListMediaOptions {
-                limit: Some(10_000),
-                ..Default::default()
-            })?;
-            close_db(conn);
-            media
-        };
+        let media = load_all_parent_media(db_path)?;
 
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -124,6 +197,57 @@ impl MetadataService {
 
         Ok(changed)
     }
+
+    /// Vuelve a consultar TVmaze y sobrescribe título, año, sinopsis y póster
+    /// de todos los medios padre indexados. Pensada para ejecutarse en un hilo
+    /// secundario y no bloquear la UI.
+    pub fn refresh_all_metadata(
+        db_path: &str,
+    ) -> Result<RefreshMetadataResult, Box<dyn std::error::Error + Send + Sync>> {
+        let media = load_all_parent_media(db_path)?;
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+
+        let mut result = RefreshMetadataResult {
+            total: media.len(),
+            ..Default::default()
+        };
+
+        for item in media {
+            match runtime.block_on(Self::sync_metadata_impl(db_path, item.id, true)) {
+                Ok(outcome) => {
+                    result.updated += 1;
+                    if outcome.poster_failed {
+                        result.poster_failed += 1;
+                    }
+                }
+                Err(error) => {
+                    result.failed += 1;
+                    eprintln!(
+                        "No se pudieron actualizar los metadatos de '{}': {}",
+                        item.title, error
+                    );
+                }
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+fn load_all_parent_media(
+    db_path: &str,
+) -> Result<Vec<crate::db::media_repo::Media>, Box<dyn std::error::Error + Send + Sync>> {
+    let mut conn = open_db(db_path)?;
+    let mut media_repo = MediaRepository::new(&mut conn);
+    let media = media_repo.list(ListMediaOptions {
+        limit: Some(i64::MAX),
+        ..Default::default()
+    })?;
+    close_db(conn);
+    Ok(media)
 }
 
 /// Cliente TVmaze.
@@ -305,5 +429,29 @@ mod tests {
         let updated =
             MetadataService::sync_missing_metadata(db_path).expect("sincronizar biblioteca vacía");
         assert_eq!(updated, 0);
+    }
+
+    #[test]
+    fn refresh_all_metadata_sin_medios_devuelve_resumen_vacio() {
+        let dir = tempfile::TempDir::new().expect("crear directorio temporal");
+        let db_path = dir.path().join("test.db");
+        let db_path = db_path.to_str().expect("ruta UTF-8");
+
+        {
+            let conn = open_db(db_path).expect("abrir BD");
+            close_db(conn);
+        }
+
+        let result =
+            MetadataService::refresh_all_metadata(db_path).expect("actualizar biblioteca vacía");
+        assert_eq!(
+            result,
+            RefreshMetadataResult {
+                total: 0,
+                updated: 0,
+                failed: 0,
+                poster_failed: 0,
+            }
+        );
     }
 }
