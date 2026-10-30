@@ -125,7 +125,6 @@ impl<'a> MediaRepository<'a> {
             "recent" => "ORDER BY updated_at DESC",
             _ => "ORDER BY sort_title ASC",
         };
-        sql.push(' ');
         sql.push_str(order_clause);
         sql.push_str(" LIMIT ?");
         params_vec.push(Box::new(options.limit.unwrap_or(500)));

@@ -16,7 +16,12 @@ CREATE TABLE IF NOT EXISTS media (
   year        INTEGER,
   folder_path TEXT    NOT NULL UNIQUE,
   created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-  updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+  updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+  poster_path TEXT,
+  synopsis    TEXT,
+  metadata_fetched_at TEXT,
+  is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1)),
+  is_watched  INTEGER NOT NULL DEFAULT 0 CHECK (is_watched IN (0, 1))
 );
 
 CREATE TABLE IF NOT EXISTS media_files (
