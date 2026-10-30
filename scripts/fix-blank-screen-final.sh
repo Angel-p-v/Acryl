@@ -52,14 +52,14 @@ fi
 echo
 
 echo "============================================================"
-echo "  Prueba 2: Ejecutar en modo desarrollo (ver errores JS)"
+echo "  Prueba 2: Ejecutar desde terminal para ver errores"
 echo "============================================================"
 echo
-echo "Comando: cd $PROJECT_DIR && npm run tauri:dev"
+echo "Comando: RUST_BACKTRACE=1 $APP_BIN"
 echo
-read -p "¿Abrir modo desarrollo? (s/N): " resp
+read -p "¿Abrir con backtrace? (s/N): " resp
 if [[ "$resp" =~ ^[sS]$ ]]; then
-  cd "$PROJECT_DIR" && npm run tauri:dev
+  RUST_BACKTRACE=1 "$APP_BIN"
 fi
 echo
 
@@ -67,31 +67,28 @@ echo "============================================================"
 echo "  Prueba 3: Usar XWayland explícitamente"
 echo "============================================================"
 echo
-echo "Comando: XDG_SESSION_TYPE=x11 GDK_BACKEND=x11 $APP_BIN"
+echo "Comando: GDK_BACKEND=x11 $APP_BIN"
 echo
-read -p "¿Probar con XDG_SESSION_TYPE=x11? (s/N): " resp
+read -p "¿Probar con GDK_BACKEND=x11? (s/N): " resp
 if [[ "$resp" =~ ^[sS]$ ]]; then
-  XDG_SESSION_TYPE=x11 GDK_BACKEND=x11 "$APP_BIN"
+  GDK_BACKEND=x11 "$APP_BIN"
 fi
 echo
 
 echo "============================================================"
-echo "  Si nada funciona - problema de WebKit2GTK en Wayland"
+echo "  Si nada funciona - problemas de renderizado GTK4/Wayland"
 echo "============================================================"
 echo
-echo "WebKit2GTK (usado por Tauri) tiene problemas conocidos en"
-echo "Wayland/Hyprland. Soluciones definitivas:"
+echo "Si la aplicación no se abre o queda en blanco, prueba:"
 echo
 echo "1. USAR X11 EN LUGAR DE WAYLAND:"
 echo "   Cierra la sesión y selecciona 'X11' en el gestor de inicio"
 echo
-echo "2. INSTALAR Y CONFIGURAR XWAYLAND:"
-echo "   sudo pacman -S xorg-xwayland"
-echo "   Luego: GDK_BACKEND=x11 ~/.local/bin/acryl"
+echo "2. USAR XWAYLAND:"
+echo "   GDK_BACKEND=x11 ~/.local/bin/acryl"
 echo
 echo "3. EJECUTAR DESDE TERMINAL PARA VER ERRORES:"
 echo "   RUST_BACKTRACE=1 GDK_BACKEND=x11 ~/.local/bin/acryl"
-echo "   (Mira la salida en la terminal para ver errores de JS)"
 echo
 echo "4. REINSTALAR COMPLETAMENTE:"
 echo "   ./scripts/install.sh"

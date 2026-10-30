@@ -35,7 +35,6 @@ jobs:
             libgtk-4-dev \
             libadwaita-1-dev \
             librsvg2-dev \
-            libmpv-dev \
             pkg-config
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets --all-features -- -D warnings

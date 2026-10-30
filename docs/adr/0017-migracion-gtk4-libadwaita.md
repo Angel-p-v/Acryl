@@ -64,7 +64,7 @@ Razones:
 |------|-----------|-----------------|
 | E.1 | Prototipo mínimo GTK4 (ventana, lista, póster, búsqueda) | 2 semanas |
 | E.2 | UI completa GTK4 (detalles, favoritos, visto, navegación) | 2-3 semanas |
-| E.3 | Reproductor integrado con libmpv en GTK4 | 1-2 semanas |
+| E.3 | Reproductor integrado con GtkMediaFile en GTK4 | 1-2 semanas |
 | E.4 | Empaquetado nativo Linux sin Tauri | 1 semana |
 | E.5 | Limpieza y documentación (eliminar frontend/Tauri) | 1 semana |
 

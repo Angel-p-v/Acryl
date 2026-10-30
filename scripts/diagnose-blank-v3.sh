@@ -5,7 +5,7 @@
 set -euo pipefail
 
 readonly APP_BIN="$HOME/.local/bin/acryl"
-readonly BUILD_DIR="$HOME/Projects/Acryl/frontend/build"
+readonly RELEASE_DIR="$HOME/Projects/Acryl/target/release"
 
 info()  { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 ok()    { printf '\033[1;32m[OK]\033[0m  %s\n' "$*"; }
@@ -38,10 +38,10 @@ else
 fi
 echo
 
-# 3. Verificar webkit2gtk
-info "3. Paquetes webkit2gtk instalados:"
+# 3. Verificar GTK4 y Libadwaita
+info "3. Paquetes GTK4 y Libadwaita instalados:"
 if command -v pacman >/dev/null 2>&1; then
-  pacman -Qs webkit2gtk 2>/dev/null || echo "   No se encontraron paquetes webkit2gtk"
+  pacman -Qs gtk4 libadwaita 2>/dev/null || echo "   No se encontraron paquetes gtk4/libadwaita"
 else
   warn "pacman no disponible"
 fi
@@ -63,15 +63,14 @@ echo
 echo "Si la aplicación se abre pero muestra pantalla en blanco,"
 echo "prueba estas opciones en orden:"
 echo
-echo "Opción 1 - Forzar X11 y desactivar composición WebKit:"
-echo "  GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 ~/.local/bin/acryl"
+echo "Opción 1 - Forzar X11 (si usas Wayland/Hyprland):"
+echo "  GDK_BACKEND=x11 ~/.local/bin/acryl"
 echo
-echo "Opción 2 - Ejecutar desde el modo desarrollo para ver errores:"
-echo "  cd /home/coronel/Projects/Acryl"
-echo "  npm run tauri:dev"
+echo "Opción 2 - Ejecutar con backtrace para ver errores de GTK4:"
+echo "  RUST_BACKTRACE=1 ~/.local/bin/acryl"
 echo
-echo "Opción 3 - Verificar que los archivos del build se incluyeron:"
-echo "  ls -la /home/coronel/Projects/Acryl/frontend/build/"
+echo "Opción 3 - Verificar que el binario existe y es ejecutable:"
+echo "  ls -la ~/.local/bin/acryl"
 echo
 echo "Opción 4 - Reinstalar completamente:"
 echo "  ./scripts/install.sh"

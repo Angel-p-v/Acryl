@@ -119,10 +119,9 @@ install_system_deps() {
         libadwaita-1-dev \
         librsvg2-dev \
         libayatana-appindicator3-dev \
-        libmpv-dev \
         libgdk-pixbuf2.0-dev || {
         warn "Algunos paquetes de Debian/Ubuntu no se pudieron instalar."
-        warn "Intenta: sudo apt-get install libgtk-4-dev libadwaita-1-dev librsvg2-dev libmpv-dev libgdk-pixbuf2.0-dev"
+        warn "Intenta: sudo apt-get install libgtk-4-dev libadwaita-1-dev librsvg2-dev libgdk-pixbuf2.0-dev"
       }
       ;;
     pacman)
@@ -134,7 +133,6 @@ install_system_deps() {
         libadwaita \
         librsvg \
         libayatana-appindicator \
-        mpv \
         gdk-pixbuf2 || {
         warn "Algunos paquetes base de Arch no se pudieron instalar."
       }
@@ -147,7 +145,6 @@ install_system_deps() {
         libadwaita-devel \
         librsvg2-devel \
         libayatana-appindicator3-devel \
-        libmpv-devel \
         gdk-pixbuf2-devel || {
         warn "Algunos paquetes base de dnf no se pudieron instalar."
       }
@@ -160,7 +157,6 @@ install_system_deps() {
         libadwaita1-devel \
         librsvg2-devel \
         libayatana-appindicator3-devel \
-        libmpv-devel \
         gdk-pixbuf2-devel || {
         warn "Algunos paquetes base de openSUSE no se pudieron instalar."
       }
@@ -173,14 +169,13 @@ install_system_deps() {
         libadwaita-dev \
         librsvg-dev \
         libayatana-appindicator3-dev \
-        libmpv-dev \
         gdk-pixbuf2-dev || {
         warn "Algunos paquetes base de Alpine no se pudieron instalar."
       }
       ;;
     *)
       error "Gestor de paquetes no soportado: '$pm'."
-      error "Instala manualmente: libgtk-4, libadwaita-1, librsvg2, libmpv, Rust ≥ $MIN_RUST."
+      error "Instala manualmente: libgtk-4, libadwaita-1, librsvg2, Rust ≥ $MIN_RUST."
       return 1
       ;;
   esac
@@ -264,7 +259,7 @@ build_and_install() {
   local project_dir="$1"
   cd "$project_dir"
 
-  info "Compilando la aplicación con Rust y Tauri..."
+  info "Compilando la aplicación con Rust y GTK4..."
   # shellcheck disable=SC1090
   [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
   export PATH="$HOME/.cargo/bin:$PATH"
@@ -295,10 +290,10 @@ create_desktop_entry() {
 
   # Copiar el icono al tema de iconos de usuario
   mkdir -p "$ICON_DIR"
-  if [[ -f "$project_dir/src-tauri/icons/acryl.svg" ]]; then
-    install -Dm644 "$project_dir/src-tauri/icons/acryl.svg" "$ICON_DIR/$APP_NAME.svg"
-  elif [[ -f "$project_dir/src-tauri/icons/icon.png" ]]; then
-    install -Dm644 "$project_dir/src-tauri/icons/icon.png" "$ICON_DIR/$APP_NAME.png"
+  if [[ -f "$project_dir/icons/acryl.svg" ]]; then
+    install -Dm644 "$project_dir/icons/acryl.svg" "$ICON_DIR/$APP_NAME.svg"
+  elif [[ -f "$project_dir/icons/icon.png" ]]; then
+    install -Dm644 "$project_dir/icons/icon.png" "$ICON_DIR/$APP_NAME.png"
   fi
 
   local icon_name="$APP_NAME"

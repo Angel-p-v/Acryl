@@ -9,11 +9,11 @@
 
 | Capa | Tecnología | Motivo |
 |------|-----------|--------|
-| **Backend** | Rust | Mejor rendimiento, SQLite nativo, FFI a `libmpv`, seguridad de memoria |
+| **Backend** | Rust | Mejor rendimiento, SQLite nativo, integración nativa GTK4, seguridad de memoria |
 | **Frontend** | TypeScript + React | Tipado estricto, ecosistema de UI de escritorio maduro, componentes reutilizables |
 | **Framework desktop** | Tauri | Ligero (WebView del sistema), llamadas Rust↔TS, instaladores nativos Linux |
 | **Base de datos** | SQLite (`rusqlite` o `sqlx`) | Reutiliza esquema actual, WAL + FTS5 |
-| **Reproductor integrado** | `libmpv` vía FFI o GStreamer | Reproducción dentro de la ventana, sin `spawn` externo |
+| **Reproductor integrado** | `GtkMediaFile` (GTK4) | Reproducción dentro de la ventana, sin procesos externos |
 | **Imágenes / pósters** | HTML `` o canvas dentro de WebView | Alta resolución, dentro de contenedor real, sin límite de 1 color por celda de terminal |
 | **Configuración** | YAML + `serde` en Rust | Reemplaza `zod` del lado de Rust |
 
@@ -27,7 +27,7 @@
 |------------|----------|---------|
 | `core/db/` | Migraciones, repositorios, FTS5, better-sqlite3 | Puerto a Rust (`rusqlite`/`sqlx`) |
 | `core/library/` | LibraryService, escaneo, indexado | Puerto a Rust |
-| `core/player/` | Lanzador de mpv/vlc, tracker IPC | Puerto a Rust (bindings a `libmpv`) |
+| `core/player/` | Lanzador de reproductor, historial | Puerto a Rust (bindings a GtkMediaFile) |
 | `core/metadata/` | TMDB/TVDB, rate limiter, caché TTL | Puerto a Rust (`reqwest` + `serde_json`) |
 | `config/` | YAML + Zod | YAML + `serde` en Rust |
 | `shared/` | Utilidades, `imageToAnsi`, `kittyProtocol` | Parcial: lógica sí, render ANSI no |
@@ -39,7 +39,7 @@
 | `ui/` (Ink) | React + TypeScript dentro de WebView de Tauri |
 | `commands/` (Commander) | Comandos Tauri (Rust → frontend) |
 | `PosterImage` (ANSI/chafa) | `` HTML o canvas Rust dentro del contenedor de React |
-| Reproductor vía `spawn` | `libmpv` integrado o GStreamer dentro de la app |
+| Reproductor integrado | GtkMediaFile dentro de la app |
 | Tests de Ink (`ink-testing-library`) | Tests de React + Tauri (vitest + playwright o similar) |
 
 ---
@@ -56,7 +56,7 @@ frontend/                 ← React + TypeScript (WebView de Tauri)
 src-tauri/                ← Rust
   ├── core/               ← Lógica de negocio portada (library, metadata, db)
   ├── db/                 ← rusqlite/sqlx, migraciones, FTS5
-  ├── player/             ← bindings a libmpv o GStreamer
+  ├── player/             ← bindings a GtkMediaFile (GTK4)
   ├── commands/           ← comandos Tauri expuestos al frontend
   └── config/             ← serde + YAML
 ```
@@ -80,7 +80,7 @@ src-tauri/                ← Rust
 - **Criterio de aceptación:** la app puede indexar una carpeta de medios y consultarla desde React.
 
 ### Hito 3 — Reproductor integrado (Semanas 7–9)
-- Bindings a `libmpv` (o GStreamer) desde Rust.
+- Bindings a `GtkMediaFile` desde Rust (GTK4).
 - Componente de video en React que reciba frames del reproductor integrado.
 - Controles: play, pause, stop, next, prev, seek, volumen.
 - **Criterio de aceptación:** se reproduce un archivo de video dentro de la ventana de la app, sin procesos externos.
@@ -126,7 +126,7 @@ src-tauri/                ← Rust
 
 | Desafío | Solución propuesta |
 |---------|-------------------|
-| Reproductor integrado | FFI a `libmpv` o GStreamer desde Rust; renderizar frames en una superficie compartida con WebView o en ventana nativa aparte |
+| Reproductor integrado | GtkMediaFile dentro de la ventana GTK4, sin procesos externos |
 | Posters en alta resolución | `` HTML con `object-fit: cover` dentro de un contenedor React con dimensiones fijas |
 | Migración de datos SQLite | Leer el archivo `.db` existente directamente desde Rust, sin migración de datos |
 | Configuración YAML | Reemplazar `zod` por `serde` + `serde_yaml` en Rust |
@@ -160,7 +160,7 @@ src-tauri/                ← Rust
 |------|-----------|--------|
 | Hito 1 | Prototipo mínimo: ventana Tauri, lista desde SQLite, póster, búsqueda | ✅ completado |
 | Hito 2 | Capa de dominio en Rust (db, library, metadata) | ✅ completado |
-| Hito 3 | Reproductor integrado (libmpv) | ✅ completado |
+| Hito 3 | Reproductor integrado (GtkMediaFile) | ✅ completado |
 | Hito 4 | UI completa (detalles, favoritos, visto, navegación) | ✅ completado |
 | Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ✅ completado |
 | Hito 6 | Configuración YAML en el backend | ✅ completado |
@@ -182,12 +182,12 @@ Todos los hitos del plan están completados.
 
 | Capa | Tecnología actual | Tecnología objetivo | Motivo |
 |------|-------------------|---------------------|--------|
-| **Backend** | Rust + Tauri | Rust puro | Mantener lógica de negocio, SQLite, libmpv |
+| **Backend** | Rust + Tauri | Rust puro | Mantener lógica de negocio, SQLite, GtkMediaFile |
 | **Frontend** | React + TypeScript (WebView) | Rust + GTK4 / Libadwaita | Renderizado nativo GTK, sin WebView |
 | **Framework desktop** | Tauri v2 | gtk4-rs / libadwaita-rs | Ventana nativa, sin WebView, sin problemas Wayland |
 | **Comunicación** | Tauri IPC (invoke) | Llamadas directas Rust → Rust | Sin serialización JSON innecesaria |
 | **Base de datos** | SQLite (`rusqlite`) | SQLite (`rusqlite`) | Sin cambios |
-| **Reproductor** | libmpv vía FFI | libmpv vía FFI | Sin cambios |
+| **Reproductor** | GtkMediaFile (GTK4) | GtkMediaFile (GTK4) | Sin cambios |
 | **Imágenes / pósters** | HTML `` en WebView | `gdk-pixbuf` / `cairo` / `gtk4::Picture` | Renderizado nativo |
 | **Configuración** | YAML + `serde` | YAML + `serde` | Sin cambios |
 | **Instaladores** | Tauri bundle (.deb, AppImage, .rpm) | `cargo-deb` / `cargo-rpm` / AppImage manual | Empaquetado nativo sin Tauri |
@@ -200,7 +200,7 @@ Todos los hitos del plan están completados.
 |------------|----------|---------|
 | `core/db/` | Migraciones, repositorios, FTS5 | Mantener (`rusqlite`) |
 | `core/library/` | LibraryService, escaneo, indexado | Mantener |
-| `core/player/` | Lanzador de mpv, tracker IPC | Mantener (bindings a `libmpv`) |
+| `core/player/` | Lanzador de reproductor, historial | Mantener (bindings a GtkMediaFile) |
 | `core/metadata/` | TMDB/TVDB, rate limiter, caché TTL | Mantener (`reqwest` + `serde_json`) |
 | `config/` | YAML + `serde` | Mantener |
 | `shared/` | Utilidades, `imageToAnsi` | Lógica sí, render ANSI no |
@@ -212,7 +212,7 @@ Todos los hitos del plan están completados.
 | `ui/` (React + TypeScript + WebView) | React + TypeScript dentro de WebView de Tauri | Rust + GTK4 / Libadwaita (código o GtkBuilder XML) |
 | `commands/` (Comandos Tauri) | Comandos Tauri expuestos al frontend | Funciones Rust internas llamadas directamente |
 | `PosterImage` | HTML `` en WebView | `gdk-pixbuf` / `cairo` dentro de contenedor GTK4 |
-| Reproductor vía `spawn` | `libmpv` integrado | `libmpv` integrado (sin cambios) |
+| Reproductor integrado | GtkMediaFile | GtkMediaFile (sin cambios) |
 | Tests de UI | Vitest + Tauri | `gtk4-rs` tests + pruebas de integración |
 | Instaladores | Tauri bundle | `cargo-deb`, `cargo-rpm`, AppImage manual |
 | Scripts de instalación | `install.sh` con detectar Node.js + Tauri | `install.sh` sin Node.js, solo Rust + GTK dependencias |
@@ -230,7 +230,7 @@ Se convierte en:
 src/                      ← Rust puro (binario único)
   ├── core/               ← Lógica de negocio (library, metadata, db)
   ├── db/                 ← rusqlite, migraciones, FTS5
-  ├── player/             ← bindings a libmpv
+  ├── player/             ← bindings a GtkMediaFile (GTK4)
   ├── config/             ← serde + YAML
   ├── ui/                 ← GTK4 / Libadwaita (ventana, widgets, vistas)
   │   ├── main_window.rs  ← Ventana principal
@@ -257,8 +257,8 @@ src/                      ← Rust puro (binario único)
 - Historial de reproducción
 - **Criterio de aceptación:** flujo completo: indexar → buscar → ver detalles → reproducir
 
-#### Hito E.3 — Reproductor integrado con libmpv (Semanas 7–8)
-- Bindings a `libmpv` dentro de ventana GTK4
+#### Hito E.3 — Reproductor integrado con GtkMediaFile (Semanas 7–8)
+- Bindings a `GtkMediaFile` dentro de ventana GTK4
 - Controles: play, pause, stop, next, prev, seek, volumen
 - **Criterio de aceptación:** se reproduce un archivo de video dentro de la ventana GTK4
 
@@ -366,12 +366,12 @@ LICENSE                   ← Se mantiene
 
 ## 14. Decisiones pendientes
 
-| Pregunta | Opciones | Decisión pendiente |
-|----------|----------|-------------------|
-| Toolkit GTK | GTK3 vs GTK4 | Pendiente (recomendado GTK4) |
-| Librería de UI | Libadwaita vs GTK puro | Pendiente (recomendado Libadwaita) |
-| Definición UI | Código Rust vs GtkBuilder XML | Pendiente (recomendado GtkBuilder para separar lógica/vista) |
-| Empaquetado | `cargo-deb` / `cargo-rpm` vs `cargo-appimage` | Pendiente |
+| Pregunta | Opciones | Decisión |
+|----------|----------|----------|
+| Toolkit GTK | GTK3 vs GTK4 | GTK4 (implementado) |
+| Librería de UI | Libadwaita vs GTK puro | Libadwaita (implementado) |
+| Definición UI | Código Rust vs GtkBuilder XML | Código Rust (implementado) |
+| Empaquetado | `cargo-deb` / `cargo-rpm` vs `cargo-appimage` | Pendiente (Hito E.4) |
 
 ---
 
@@ -381,7 +381,7 @@ LICENSE                   ← Se mantiene
 |------|-----------|--------|
 | Hito 1 | Prototipo mínimo: ventana Tauri, lista desde SQLite, póster, búsqueda | ✅ completado |
 | Hito 2 | Capa de dominio en Rust (db, library, metadata) | ✅ completado |
-| Hito 3 | Reproductor integrado (libmpv) | ✅ completado |
+| Hito 3 | Reproductor integrado (GtkMediaFile) | ✅ completado |
 | Hito 4 | UI completa (detalles, favoritos, visto, navegación) | ✅ completado |
 | Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ✅ completado |
 | Hito 6 | Configuración YAML en el backend | ✅ completado |
@@ -398,7 +398,7 @@ LICENSE                   ← Se mantiene
 
 ## 16. Próximo paso inmediato
 
-Implementar el **Hito E.2 — UI completa GTK4**: vistas de detalles con póster grande, metadatos, sinopsis; favoritos; en curso; vistos/no vistos; navegación entre lista y detalles. Crear la rama `feat/gtk4-e2-ui-completa` para el trabajo.
+Implementar el **Hito E.4 — Empaquetado nativo Linux** (`.deb`, `.rpm`, AppImage sin Tauri) y el **Hito E.5 — Limpieza y documentación** (eliminar referencias obsoletas a Tauri/Node/WebView). Crear la rama `feat/gtk4-e4-empaquetado` para el trabajo.
 
 ---
 
