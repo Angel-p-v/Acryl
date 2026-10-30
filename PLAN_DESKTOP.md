@@ -392,14 +392,14 @@ LICENSE                   ← Se mantiene
 | **Hito E.1** | Prototipo mínimo GTK4 (ventana, lista, póster, búsqueda) | ✅ completado |
 | **Hito E.2** | UI completa GTK4 (detalles, favoritos, visto, navegación) | ✅ completado |
 | **Hito E.3** | Reproductor integrado con GtkMediaFile en GTK4 | ✅ completado |
-| **Hito E.4** | Empaquetado nativo Linux sin Tauri | ⏳ pendiente |
-| **Hito E.5** | Limpieza y documentación (eliminar frontend/Tauri) | ⏳ pendiente |
+| **Hito E.4** | Empaquetado nativo Linux sin Tauri | ✅ completado |
+| **Hito E.5** | Limpieza y documentación (eliminar frontend/Tauri) | ✅ completado |
 
 ---
 
 ## 16. Próximo paso inmediato
 
-Implementar el **Hito E.4 — Empaquetado nativo Linux** (`.deb`, `.rpm`, AppImage sin Tauri) y el **Hito E.5 — Limpieza y documentación** (eliminar referencias obsoletas a Tauri/Node/WebView). Crear la rama `feat/gtk4-e4-empaquetado` para el trabajo.
+Todos los hitos del plan están completados (E.1 a E.9 y E.1 a E.5). El proyecto está en estado estable: Rust puro + GTK4/Libadwaita, sin Tauri, sin Node.js, sin WebView.
 
 ---
 
