@@ -3,13 +3,13 @@
 use crate::core::player::PlayerService;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Entry, Label, Orientation};
-use std::rc::Rc;
 
 /// Componente reproductor de vídeo.
 pub struct VideoPlayer {
     box_: Box,
     path_entry: Entry,
     play_button: Button,
+    #[allow(dead_code)]
     stop_button: Button,
     status_label: Label,
     db_path: String,
@@ -25,7 +25,7 @@ impl VideoPlayer {
         box_.set_margin_end(10);
 
         let path_entry = Entry::new();
-        path_entry.set_placeholder_text("Ruta del archivo de vídeo...");
+        path_entry.set_placeholder_text(Some("Ruta del archivo de vídeo..."));
         path_entry.set_hexpand(true);
         box_.append(&path_entry);
 
@@ -71,18 +71,17 @@ impl VideoPlayer {
             let db_path = db_path.clone();
             let status_label = status_label.clone();
             let media_id = media_id;
+            let path = path.to_string();
 
-            glib::spawn_blocking(move || {
-                let result = crate::core::player::PlayerService::open(&db_path, media_id, &path);
-                match result {
-                    Ok(_) => {
-                        status_label.set_text(&format!("Reproduciendo: {}", path));
-                    }
-                    Err(e) => {
-                        status_label.set_text(&format!("Error: {}", e));
-                    }
+            let result = PlayerService::open(&db_path, media_id, &path);
+            match result {
+                Ok(_) => {
+                    status_label.set_text(&format!("Reproduciendo: {}", path));
                 }
-            });
+                Err(e) => {
+                    status_label.set_text(&format!("Error: {}", e));
+                }
+            }
         });
     }
 }

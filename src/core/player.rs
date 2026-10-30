@@ -1,14 +1,17 @@
 //! Servicio de reproductor: bindings a libmpv.
 
-use crate::db::{open_db, close_db, MediaRepository};
-use std::path::Path;
+use crate::db::{MediaRepository, close_db, open_db};
 
 /// Servicio de reproductor: gestiona reproducción de archivos de vídeo.
 pub struct PlayerService;
 
 impl PlayerService {
     /// Abre un archivo de vídeo para reproducción.
-    pub fn open(db_path: &str, media_id: i64, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn open(
+        db_path: &str,
+        media_id: i64,
+        file_path: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut conn = open_db(db_path)?;
         let mut media_repo = MediaRepository::new(&mut conn);
 
@@ -25,7 +28,10 @@ impl PlayerService {
     }
 
     /// Obtiene la lista de archivos de vídeo de un medio.
-    pub fn get_playable_files(db_path: &str, media_id: i64) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    pub fn get_playable_files(
+        db_path: &str,
+        media_id: i64,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         let mut conn = open_db(db_path)?;
         let mut media_repo = MediaRepository::new(&mut conn);
         let files = media_repo.list_files_by_media(media_id)?;
@@ -36,11 +42,18 @@ impl PlayerService {
 }
 
 /// Lista los archivos de vídeo de un medio.
-pub fn list_media_files(db_path: &str, media_id: i64) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+pub fn list_media_files(
+    db_path: &str,
+    media_id: i64,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     PlayerService::get_playable_files(db_path, media_id)
 }
 
 /// Reproduce un archivo de vídeo.
-pub fn play_file(db_path: &str, media_id: i64, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn play_file(
+    db_path: &str,
+    media_id: i64,
+    file_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     PlayerService::open(db_path, media_id, file_path)
 }

@@ -35,7 +35,10 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            db_path: default_data_dir().join("acryl.db").to_string_lossy().to_string(),
+            db_path: default_data_dir()
+                .join("acryl.db")
+                .to_string_lossy()
+                .to_string(),
             language: "es".to_string(),
             auto_sync_metadata: false,
             default_player: "mpv".to_string(),

@@ -1,7 +1,6 @@
 //! Apertura de base de datos SQLite.
 
 use rusqlite::{Connection, Result as RusqliteResult};
-use std::path::Path;
 
 use crate::db::migrations::{MIGRATIONS, Migration};
 

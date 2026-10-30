@@ -1,14 +1,16 @@
 //! Capa de dominio: servicios de negocio.
 
-use crate::db::{open_db, close_db, MediaRepository};
 use crate::db::media_repo::MediaInput;
+use crate::db::{MediaRepository, close_db, open_db};
 
 pub struct LibraryService;
 
 impl LibraryService {
-    pub fn index_folder(db_path: &str, folder_path: &str) -> Result<IndexResult, Box<dyn std::error::Error>> {
+    pub fn index_folder(
+        db_path: &str,
+        folder_path: &str,
+    ) -> Result<IndexResult, Box<dyn std::error::Error>> {
         let mut conn = open_db(db_path)?;
-        let mut media_repo = MediaRepository::new(&mut conn);
 
         let mut media_added = 0i64;
         let mut files_added = 0i64;
@@ -28,14 +30,12 @@ impl LibraryService {
             if let Ok(read_dir) = std::fs::read_dir(&path) {
                 for file_entry in read_dir.flatten() {
                     let file_path = file_entry.path();
-                    if file_path.is_file() {
-                        if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
-                            if VIDEO_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
-                                if let Some(path_str) = file_path.to_str() {
-                                    video_files.push(path_str.to_string());
-                                }
-                            }
-                        }
+                    if file_path.is_file()
+                        && let Some(ext) = file_path.extension().and_then(|e| e.to_str())
+                        && VIDEO_EXTENSIONS.contains(&ext.to_lowercase().as_str())
+                        && let Some(path_str) = file_path.to_str()
+                    {
+                        video_files.push(path_str.to_string());
                     }
                 }
             }
@@ -46,7 +46,11 @@ impl LibraryService {
 
             video_files.sort();
 
-            let folder_name = path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+            let folder_name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_lowercase();
             let r#type = if folder_name.contains("anime") {
                 "anime"
             } else if folder_name.contains("serie") || folder_name.contains("series") {
@@ -55,19 +59,25 @@ impl LibraryService {
                 "movie"
             };
 
-            let title = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let title = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let sort_title = title.to_lowercase();
 
-            let media = media_repo.upsert(&MediaInput {
-                r#type: r#type.to_string(),
-                title: title.clone(),
-                sort_title,
-                year: None,
-                folder_path: path.to_string_lossy().to_string(),
-            })?;
-
-            media_added += 1;
-            let media_id = media.id;
+            let media_id = {
+                let mut media_repo = MediaRepository::new(&mut conn);
+                let media = media_repo.upsert(&MediaInput {
+                    r#type: r#type.to_string(),
+                    title: title.clone(),
+                    sort_title,
+                    year: None,
+                    folder_path: path.to_string_lossy().to_string(),
+                })?;
+                media_added += 1;
+                media.id
+            };
 
             for (idx, file_path_str) in video_files.iter().enumerate() {
                 let file_name = std::path::Path::new(file_path_str)
@@ -109,7 +119,12 @@ impl LibraryService {
         })
     }
 
-    pub fn list_media(db_path: &str, r#type: Option<String>, limit: Option<i64>, offset: Option<i64>) -> Result<Vec<crate::db::media_repo::Media>, Box<dyn std::error::Error>> {
+    pub fn list_media(
+        db_path: &str,
+        r#type: Option<String>,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> Result<Vec<crate::db::media_repo::Media>, Box<dyn std::error::Error>> {
         let mut conn = open_db(db_path)?;
         let mut media_repo = MediaRepository::new(&mut conn);
         let media = media_repo.list(crate::db::media_repo::ListMediaOptions {
@@ -122,18 +137,26 @@ impl LibraryService {
         Ok(media)
     }
 
-    pub fn search_media(db_path: &str, query: &str, r#type: Option<String>, limit: Option<i64>) -> Result<Vec<crate::db::media_repo::Media>, Box<dyn std::error::Error>> {
+    pub fn search_media(
+        db_path: &str,
+        query: &str,
+        r#type: Option<String>,
+        limit: Option<i64>,
+    ) -> Result<Vec<crate::db::media_repo::Media>, Box<dyn std::error::Error>> {
         let mut conn = open_db(db_path)?;
         let mut media_repo = MediaRepository::new(&mut conn);
-        let results = media_repo.search(query, crate::db::media_repo::SearchMediaOptions {
-            r#type,
-            limit,
-        })?;
+        let results = media_repo.search(
+            query,
+            crate::db::media_repo::SearchMediaOptions { r#type, limit },
+        )?;
         close_db(conn);
         Ok(results)
     }
 
-    pub fn toggle_favorite(db_path: &str, media_id: i64) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn toggle_favorite(
+        db_path: &str,
+        media_id: i64,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let mut conn = open_db(db_path)?;
         let mut media_repo = MediaRepository::new(&mut conn);
         let value = media_repo.toggle_favorite(media_id)?;
@@ -141,7 +164,10 @@ impl LibraryService {
         Ok(value)
     }
 
-    pub fn toggle_watched(db_path: &str, media_id: i64) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn toggle_watched(
+        db_path: &str,
+        media_id: i64,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let mut conn = open_db(db_path)?;
         let mut media_repo = MediaRepository::new(&mut conn);
         let value = media_repo.toggle_watched(media_id)?;

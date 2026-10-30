@@ -56,7 +56,13 @@ impl<'a> MediaRepository<'a> {
         let insert_result = self.conn.execute(
             "INSERT INTO media (type, title, sort_title, year, folder_path)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![input.r#type, input.title, input.sort_title, input.year, input.folder_path],
+            params![
+                input.r#type,
+                input.title,
+                input.sort_title,
+                input.year,
+                input.folder_path
+            ],
         );
 
         let id: i64 = match insert_result {
@@ -66,7 +72,13 @@ impl<'a> MediaRepository<'a> {
                     "UPDATE media SET type = ?1, title = ?2, sort_title = ?3,
                      year = ?4, updated_at = datetime('now')
                      WHERE folder_path = ?5",
-                    params![input.r#type, input.title, input.sort_title, input.year, input.folder_path],
+                    params![
+                        input.r#type,
+                        input.title,
+                        input.sort_title,
+                        input.year,
+                        input.folder_path
+                    ],
                 )?;
                 self.conn.query_row(
                     "SELECT id FROM media WHERE folder_path = ?1",
@@ -77,7 +89,8 @@ impl<'a> MediaRepository<'a> {
             Err(e) => return Err(e),
         };
 
-        self.find_by_id(id)?.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)
+        self.find_by_id(id)?
+            .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)
     }
 
     pub fn find_by_id(&mut self, id: i64) -> RusqliteResult<Option<Media>> {
@@ -234,7 +247,9 @@ impl<'a> MediaRepository<'a> {
     }
 
     pub fn list_folders(&mut self) -> RusqliteResult<Vec<String>> {
-        let mut stmt = self.conn.prepare("SELECT folder_path FROM media ORDER BY sort_title")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT folder_path FROM media ORDER BY sort_title")?;
         let rows: Vec<String> = stmt
             .query_map([], |row| row.get(0))?
             .filter_map(Result::ok)
@@ -242,10 +257,58 @@ impl<'a> MediaRepository<'a> {
         Ok(rows)
     }
 
-    pub fn list_files_by_media(&mut self, media_id: i64) -> RusqliteResult<Vec<crate::db::file_repo::MediaFile>> {
+    pub fn list_files_by_media(
+        &mut self,
+        media_id: i64,
+    ) -> RusqliteResult<Vec<crate::db::file_repo::MediaFile>> {
         let mut file_repo = FileRepository::new(self.conn);
         file_repo.list_by_media(media_id)
     }
+
+    pub fn update_metadata(
+        &mut self,
+        media_id: i64,
+        poster_path: Option<&str>,
+        synopsis: Option<&str>,
+    ) -> RusqliteResult<()> {
+        self.conn.execute(
+            "UPDATE media SET poster_path = ?1, synopsis = ?2,
+             metadata_fetched_at = datetime('now'), updated_at = datetime('now')
+             WHERE id = ?3",
+            params![poster_path, synopsis, media_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_playback(
+        &mut self,
+        media_id: i64,
+        position: f64,
+        duration: f64,
+    ) -> RusqliteResult<()> {
+        self.conn.execute(
+            "INSERT INTO playback_history (media_id, position, duration) VALUES (?1, ?2, ?3)",
+            params![media_id, position, duration],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_details(&mut self, media_id: i64) -> RusqliteResult<Option<MediaDetails>> {
+        let media = self.find_by_id(media_id)?;
+        let media = match media {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+        let mut file_repo = FileRepository::new(self.conn);
+        let files = file_repo.list_by_media(media_id)?;
+        Ok(Some(MediaDetails { media, files }))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MediaDetails {
+    pub media: Media,
+    pub files: Vec<crate::db::file_repo::MediaFile>,
 }
 
 fn map_media_row(row: &rusqlite::Row<'_>) -> RusqliteResult<Media> {

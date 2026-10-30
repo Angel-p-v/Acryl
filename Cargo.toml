@@ -12,6 +12,9 @@ rust-version = "1.90"
 name = "acryl"
 path = "src/main.rs"
 
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -23,6 +26,8 @@ libadwaita = "0.9"
 gdk-pixbuf = "0.20"
 glib = "0.19"
 urlencoding = "2.1"
+env_logger = "0.11"
+log = "0.4"
 
 [dev-dependencies]
 tempfile = "3"

@@ -14,6 +14,12 @@ pub struct MediaList {
     on_media_select: Option<Rc<dyn Fn(i64)>>,
 }
 
+impl Default for MediaList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MediaList {
     pub fn new() -> Self {
         let box_ = Box::new(Orientation::Vertical, 10);
@@ -52,7 +58,7 @@ impl MediaList {
         let media = self.media.borrow();
         for m in media.iter() {
             let card = create_media_card(m.clone(), self.on_media_select.clone());
-            scrolled.add(&card);
+            scrolled.set_child(Some(&card));
         }
 
         scrolled.set_visible(true);
@@ -76,7 +82,7 @@ fn create_media_card(media: Media, on_select: Option<Rc<dyn Fn(i64)>>) -> gtk4::
     card.set_size_request(150, 220);
 
     let poster = Poster::new(&media.title, &media.poster_path);
-    card.append(&poster.widget());
+    card.append(poster.widget());
 
     let label = Label::new(Some(&media.title));
     label.set_wrap(true);

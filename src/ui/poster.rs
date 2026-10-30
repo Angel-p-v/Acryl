@@ -1,5 +1,6 @@
 //! Componente Poster: renderiza pósters con gdk-pixbuf.
 
+use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
 use gtk4::{Box, Image, Label, Orientation};
 use std::path::Path;
@@ -21,17 +22,11 @@ impl Poster {
         let image = Image::new();
         image.set_size_request(150, 200);
 
-        if let Some(path) = poster_path {
-            if Path::new(path).exists() {
-                if let Ok(pixbuf) = gdk_pixbuf::Pixbuf::from_file_at_scale(
-                    path,
-                    150,
-                    200,
-                    true,
-                ) {
-                    image.set_from_pixbuf(Some(&pixbuf));
-                }
-            }
+        if let Some(path) = poster_path
+            && Path::new(path).exists()
+            && let Ok(pixbuf) = GtkPixbuf::from_file_at_scale(path, 150, 200, true)
+        {
+            image.set_from_pixbuf(Some(&pixbuf));
         }
 
         let label = Label::new(Some(title));
@@ -41,11 +36,7 @@ impl Poster {
         box_.append(&image);
         box_.append(&label);
 
-        Self {
-            box_,
-            image,
-            label,
-        }
+        Self { box_, image, label }
     }
 
     pub fn widget(&self) -> &Box {
@@ -54,5 +45,14 @@ impl Poster {
 
     pub fn set_title(&self, title: &str) {
         self.label.set_label(title);
+    }
+
+    pub fn set_poster(&self, poster_path: Option<&str>) {
+        if let Some(path) = poster_path
+            && Path::new(path).exists()
+            && let Ok(pixbuf) = GtkPixbuf::from_file_at_scale(path, 150, 200, true)
+        {
+            self.image.set_from_pixbuf(Some(&pixbuf));
+        }
     }
 }

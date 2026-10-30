@@ -1,6 +1,5 @@
 //! Repositorio de archivos multimedia.
 
-use crate::db::media_repo::MediaRepository;
 use rusqlite::{Connection, Result as RusqliteResult, params};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

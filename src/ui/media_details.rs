@@ -1,10 +1,9 @@
 //! Vista de detalles de un medio.
 
-use crate::db::{open_db, close_db, MediaRepository};
+use crate::db::{MediaRepository, close_db, open_db};
 use gtk4::prelude::*;
-use gtk4::{Box, Button, Label, Orientation, ScrolledWindow};
+use gtk4::{Box, Button, Label, Orientation};
 use std::rc::Rc;
-use std::cell::RefCell;
 
 use crate::ui::poster::Poster;
 
@@ -46,7 +45,7 @@ impl MediaDetails {
         back_button.set_halign(gtk4::Align::Start);
 
         box_.append(&back_button);
-        box_.append(&poster.widget());
+        box_.append(poster.widget());
         box_.append(&title_label);
         box_.append(&synopsis_label);
 
@@ -81,8 +80,10 @@ impl MediaDetails {
         close_db(conn);
 
         if let Some(details) = details {
-            self.title_label.set_markup(&format!("<b>{}</b>", details.media.title));
-            self.synopsis_label.set_label(&details.media.synopsis.unwrap_or_default());
+            self.title_label
+                .set_markup(&format!("<b>{}</b>", details.media.title));
+            self.synopsis_label
+                .set_label(&details.media.synopsis.unwrap_or_default());
             self.poster.set_poster(details.media.poster_path.as_deref());
         }
     }
