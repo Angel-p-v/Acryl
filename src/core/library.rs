@@ -1,7 +1,9 @@
 //! Capa de dominio: servicios de negocio.
 
-use crate::db::media_repo::MediaInput;
+use crate::db::media_repo::{MediaInput, NewMediaStream};
 use crate::db::{MediaRepository, close_db, open_db};
+use serde_json::Value;
+use std::process::Command;
 
 pub struct LibraryService;
 
@@ -311,4 +313,268 @@ pub struct IndexResult {
     pub folders_processed: i64,
 }
 
+/// Extrae las pistas de audio y subtítulos de un archivo de vídeo mediante ffprobe.
+///
+/// Devuelve los streams con `stream_index` relativo al tipo (audio o subtitle),
+/// listo para usarse con `--aid` / `--sid` de mpv.
+pub fn extract_media_streams(
+    file_path: &str,
+) -> Result<Vec<NewMediaStream>, Box<dyn std::error::Error>> {
+    let output = Command::new("ffprobe")
+        .arg("-v")
+        .arg("quiet")
+        .arg("-print_format")
+        .arg("json")
+        .arg("-show_streams")
+        .arg(file_path)
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(format!(
+            "ffprobe falló para {} (código {}): stderr={} stdout={}",
+            file_path,
+            output.status.code().unwrap_or(-1),
+            stderr,
+            stdout
+        )
+        .into());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let data: Value = serde_json::from_str(&stdout)?;
+
+    let streams: Vec<Value> = data
+        .get("streams")
+        .and_then(|s| s.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut audio_index = 0i32;
+    let mut subtitle_index = 0i32;
+    let mut result = Vec::new();
+
+    for stream in &streams {
+        let codec_type = stream
+            .get("codec_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let tags = stream.get("tags").and_then(|v| v.as_object());
+        let language = tags
+            .and_then(|t| t.get("language").and_then(|v| v.as_str()))
+            .filter(|l| !l.is_empty())
+            .map(|l| l.to_string());
+        let title = tags
+            .and_then(|t| t.get("title").and_then(|v| v.as_str()))
+            .filter(|t| !t.is_empty())
+            .map(|t| t.to_string());
+        let codec = stream
+            .get("codec_name")
+            .and_then(|v| v.as_str())
+            .map(|c| c.to_string());
+
+        match codec_type {
+            "audio" => {
+                result.push(NewMediaStream {
+                    file_path: file_path.to_string(),
+                    stream_type: "audio".to_string(),
+                    stream_index: audio_index,
+                    language,
+                    codec,
+                    title,
+                });
+                audio_index += 1;
+            }
+            "subtitle" => {
+                result.push(NewMediaStream {
+                    file_path: file_path.to_string(),
+                    stream_type: "subtitle".to_string(),
+                    stream_index: subtitle_index,
+                    language,
+                    codec,
+                    title,
+                });
+                subtitle_index += 1;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(result)
+}
+
+/// Extrae y guarda los streams de audio/subtítulo de un archivo en la base de datos.
+/// Es idempotente: reemplaza los streams previos de ese archivo.
+pub fn index_media_streams_for_file(
+    db_path: &str,
+    media_id: i64,
+    file_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let streams = extract_media_streams(file_path)?;
+
+    let mut conn = open_db(db_path)?;
+    let mut media_repo = MediaRepository::new(&mut conn);
+    media_repo.replace_streams_for_file(media_id, file_path, &streams)?;
+    close_db(conn);
+
+    Ok(())
+}
+
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mkv", "avi", "webm", "mov", "flv", "wmv"];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::connection::open_db;
+    use tempfile::TempDir;
+
+    fn disponible(bin: &str) -> bool {
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("command -v {}", bin))
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    fn temp_db() -> (String, TempDir) {
+        let dir = TempDir::new().expect("crear directorio temporal");
+        let path = dir.path().join("test.db");
+        (path.to_str().unwrap().to_string(), dir)
+    }
+
+    /// Genera un video de prueba con una pista de audio usando ffmpeg.
+    fn generar_video_prueba(dir: &std::path::Path) -> std::path::PathBuf {
+        let salida = dir.join("prueba.mkv");
+        let estado = std::process::Command::new("ffmpeg")
+            .arg("-y")
+            .arg("-f")
+            .arg("lavfi")
+            .arg("-i")
+            .arg("testsrc=duration=2:size=320x240:rate=30")
+            .arg("-f")
+            .arg("lavfi")
+            .arg("-i")
+            .arg("sine=frequency=440:duration=2")
+            .arg("-c:v")
+            .arg("libx264")
+            .arg("-c:a")
+            .arg("aac")
+            .arg("-shortest")
+            .arg("-loglevel")
+            .arg("error")
+            .arg(&salida)
+            .status()
+            .expect("ejecutar ffmpeg para generar video de prueba");
+        assert!(estado.success(), "ffmpeg no pudo generar el video");
+        salida
+    }
+
+    #[test]
+    fn extract_media_streams_detecta_audio_de_video_real() {
+        if !disponible("ffmpeg") || !disponible("ffprobe") {
+            eprintln!("test salteado: se requiere ffmpeg y ffprobe");
+            return;
+        }
+
+        let dir = TempDir::new().expect("crear directorio temporal");
+        let video = generar_video_prueba(dir.path());
+
+        let streams = extract_media_streams(video.to_str().unwrap()).expect("extraer streams");
+
+        assert!(
+            streams.iter().any(|s| s.stream_type == "audio"),
+            "debería detectar al menos una pista de audio"
+        );
+        let audios: Vec<_> = streams
+            .iter()
+            .filter(|s| s.stream_type == "audio")
+            .collect();
+        assert_eq!(audios[0].stream_index, 0);
+    }
+
+    #[test]
+    fn index_media_streams_for_file_guarda_en_bd() {
+        if !disponible("ffmpeg") || !disponible("ffprobe") {
+            eprintln!("test salteado: se requiere ffmpeg y ffprobe");
+            return;
+        }
+
+        let (db_path, _dir) = temp_db();
+        let conn = open_db(&db_path).expect("abrir BD");
+
+        // Crear medio y archivo en BD
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS media (
+                id          INTEGER PRIMARY KEY,
+                type        TEXT    NOT NULL,
+                title       TEXT    NOT NULL,
+                sort_title  TEXT    NOT NULL,
+                year        INTEGER,
+                folder_path TEXT    NOT NULL UNIQUE,
+                created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+                updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+            );
+             CREATE TABLE IF NOT EXISTS media_files (
+                id          INTEGER PRIMARY KEY,
+                media_id    INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+                file_path   TEXT    NOT NULL UNIQUE
+            );
+             CREATE TABLE IF NOT EXISTS media_streams (
+                id          INTEGER PRIMARY KEY,
+                media_id    INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+                file_path   TEXT    NOT NULL,
+                stream_type TEXT    NOT NULL CHECK (stream_type IN ('audio', 'subtitle')),
+                stream_index INTEGER NOT NULL,
+                language    TEXT,
+                codec       TEXT,
+                title       TEXT,
+                indexed_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+             )",
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params!["movie", "Test Movie", "test movie", "/tmp/test"],
+        )
+        .unwrap();
+        let media_id: i64 = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO media_files (media_id, file_path) VALUES (?1, ?2)",
+            rusqlite::params![media_id, "/tmp/test/video.mkv"],
+        )
+        .unwrap();
+        drop(conn);
+
+        let dir = TempDir::new().expect("crear directorio temporal");
+        let video = generar_video_prueba(dir.path());
+        let video_str = video.to_str().unwrap().to_string();
+
+        // Actualizar file_path a la ruta real del video generado
+        let conn = open_db(&db_path).expect("abrir BD");
+        conn.execute(
+            "UPDATE media_files SET file_path = ?1 WHERE media_id = ?2",
+            rusqlite::params![&video_str, media_id],
+        )
+        .unwrap();
+        drop(conn);
+
+        index_media_streams_for_file(&db_path, media_id, &video_str).expect("indexar streams");
+
+        // Verificar que se guardaron
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let mut repo = MediaRepository::new(&mut conn);
+        let streams = repo
+            .list_streams_by_file(&video_str)
+            .expect("listar streams");
+        assert!(!streams.is_empty(), "debería haber streams guardados");
+        assert!(
+            streams.iter().any(|s| s.stream_type == "audio"),
+            "debería guardar al menos una pista de audio"
+        );
+    }
+}
