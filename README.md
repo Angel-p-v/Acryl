@@ -41,7 +41,7 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 |-----------|-------------|
 | 📚 **Biblioteca local** | Indexa películas, series y anime en una base de datos SQLite con búsqueda FTS5 |
 | 🔍 **Búsqueda rápida** | Busca por título con filtrado por tipo y paginación |
-| 🖼️ **Pósteres y metadatos** | Descarga pósteres y sinopsis desde TVmaze y los muestra en la biblioteca y en los detalles |
+| 🖼️ **Pósteres, banners y metadatos** | Descarga pósteres y sinopsis desde TVmaze, banners anchos desde TVmaze/AniList, y los muestra en la biblioteca y en los detalles |
 | ⭐ **Favoritos y visto** | Marca contenido como favorito o visto con un solo clic |
 | ▶️ **Reproducción con mpv** | Abre el episodio seleccionado en `mpv` (ventana independiente) |
 | ⚙️ **Configuración YAML** | Ajustes persistentes en archivo YAML (idioma, ruta de base de datos, reproductor predeterminado) |
@@ -95,7 +95,7 @@ graph TD
 2. La UI llama directamente a funciones Rust del backend.
 3. El backend consulta **una única base de datos SQLite** (`acryl.db`) y devuelve los resultados a la UI.
 4. Para la reproducción, el backend lanza `mpv` como proceso externo (`std::process::Command`) en su propia ventana; `mpv` gestiona play, pausa, seek, volumen y pistas.
-5. Los metadatos se sincronizan en segundo plano con TVmaze (API pública, sin API key) para obtener pósteres y sinopsis automáticamente.
+5. Los metadatos se sincronizan en segundo plano con TVmaze (API pública, sin API key) para obtener pósteres y sinopsis automáticamente. Para el banner ancho de la vista de detalles se consultan las imágenes `background`/`banner` de TVmaze y, en anime, el banner de AniList (con Kitsu como respaldo). Desde Ajustes se puede forzar una actualización completa que sobrescribe los metadatos de todos los medios indexados.
 
 ### Principios de diseño
 
@@ -242,10 +242,11 @@ Una vez iniciada la aplicación:
 
 1. **Indexar medios**: Acryl carga automáticamente los medios desde la base de datos SQLite configurada (`acryl.db` por defecto).
 2. **Buscar**: Escribe un título en el campo de búsqueda para filtrar resultados.
-3. **Ver detalles**: Haz clic en cualquier medio para ver su póster, sinopsis, año y archivos indexados.
+3. **Ver detalles**: Haz clic en cualquier medio para ver su banner, sinopsis, año y archivos indexados.
 4. **Marcar favorito/visto**: Usa los botones de estado en la vista de detalles.
 5. **Reproducir**: Pulsa "▶ Reproducir" en la vista de detalles o en un episodio concreto; el archivo se abrirá en `mpv`.
-6. **Cambiar idioma**: Usa el selector de idioma en la parte superior de la aplicación.
+6. **Actualizar metadatos**: En Ajustes, pulsa "Actualizar todos los metadatos" para volver a consultar TVmaze y sobrescribir título, año, sinopsis, póster y banner de todos los medios indexados. La operación se ejecuta en segundo plano y pide confirmación.
+7. **Cambiar idioma**: Usa el selector de idioma en la parte superior de la aplicación.
 
 ---
 
@@ -263,7 +264,7 @@ app-media-manager/
 │   │   ├── search_bar.rs     Barra de búsqueda
 │   │   ├── media_list.rs     Galería de medios con pósters
 │   │   ├── media_details.rs  Vista de detalles
-│   │   └── poster.rs         Renderizado de pósters con gdk-pixbuf
+│   │   └── poster.rs         Renderizado de pósters, banners y marcadores
 │   ├── Cargo.toml
 │   └── Cargo.lock
 ├── scripts/                  Scripts de instalación y desinstalación

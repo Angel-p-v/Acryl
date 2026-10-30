@@ -2,6 +2,7 @@
 
 use crate::db::media_repo::Media;
 use crate::db::{MediaRepository, close_db, open_db};
+use crate::ui::poster::Banner;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, Orientation};
 use std::rc::Rc;
@@ -11,9 +12,7 @@ pub struct MediaDetails {
     box_: Box,
     db_path: String,
     media_id: i64,
-    poster: crate::ui::poster::Poster,
-    title_label: Label,
-    info_label: Label,
+    banner: Banner,
     synopsis_label: Label,
     favorite_button: Button,
     watched_button: Button,
@@ -37,18 +36,7 @@ impl MediaDetails {
         box_.set_margin_start(10);
         box_.set_margin_end(10);
 
-        let poster = crate::ui::poster::Poster::new("", None);
-
-        let title_label = Label::new(None);
-        title_label.set_markup("<b>Título</b>");
-        title_label.set_halign(gtk4::Align::Start);
-        title_label.set_hexpand(true);
-        title_label.set_wrap(true);
-
-        let info_label = Label::new(None);
-        info_label.set_halign(gtk4::Align::Start);
-        info_label.set_hexpand(true);
-        info_label.add_css_class("dim-label");
+        let banner = Banner::new();
 
         let synopsis_label = Label::new(None);
         synopsis_label.set_halign(gtk4::Align::Start);
@@ -73,9 +61,7 @@ impl MediaDetails {
         content_container.set_hexpand(true);
 
         box_.append(&back_button);
-        box_.append(poster.widget());
-        box_.append(&title_label);
-        box_.append(&info_label);
+        box_.append(banner.widget());
         box_.append(&synopsis_label);
         box_.append(&content_container);
         box_.append(&favorite_button);
@@ -86,9 +72,7 @@ impl MediaDetails {
             box_,
             db_path: db_path.to_string(),
             media_id,
-            poster,
-            title_label,
-            info_label,
+            banner,
             synopsis_label,
             favorite_button,
             watched_button,
@@ -132,8 +116,6 @@ impl MediaDetails {
     /// Si es una temporada (con parent_id), muestra sus episodios.
     pub fn set_media(&mut self, media: &Media) {
         self.media_id = media.id;
-        self.title_label
-            .set_markup(&format!("<b>{}</b>", escape_markup(&media.title)));
         let type_label = match media.r#type.as_str() {
             "series" => "Serie",
             "anime" => "Anime",
@@ -144,12 +126,11 @@ impl MediaDetails {
             Some(year) => format!("{} · {}", type_label, year),
             None => type_label.to_string(),
         };
-        self.info_label.set_label(&info_label);
         self.synopsis_label
             .set_label(&media.synopsis.clone().unwrap_or_default());
-        self.poster.set_title(&media.title);
-        self.poster
-            .set_poster_url(media.poster_path.as_deref().unwrap_or(""));
+        self.banner.set_info(&media.title, &info_label);
+        self.banner
+            .set_images(media.banner_path.as_deref(), media.poster_path.as_deref());
 
         let fav_label = if media.is_favorite {
             "★ Favorito (activo)"

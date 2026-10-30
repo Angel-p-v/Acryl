@@ -14,6 +14,7 @@ pub struct Media {
     pub created_at: String,
     pub updated_at: String,
     pub poster_path: Option<String>,
+    pub banner_path: Option<String>,
     pub synopsis: Option<String>,
     pub metadata_fetched_at: Option<String>,
     pub is_favorite: bool,
@@ -29,6 +30,17 @@ pub struct MediaInput {
     pub year: Option<i32>,
     pub folder_path: String,
     pub parent_id: Option<i64>,
+}
+
+/// Metadatos completos con los que sobrescribir un medio.
+#[derive(Debug, Clone, Default)]
+pub struct MediaMetadataInput<'a> {
+    pub title: &'a str,
+    pub sort_title: &'a str,
+    pub year: Option<i32>,
+    pub poster_path: Option<&'a str>,
+    pub banner_path: Option<&'a str>,
+    pub synopsis: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -100,7 +112,8 @@ impl<'a> MediaRepository<'a> {
     pub fn find_by_id(&mut self, id: i64) -> RusqliteResult<Option<Media>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
-                    is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at, parent_id
+                    is_favorite, is_watched, poster_path, banner_path, synopsis,
+                    metadata_fetched_at, parent_id
              FROM media WHERE id = ?1",
         )?;
         let row = stmt.query_row(params![id], map_media_row);
@@ -114,7 +127,8 @@ impl<'a> MediaRepository<'a> {
     pub fn list(&mut self, options: ListMediaOptions) -> RusqliteResult<Vec<Media>> {
         let mut sql = String::from(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
-                    is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at, parent_id
+                    is_favorite, is_watched, poster_path, banner_path, synopsis,
+                    metadata_fetched_at, parent_id
              FROM media",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -171,7 +185,7 @@ impl<'a> MediaRepository<'a> {
             let mut sql = String::from(
                 "SELECT m.id, m.type, m.title, m.sort_title, m.year, m.folder_path,
                         m.created_at, m.updated_at,
-                        m.is_favorite, m.is_watched, m.poster_path, m.synopsis,
+                        m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
                         m.metadata_fetched_at, m.parent_id
                  FROM media m
                  JOIN media_fts f ON f.rowid = m.id
@@ -202,7 +216,7 @@ impl<'a> MediaRepository<'a> {
             let mut sql = String::from(
                 "SELECT m.id, m.type, m.title, m.sort_title, m.year, m.folder_path,
                         m.created_at, m.updated_at,
-                        m.is_favorite, m.is_watched, m.poster_path, m.synopsis,
+                        m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
                         m.metadata_fetched_at, m.parent_id
                  FROM media m
                  WHERE m.sort_title LIKE ?1 ESCAPE '\\' AND m.parent_id IS NULL",
@@ -260,7 +274,8 @@ impl<'a> MediaRepository<'a> {
     pub fn list_children(&mut self, parent_id: i64) -> RusqliteResult<Vec<Media>> {
         let sql = String::from(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
-                    is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at, parent_id
+                    is_favorite, is_watched, poster_path, banner_path, synopsis,
+                    metadata_fetched_at, parent_id
              FROM media WHERE parent_id = ?1 ORDER BY sort_title ASC",
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -296,13 +311,43 @@ impl<'a> MediaRepository<'a> {
         media_id: i64,
         year: Option<i32>,
         poster_path: Option<&str>,
+        banner_path: Option<&str>,
         synopsis: Option<&str>,
     ) -> RusqliteResult<()> {
         self.conn.execute(
-            "UPDATE media SET year = COALESCE(?1, year), poster_path = ?2, synopsis = ?3,
+            "UPDATE media SET year = COALESCE(?1, year), poster_path = ?2,
+             banner_path = COALESCE(?3, banner_path), synopsis = ?4,
              metadata_fetched_at = datetime('now'), updated_at = datetime('now')
-             WHERE id = ?4",
-            params![year, poster_path, synopsis, media_id],
+             WHERE id = ?5",
+            params![year, poster_path, banner_path, synopsis, media_id],
+        )?;
+        Ok(())
+    }
+
+    /// Sobrescribe todos los metadatos de un medio con los datos obtenidos de TVmaze.
+    ///
+    /// A diferencia de `update_metadata`, no conserva los valores anteriores: el
+    /// título, el título de ordenación, el año, el póster, el banner y la
+    /// sinopsis se reemplazan por los nuevos valores.
+    pub fn overwrite_metadata(
+        &mut self,
+        media_id: i64,
+        metadata: &MediaMetadataInput<'_>,
+    ) -> RusqliteResult<()> {
+        self.conn.execute(
+            "UPDATE media SET title = ?1, sort_title = ?2, year = ?3, poster_path = ?4,
+             banner_path = ?5, synopsis = ?6, metadata_fetched_at = datetime('now'),
+             updated_at = datetime('now')
+             WHERE id = ?7",
+            params![
+                metadata.title,
+                metadata.sort_title,
+                metadata.year,
+                metadata.poster_path,
+                metadata.banner_path,
+                metadata.synopsis,
+                media_id
+            ],
         )?;
         Ok(())
     }
@@ -463,9 +508,10 @@ fn map_media_row(row: &rusqlite::Row<'_>) -> RusqliteResult<Media> {
         is_favorite: row.get(8)?,
         is_watched: row.get(9)?,
         poster_path: row.get(10)?,
-        synopsis: row.get(11)?,
-        metadata_fetched_at: row.get(12)?,
-        parent_id: row.get(13)?,
+        banner_path: row.get(11)?,
+        synopsis: row.get(12)?,
+        metadata_fetched_at: row.get(13)?,
+        parent_id: row.get(14)?,
     })
 }
 
@@ -612,6 +658,54 @@ mod tests {
             .list_streams_by_file("/tmp/test/video.mkv")
             .expect("listar por archivo");
         assert_eq!(by_file.len(), 3);
+    }
+
+    #[test]
+    fn overwrite_metadata_reemplaza_todos_los_campos() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let media_id = setup_media_and_file(&mut conn);
+        let mut repo = MediaRepository::new(&mut conn);
+
+        repo.update_metadata(
+            media_id,
+            Some(1999),
+            Some("https://example.com/old.jpg"),
+            Some("https://example.com/old-banner.jpg"),
+            Some("Sinopsis antigua"),
+        )
+        .expect("guardar metadatos antiguos");
+
+        repo.overwrite_metadata(
+            media_id,
+            &MediaMetadataInput {
+                title: "Nuevo título",
+                sort_title: "nuevo título",
+                year: Some(2024),
+                poster_path: Some("https://example.com/new.jpg"),
+                banner_path: Some("https://example.com/new-banner.jpg"),
+                synopsis: Some("Sinopsis nueva"),
+            },
+        )
+        .expect("sobrescribir metadatos");
+
+        let media = repo
+            .find_by_id(media_id)
+            .expect("buscar medio")
+            .expect("el medio existe");
+        assert_eq!(media.title, "Nuevo título");
+        assert_eq!(media.sort_title, "nuevo título");
+        assert_eq!(media.year, Some(2024));
+        assert_eq!(
+            media.poster_path.as_deref(),
+            Some("https://example.com/new.jpg")
+        );
+        assert_eq!(
+            media.banner_path.as_deref(),
+            Some("https://example.com/new-banner.jpg")
+        );
+        assert_eq!(media.synopsis.as_deref(), Some("Sinopsis nueva"));
+        assert!(media.metadata_fetched_at.is_some());
     }
 
     #[test]

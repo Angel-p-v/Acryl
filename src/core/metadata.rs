@@ -19,8 +19,28 @@ pub struct SyncMetadataResult {
     pub title: Option<String>,
     pub synopsis: Option<String>,
     pub poster_path: Option<String>,
+    pub banner_path: Option<String>,
     pub release_date: Option<String>,
     pub vote_average: Option<f64>,
+    /// Identificador del show en TVmaze, usado para pedir sus imágenes anchas.
+    pub show_id: Option<u64>,
+}
+
+/// Resumen de una actualización forzada de toda la biblioteca.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RefreshMetadataResult {
+    pub total: usize,
+    pub updated: usize,
+    pub failed: usize,
+    pub poster_failed: usize,
+    pub banner_failed: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SyncOutcome {
+    metadata: SyncMetadataResult,
+    poster_failed: bool,
+    banner_failed: bool,
 }
 
 /// Servicio de metadatos: sincroniza con TVmaze.
@@ -34,6 +54,16 @@ impl MetadataService {
         db_path: &str,
         media_id: i64,
     ) -> Result<SyncMetadataResult, Box<dyn std::error::Error>> {
+        Ok(Self::sync_metadata_impl(db_path, media_id, false)
+            .await?
+            .metadata)
+    }
+
+    async fn sync_metadata_impl(
+        db_path: &str,
+        media_id: i64,
+        force: bool,
+    ) -> Result<SyncOutcome, Box<dyn std::error::Error>> {
         let media = {
             let mut conn = open_db(db_path)?;
             let mut media_repo = MediaRepository::new(&mut conn);
@@ -47,31 +77,134 @@ impl MetadataService {
         let client = TvmazeClient::new();
         let fetched = sync_metadata(&media.r#type, &media.title, &client).await?;
 
+        // Al forzar, un resultado vacío no debe borrar los metadatos existentes.
+        if force && fetched.title.is_none() {
+            return Err(format!("TVmaze no devolvió resultados para '{}'", media.title).into());
+        }
+
         let year = fetched.release_date.as_deref().and_then(parse_year);
+        let new_title = fetched
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .unwrap_or(media.title.as_str());
+        let sort_title = new_title.to_lowercase();
+
+        let mut poster_path = fetched.poster_path.clone();
+        let mut poster_failed = false;
+
+        if let Some(poster_url) = poster_path.as_deref().filter(|url| !url.is_empty()) {
+            let poster_service = PosterService::new();
+            let download = if force {
+                poster_service.download_async_force(poster_url).await
+            } else {
+                poster_service.download_async(poster_url).await
+            };
+
+            match download {
+                Ok(_) => {
+                    if force
+                        && let Some(old_url) = media.poster_path.as_deref()
+                        && old_url != poster_url
+                        && let Err(error) = crate::core::poster_service::remove_cached(old_url)
+                    {
+                        eprintln!(
+                            "No se pudo eliminar el póster antiguo de '{}': {}",
+                            media.title, error
+                        );
+                    }
+                }
+                Err(error) => {
+                    poster_failed = true;
+                    eprintln!(
+                        "No se pudo descargar el póster de '{}': {}",
+                        media.title, error
+                    );
+                    // Al forzar, si el póster nuevo falla, se conserva el anterior.
+                    if force {
+                        poster_path = media.poster_path.clone();
+                    }
+                }
+            }
+        } else if force {
+            // TVmaze no ofrece póster: conservar el que ya hubiera.
+            poster_path = media.poster_path.clone();
+        }
+
+        let mut banner_path = fetched.banner_path.clone();
+        let mut banner_failed = false;
+
+        if let Some(banner_url) = banner_path.as_deref().filter(|url| !url.is_empty()) {
+            let poster_service = PosterService::new();
+            let download = if force {
+                poster_service.download_async_force(banner_url).await
+            } else {
+                poster_service.download_async(banner_url).await
+            };
+
+            match download {
+                Ok(_) => {
+                    if force
+                        && let Some(old_url) = media.banner_path.as_deref()
+                        && old_url != banner_url
+                        && let Err(error) = crate::core::poster_service::remove_cached(old_url)
+                    {
+                        eprintln!(
+                            "No se pudo eliminar el banner antiguo de '{}': {}",
+                            media.title, error
+                        );
+                    }
+                }
+                Err(error) => {
+                    banner_failed = true;
+                    eprintln!(
+                        "No se pudo descargar el banner de '{}': {}",
+                        media.title, error
+                    );
+                    // Al forzar, si el banner nuevo falla, se conserva el anterior.
+                    if force {
+                        banner_path = media.banner_path.clone();
+                    }
+                }
+            }
+        } else if force {
+            // Sin banner nuevo: conservar el que ya hubiera.
+            banner_path = media.banner_path.clone();
+        }
+
         {
             let mut conn = open_db(db_path)?;
             let mut media_repo = MediaRepository::new(&mut conn);
-            media_repo.update_metadata(
-                media_id,
-                year,
-                fetched.poster_path.as_deref(),
-                fetched.synopsis.as_deref(),
-            )?;
+            if force {
+                media_repo.overwrite_metadata(
+                    media_id,
+                    &crate::db::media_repo::MediaMetadataInput {
+                        title: new_title,
+                        sort_title: &sort_title,
+                        year,
+                        poster_path: poster_path.as_deref(),
+                        banner_path: banner_path.as_deref(),
+                        synopsis: fetched.synopsis.as_deref(),
+                    },
+                )?;
+            } else {
+                media_repo.update_metadata(
+                    media_id,
+                    year,
+                    poster_path.as_deref(),
+                    banner_path.as_deref(),
+                    fetched.synopsis.as_deref(),
+                )?;
+            }
             close_db(conn);
         }
 
-        if let Some(poster_url) = fetched.poster_path.as_deref()
-            && !poster_url.is_empty()
-            && !is_cached(poster_url)
-            && let Err(error) = PosterService::new().download_async(poster_url).await
-        {
-            eprintln!(
-                "No se pudo descargar el póster de '{}': {}",
-                media.title, error
-            );
-        }
-
-        Ok(fetched)
+        Ok(SyncOutcome {
+            metadata: fetched,
+            poster_failed,
+            banner_failed,
+        })
     }
 
     /// Sincroniza los medios que aún no tienen metadatos y descarga los pósters
@@ -81,16 +214,7 @@ impl MetadataService {
     pub fn sync_missing_metadata(
         db_path: &str,
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
-        let media = {
-            let mut conn = open_db(db_path)?;
-            let mut media_repo = MediaRepository::new(&mut conn);
-            let media = media_repo.list(ListMediaOptions {
-                limit: Some(10_000),
-                ..Default::default()
-            })?;
-            close_db(conn);
-            media
-        };
+        let media = load_all_parent_media(db_path)?;
 
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -120,10 +244,76 @@ impl MetadataService {
                     ),
                 }
             }
+
+            if let Some(banner_url) = item.banner_path.as_deref().filter(|url| !url.is_empty())
+                && !is_cached(banner_url)
+            {
+                match runtime.block_on(PosterService::new().download_async(banner_url)) {
+                    Ok(_) => changed += 1,
+                    Err(error) => eprintln!(
+                        "No se pudo descargar el banner de '{}': {}",
+                        item.title, error
+                    ),
+                }
+            }
         }
 
         Ok(changed)
     }
+
+    /// Vuelve a consultar TVmaze y sobrescribe título, año, sinopsis y póster
+    /// de todos los medios padre indexados. Pensada para ejecutarse en un hilo
+    /// secundario y no bloquear la UI.
+    pub fn refresh_all_metadata(
+        db_path: &str,
+    ) -> Result<RefreshMetadataResult, Box<dyn std::error::Error + Send + Sync>> {
+        let media = load_all_parent_media(db_path)?;
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+
+        let mut result = RefreshMetadataResult {
+            total: media.len(),
+            ..Default::default()
+        };
+
+        for item in media {
+            match runtime.block_on(Self::sync_metadata_impl(db_path, item.id, true)) {
+                Ok(outcome) => {
+                    result.updated += 1;
+                    if outcome.poster_failed {
+                        result.poster_failed += 1;
+                    }
+                    if outcome.banner_failed {
+                        result.banner_failed += 1;
+                    }
+                }
+                Err(error) => {
+                    result.failed += 1;
+                    eprintln!(
+                        "No se pudieron actualizar los metadatos de '{}': {}",
+                        item.title, error
+                    );
+                }
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+fn load_all_parent_media(
+    db_path: &str,
+) -> Result<Vec<crate::db::media_repo::Media>, Box<dyn std::error::Error + Send + Sync>> {
+    let mut conn = open_db(db_path)?;
+    let mut media_repo = MediaRepository::new(&mut conn);
+    let media = media_repo.list(ListMediaOptions {
+        limit: Some(i64::MAX),
+        ..Default::default()
+    })?;
+    close_db(conn);
+    Ok(media)
 }
 
 /// Cliente TVmaze.
@@ -149,9 +339,13 @@ impl Default for TvmazeClient {
     }
 }
 
-/// Busca metadatos en TVmaze.
+/// Busca metadatos en TVmaze y, además, una imagen ancha para el banner.
+///
+/// Para anime se consulta primero AniList y, si no hay banner, Kitsu; en el
+/// resto de casos se usan las imágenes `background`/`banner` de TVmaze. La
+/// ausencia de banner no es un error: la vista de detalles usa un degradado.
 pub async fn sync_metadata(
-    _media_type: &str,
+    media_type: &str,
     title: &str,
     client: &TvmazeClient,
 ) -> Result<SyncMetadataResult, Box<dyn std::error::Error>> {
@@ -168,7 +362,96 @@ pub async fn sync_metadata(
         .json()
         .await?;
 
-    Ok(parse_search_response(&response))
+    let mut metadata = parse_search_response(&response);
+    metadata.banner_path = fetch_banner_url(media_type, title, metadata.show_id, client).await;
+    Ok(metadata)
+}
+
+/// Busca una imagen ancha para el banner del medio.
+async fn fetch_banner_url(
+    media_type: &str,
+    title: &str,
+    show_id: Option<u64>,
+    client: &TvmazeClient,
+) -> Option<String> {
+    if media_type == "anime" {
+        if let Some(url) = fetch_anilist_banner(title, client).await {
+            return Some(url);
+        }
+        if let Some(url) = fetch_kitsu_banner(title, client).await {
+            return Some(url);
+        }
+    }
+
+    match show_id {
+        Some(id) => fetch_tvmaze_banner(id, client).await,
+        None => None,
+    }
+}
+
+/// Obtiene el banner de AniList (GraphQL público, sin clave).
+async fn fetch_anilist_banner(title: &str, client: &TvmazeClient) -> Option<String> {
+    let body = serde_json::json!({
+        "query": "query ($search: String) { Media(search: $search, type: ANIME) { bannerImage } }",
+        "variables": { "search": title }
+    });
+
+    let response = client
+        .client
+        .post("https://graphql.anilist.co")
+        .json(&body)
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json::<Value>()
+        .await
+        .ok()?;
+
+    parse_anilist_banner(&response)
+}
+
+/// Obtiene el cover ancho de Kitsu como respaldo de AniList.
+async fn fetch_kitsu_banner(title: &str, client: &TvmazeClient) -> Option<String> {
+    let url = format!(
+        "https://kitsu.io/api/edge/anime?filter%5Btext%5D={}&page%5Blimit%5D=1",
+        urlencoding::encode(title)
+    );
+
+    let response = client
+        .client
+        .get(&url)
+        .header("Accept", "application/vnd.api+json")
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json::<Value>()
+        .await
+        .ok()?;
+
+    parse_kitsu_banner(&response)
+}
+
+/// Obtiene la imagen `background` o `banner` de TVmaze para un show.
+async fn fetch_tvmaze_banner(show_id: u64, client: &TvmazeClient) -> Option<String> {
+    let url = format!("https://api.tvmaze.com/shows/{}/images", show_id);
+
+    let response = client
+        .client
+        .get(&url)
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json::<Value>()
+        .await
+        .ok()?;
+
+    parse_tvmaze_banner(&response)
 }
 
 fn parse_search_response(response: &Value) -> SyncMetadataResult {
@@ -196,7 +479,59 @@ fn parse_search_response(response: &Value) -> SyncMetadataResult {
             .get("rating")
             .and_then(|rating| rating.get("average"))
             .and_then(Value::as_f64),
+        banner_path: None,
+        show_id: show.get("id").and_then(Value::as_u64),
     }
+}
+
+/// Extrae el banner de una respuesta de AniList.
+fn parse_anilist_banner(response: &Value) -> Option<String> {
+    response
+        .get("data")?
+        .get("Media")?
+        .get("bannerImage")?
+        .as_str()
+        .map(str::to_string)
+        .filter(|url| !url.is_empty())
+}
+
+/// Extrae el cover ancho de una respuesta de Kitsu.
+fn parse_kitsu_banner(response: &Value) -> Option<String> {
+    response
+        .get("data")?
+        .as_array()?
+        .first()?
+        .get("attributes")?
+        .get("coverImage")?
+        .get("original")?
+        .as_str()
+        .map(str::to_string)
+        .filter(|url| !url.is_empty())
+}
+
+/// Extrae la mejor imagen ancha (`background` o `banner`) de TVmaze.
+fn parse_tvmaze_banner(images: &Value) -> Option<String> {
+    let images = images.as_array()?;
+    let pick = |kind: &str| {
+        images
+            .iter()
+            .find(|image| image.get("type").and_then(Value::as_str) == Some(kind))
+    };
+    let image = pick("background").or_else(|| pick("banner"))?;
+    let resolutions = image.get("resolutions")?;
+
+    for key in ["original", "medium"] {
+        if let Some(url) = resolutions
+            .get(key)
+            .and_then(|resolution| resolution.get("url"))
+            .and_then(Value::as_str)
+            .filter(|url| !url.is_empty())
+        {
+            return Some(url.to_string());
+        }
+    }
+
+    None
 }
 
 fn parse_year(date: &str) -> Option<i32> {
@@ -243,6 +578,7 @@ mod tests {
         let response = json!([{
             "score": 1.0,
             "show": {
+                "id": 64632,
                 "name": "Solo Leveling",
                 "summary": "<p>Hola &amp; adiós</p>",
                 "image": {"medium": "https://example.com/poster.jpg"},
@@ -260,6 +596,94 @@ mod tests {
         );
         assert_eq!(parsed.release_date.as_deref(), Some("2024-01-06"));
         assert_eq!(parsed.vote_average, Some(8.0));
+        assert_eq!(parsed.show_id, Some(64632));
+        assert_eq!(parsed.banner_path, None);
+    }
+
+    #[test]
+    fn parse_tvmaze_banner_prefiere_background_y_original() {
+        let images = json!([
+            {
+                "type": "poster",
+                "resolutions": {
+                    "original": {"url": "https://example.com/poster.jpg"}
+                }
+            },
+            {
+                "type": "banner",
+                "resolutions": {
+                    "original": {"url": "https://example.com/banner.jpg"}
+                }
+            },
+            {
+                "type": "background",
+                "resolutions": {
+                    "medium": {"url": "https://example.com/background-medium.jpg"},
+                    "original": {"url": "https://example.com/background.jpg"}
+                }
+            }
+        ]);
+
+        assert_eq!(
+            parse_tvmaze_banner(&images).as_deref(),
+            Some("https://example.com/background.jpg")
+        );
+        assert_eq!(parse_tvmaze_banner(&json!([])), None);
+    }
+
+    #[test]
+    fn parse_tvmaze_banner_usa_medium_si_no_hay_original() {
+        let images = json!([{
+            "type": "background",
+            "resolutions": {
+                "medium": {"url": "https://example.com/background-medium.jpg"}
+            }
+        }]);
+
+        assert_eq!(
+            parse_tvmaze_banner(&images).as_deref(),
+            Some("https://example.com/background-medium.jpg")
+        );
+    }
+
+    #[test]
+    fn parse_anilist_banner_extrae_la_imagen() {
+        let response = json!({
+            "data": {
+                "Media": {
+                    "bannerImage": "https://s4.anilist.co/file/anilistcdn/media/anime/banner/151807.jpg"
+                }
+            }
+        });
+
+        assert_eq!(
+            parse_anilist_banner(&response).as_deref(),
+            Some("https://s4.anilist.co/file/anilistcdn/media/anime/banner/151807.jpg")
+        );
+        assert_eq!(
+            parse_anilist_banner(&json!({"data": {"Media": null}})),
+            None
+        );
+        assert_eq!(parse_anilist_banner(&json!({})), None);
+    }
+
+    #[test]
+    fn parse_kitsu_banner_extrae_el_cover() {
+        let response = json!({
+            "data": [{
+                "attributes": {
+                    "coverImage": {
+                        "original": "https://media.kitsu.app/anime/46231/cover_image.jpg"
+                    }
+                }
+            }]
+        });
+
+        assert_eq!(
+            parse_kitsu_banner(&response).as_deref(),
+            Some("https://media.kitsu.app/anime/46231/cover_image.jpg")
+        );
+        assert_eq!(parse_kitsu_banner(&json!({"data": []})), None);
     }
 
     #[test]
@@ -305,5 +729,30 @@ mod tests {
         let updated =
             MetadataService::sync_missing_metadata(db_path).expect("sincronizar biblioteca vacía");
         assert_eq!(updated, 0);
+    }
+
+    #[test]
+    fn refresh_all_metadata_sin_medios_devuelve_resumen_vacio() {
+        let dir = tempfile::TempDir::new().expect("crear directorio temporal");
+        let db_path = dir.path().join("test.db");
+        let db_path = db_path.to_str().expect("ruta UTF-8");
+
+        {
+            let conn = open_db(db_path).expect("abrir BD");
+            close_db(conn);
+        }
+
+        let result =
+            MetadataService::refresh_all_metadata(db_path).expect("actualizar biblioteca vacía");
+        assert_eq!(
+            result,
+            RefreshMetadataResult {
+                total: 0,
+                updated: 0,
+                failed: 0,
+                poster_failed: 0,
+                banner_failed: 0,
+            }
+        );
     }
 }
