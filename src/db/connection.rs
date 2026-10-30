@@ -23,25 +23,48 @@ pub fn close_db(conn: Connection) {
     let _ = conn.close();
 }
 
-/// Ejecuta cada statement SQL de una migración individualmente, ignorando errores
-/// de "duplicate column name" (columnas que ya existen) para que las migraciones
-/// sean idempotentes sobre bases de datos preexistentes.
-fn run_migration_statements(conn: &Connection, sql: &str) -> RusqliteResult<()> {
-    // Dividir el SQL en statements individuales por punto y coma
-    let statements: Vec<&str> = sql
-        .split(';')
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .collect();
+/// Ejecuta una migración completa.
+///
+/// `execute_batch` respeta los bloques `BEGIN ... END` de los triggers de SQLite,
+/// algo que dividir el SQL por `;` rompería. Si la migración falla porque una base
+/// de datos antigua ya contiene alguna columna (caso de migraciones previas a
+/// `schema_migrations`), se reintenta statement a statement tolerando únicamente
+/// los errores idempotentes esperados.
+fn run_migration(conn: &mut Connection, migration: &Migration) -> RusqliteResult<()> {
+    match conn.execute_batch(migration.sql) {
+        Ok(()) => Ok(()),
+        Err(batch_error) => {
+            // Los triggers contienen puntos y coma en su cuerpo; no se pueden
+            // reintentar con un split ingenuo sin romperlos.
+            if migration
+                .sql
+                .to_ascii_uppercase()
+                .contains("CREATE TRIGGER")
+            {
+                return Err(batch_error);
+            }
 
-    for stmt in statements {
-        // Ejecutar cada statement individualmente. Errores de columnas duplicadas,
-        // fragmentos de triggers divididos por punto y coma u otros errores no
-        // críticos se ignoran: los statements válidos (CREATE TABLE/INDEX con
-        // IF NOT EXISTS, ALTER TABLE) se ejecutan correctamente.
-        let _ = conn.execute(stmt, []);
+            for stmt in migration
+                .sql
+                .split(';')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                if let Err(error) = conn.execute(stmt, []) {
+                    if is_idempotent_migration_error(&error) {
+                        continue;
+                    }
+                    return Err(error);
+                }
+            }
+            Ok(())
+        }
     }
-    Ok(())
+}
+
+fn is_idempotent_migration_error(error: &rusqlite::Error) -> bool {
+    let message = error.to_string().to_ascii_lowercase();
+    message.contains("duplicate column name") || message.contains("already exists")
 }
 
 fn run_migrations(
@@ -70,7 +93,7 @@ fn run_migrations(
             continue;
         }
 
-        run_migration_statements(conn, migration.sql)?;
+        run_migration(conn, migration)?;
         conn.prepare("INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)")?
             .execute(rusqlite::params![migration.version, migration.name])?;
     }

@@ -7,7 +7,7 @@
 <p align="center">
   <strong>Gestor de contenido multimedia de escritorio para Linux</strong><br/>
   Indexa tu colección de películas, series y anime en una base de datos SQLite local<br/>
-  y reprodúcelo dentro de la propia aplicación, sin depender de reproductores externos.
+  y reproduce tus episodios con mpv, el reproductor de referencia en Linux.
 </p>
 
 <p align="center">
@@ -29,9 +29,9 @@
 
 ## 🎯 ¿Qué es Acryl?
 
-**Acryl** es una aplicación de escritorio nativa para Linux que te permite indexar, buscar y reproducir tu colección local de películas, series y anime —todo dentro de la propia aplicación, sin depender de reproductores externos ni servicios en la nube.
+**Acryl** es una aplicación de escritorio nativa para Linux que te permite indexar, buscar y reproducir tu colección local de películas, series y anime. La interfaz es Rust + GTK4/Libadwaita y la reproducción se delega a `mpv` en una ventana independiente.
 
-Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice de búsqueda de texto completo (FTS5) y la reproducción de vídeo integrada mediante GtkMediaFile (GTK4).
+Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice de búsqueda de texto completo (FTS5) y la integración con `mpv` mediante `std::process::Command`.
 
 ---
 
@@ -41,9 +41,9 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 |-----------|-------------|
 | 📚 **Biblioteca local** | Indexa películas, series y anime en una base de datos SQLite con búsqueda FTS5 |
 | 🔍 **Búsqueda rápida** | Busca por título con filtrado por tipo y paginación |
-| 🖼️ **Pósteres y metadatos** | Visualiza pósteres, sinopsis, año y tipo de cada medio |
+| 🖼️ **Pósteres y metadatos** | Descarga pósteres y sinopsis desde TVmaze y los muestra en la biblioteca y en los detalles |
 | ⭐ **Favoritos y visto** | Marca contenido como favorito o visto con un solo clic |
-| ▶️ **Reproducción integrada** | Reproduce archivos de vídeo dentro de la aplicación sin reproductores externos |
+| ▶️ **Reproducción con mpv** | Abre el episodio seleccionado en `mpv` (ventana independiente) |
 | ⚙️ **Configuración YAML** | Ajustes persistentes en archivo YAML (idioma, ruta de base de datos, reproductor predeterminado) |
 | 🌐 **Idiomas** | Interfaz disponible en español e inglés |
 | 📦 **Instalación** | Clona el repositorio y ejecuta `./scripts/install.sh` |
@@ -61,7 +61,7 @@ graph TD
     Logic[["Lógica: Rust puro"]]
     Decision{{"¿Consulta o reproduce?"}}
     SQLite[["SQLite: acryl.db"]]
-    MPV[["GtkMediaFile (GTK4)"]]
+    MPV[["mpv (proceso externo)"]]
     TVmaze[["TVmaze: API pública"]]
 
     Usuario -->|busca| UI
@@ -70,7 +70,7 @@ graph TD
     Decision -->|consulta| SQLite
     Decision -->|reproduce| MPV
     SQLite -->|datos| UI
-    MPV -->|frames| UI
+    MPV -->|ventana independiente| Usuario
     Logic -.->|sincroniza| TVmaze
     TVmaze -.->|metadatos| Logic
     UI -->|resultado| Usuario
@@ -94,8 +94,8 @@ graph TD
 1. El usuario busca o navega por medios en la UI (GTK4 / Libadwaita, Rust).
 2. La UI llama directamente a funciones Rust del backend.
 3. El backend consulta **una única base de datos SQLite** (`acryl.db`) y devuelve los resultados a la UI.
-4. Para la reproducción, el backend utiliza GtkMediaFile integrada en GTK4 para abrir y controlar el archivo de vídeo dentro de la misma ventana.
-5. Los metadatos pueden sincronizarse con TVmaze (API pública, sin API key) para obtener pósteres y sinopsis automáticamente.
+4. Para la reproducción, el backend lanza `mpv` como proceso externo (`std::process::Command`) en su propia ventana; `mpv` gestiona play, pausa, seek, volumen y pistas.
+5. Los metadatos se sincronizan en segundo plano con TVmaze (API pública, sin API key) para obtener pósteres y sinopsis automáticamente.
 
 ### Principios de diseño
 
@@ -116,7 +116,7 @@ graph TD
 | `libadwaita-1-dev` | Componentes de UI (Libadwaita) | Todas |
 | `librsvg2-dev` | Renderizado de SVG | Todas |
 | `libayatana-appindicator3-dev` | Indicadores de bandeja (opcional) | Todas |
-| `libgtk-4-dev` (incluye GtkMediaFile) | Reproducción de vídeo integrado | Todas |
+| `mpv` | Reproducción de vídeo (proceso externo) | Todas |
 | `libgdk-pixbuf2.0-dev` | Decodificación de imágenes (pósters) | Todas |
 
 ### Herramientas de desarrollo
@@ -244,7 +244,7 @@ Una vez iniciada la aplicación:
 2. **Buscar**: Escribe un título en el campo de búsqueda para filtrar resultados.
 3. **Ver detalles**: Haz clic en cualquier medio para ver su póster, sinopsis, año y archivos indexados.
 4. **Marcar favorito/visto**: Usa los botones de estado en la vista de detalles.
-5. **Reproducir**: Escribe la ruta de un archivo de vídeo en el reproductor integrado y pulsa "Abrir".
+5. **Reproducir**: Pulsa "▶ Reproducir" en la vista de detalles o en un episodio concreto; el archivo se abrirá en `mpv`.
 6. **Cambiar idioma**: Usa el selector de idioma en la parte superior de la aplicación.
 
 ---
@@ -255,16 +255,14 @@ Una vez iniciada la aplicación:
 app-media-manager/
 ├── src/                      ← Rust puro (sin Tauri, sin WebView)
 │   ├── main.rs               Punto de entrada de la aplicación GTK4
-│   ├── core/                 ← Lógica de negocio (library, metadata, db)
+│   ├── core/                 ← Lógica de negocio (library, metadata, player, poster_service)
 │   ├── db/                   SQLite, repositorios, migraciones, FTS5
-│   ├── player/               Reproducción con GtkMediaFile (GTK4)
 │   ├── config/               Gestión de configuración YAML
 │   ├── ui/                   Interfaz GTK4 / Libadwaita
 │   │   ├── main_window.rs    Ventana principal
 │   │   ├── search_bar.rs     Barra de búsqueda
-│   │   ├── media_list.rs     Lista de medios
+│   │   ├── media_list.rs     Galería de medios con pósters
 │   │   ├── media_details.rs  Vista de detalles
-│   │   ├── video_player.rs   Reproductor embebido
 │   │   └── poster.rs         Renderizado de pósters con gdk-pixbuf
 │   ├── Cargo.toml
 │   └── Cargo.lock
@@ -333,7 +331,8 @@ Acryl utiliza las siguientes dependencias principales. Todas son de código abie
 
 | Paquete | Propósito | Licencia |
 |---------|-----------|----------|
-| `gtk4` | Reproducción de vídeo integrada (GtkMediaFile) | LGPL |
+| `gtk4` | Interfaz gráfica | LGPL |
+| `mpv` | Reproducción de vídeo externa | GPLv2+ |
 | `libgtk-4` | Interfaz gráfica | LGPL |
 | `libadwaita-1` | Componentes de UI | LGPL |
 | `librsvg2` | Renderizado SVG | LGPL |

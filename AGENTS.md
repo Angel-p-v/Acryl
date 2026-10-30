@@ -10,7 +10,7 @@ Estas instrucciones complementan las configuraciones del repositorio, las polít
 
 ## 1. Objetivo del proyecto
 
-`acryl` es una aplicación de escritorio nativa para Linux que indexa y gestiona colecciones locales de películas, series y anime mediante una base de datos SQLite. Permite buscar, consultar información y reproducir contenido dentro de la propia aplicación, sin depender de reproductores externos ejecutados mediante `spawn`.
+`acryl` es una aplicación de escritorio nativa para Linux que indexa y gestiona colecciones locales de películas, series y anime mediante una base de datos SQLite. Permite buscar, consultar información y reproducir contenido mediante el reproductor externo `mpv`.
 
 La capa de presentación está implementada en Rust puro con GTK4 / Libadwaita (sin motor Web, sin Tauri, sin frontend web). La lógica de negocio reside en capas de dominio y persistencia en Rust.
 
@@ -60,7 +60,7 @@ app-media-manager/
 │   ├── main.rs             Punto de entrada GTK4
 │   ├── lib.rs              Biblioteca (config, core, db, ui)
 │   ├── config/             Gestión de configuración YAML (mod.rs)
-│   ├── core/               Lógica de negocio (library, metadata, player, mod.rs)
+│   ├── core/               Lógica de negocio (library, metadata, player, poster_service, mod.rs)
 │   ├── db/                 SQLite, migraciones, repositorios, FTS5
 │   │   ├── connection.rs   Apertura de BD, migraciones, PRAGMA
 │   │   ├── file_repo.rs    Repositorio de archivos multimedia
@@ -73,10 +73,11 @@ app-media-manager/
 │       ├── media_list.rs   Lista de medios
 │       ├── media_details.rs Vista de detalles
 │       ├── search_bar.rs   Barra de búsqueda
-│       ├── poster.rs       Renderizado de pósters con gdk-pixbuf
-│       └── video_player.rs Reproductor embebido
+│       ├── settings_window.rs Vista de ajustes
+│       └── poster.rs       Renderizado de pósters con gdk-pixbuf
 ├── tests/
-│   └── media_persistence.rs Tests de integración con SQLite temporal
+│   ├── media_persistence.rs Tests de integración con SQLite temporal
+│   └── mpv_player.rs       Tests de integración con mpv
 ├── scripts/
 │   ├── install.sh          Instalador (sin Node.js, solo Rust + GTK)
 │   ├── uninstall.sh        Desinstalador

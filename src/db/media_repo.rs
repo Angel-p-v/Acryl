@@ -200,10 +200,12 @@ impl<'a> MediaRepository<'a> {
         if results.is_empty() {
             let like_pattern = format!("%{}%", escape_like(trimmed));
             let mut sql = String::from(
-                "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
-                        is_favorite, is_watched, poster_path, synopsis, metadata_fetched_at
-                 FROM media
-                 WHERE sort_title LIKE ?1 AND parent_id IS NULL",
+                "SELECT m.id, m.type, m.title, m.sort_title, m.year, m.folder_path,
+                        m.created_at, m.updated_at,
+                        m.is_favorite, m.is_watched, m.poster_path, m.synopsis,
+                        m.metadata_fetched_at, m.parent_id
+                 FROM media m
+                 WHERE m.sort_title LIKE ?1 ESCAPE '\\' AND m.parent_id IS NULL",
             );
             let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(like_pattern)];
 
@@ -212,7 +214,7 @@ impl<'a> MediaRepository<'a> {
                 params.push(Box::new(t.clone()));
             }
 
-            sql.push_str(" ORDER BY sort_title ASC LIMIT ?");
+            sql.push_str(" ORDER BY m.sort_title ASC LIMIT ?");
             params.push(Box::new(options.limit.unwrap_or(20)));
 
             let params_slice: Vec<&dyn rusqlite::ToSql> =
@@ -292,14 +294,15 @@ impl<'a> MediaRepository<'a> {
     pub fn update_metadata(
         &mut self,
         media_id: i64,
+        year: Option<i32>,
         poster_path: Option<&str>,
         synopsis: Option<&str>,
     ) -> RusqliteResult<()> {
         self.conn.execute(
-            "UPDATE media SET poster_path = ?1, synopsis = ?2,
+            "UPDATE media SET year = COALESCE(?1, year), poster_path = ?2, synopsis = ?3,
              metadata_fetched_at = datetime('now'), updated_at = datetime('now')
-             WHERE id = ?3",
-            params![poster_path, synopsis, media_id],
+             WHERE id = ?4",
+            params![year, poster_path, synopsis, media_id],
         )?;
         Ok(())
     }
@@ -484,14 +487,14 @@ fn to_fts_query(query: &str) -> String {
 }
 
 fn escape_like(value: &str) -> String {
-    value
-        .chars()
-        .flat_map(|c| match c {
-            '\\' | '%' | '_' => format!("\\{}", c).into_bytes().to_vec(),
-            _ => vec![c as u8],
-        })
-        .map(|b| b as char)
-        .collect::<String>()
+    let mut escaped = String::with_capacity(value.len());
+    for c in value.chars() {
+        if matches!(c, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
 }
 
 #[cfg(test)]
@@ -609,6 +612,14 @@ mod tests {
             .list_streams_by_file("/tmp/test/video.mkv")
             .expect("listar por archivo");
         assert_eq!(by_file.len(), 3);
+    }
+
+    #[test]
+    fn escape_like_conserva_unicode_y_escapa_comodines() {
+        assert_eq!(
+            escape_like("película 100%_x\\y"),
+            "película 100\\%\\_x\\\\y"
+        );
     }
 
     #[test]

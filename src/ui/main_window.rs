@@ -7,12 +7,13 @@ use crate::ui::media_list::MediaList;
 use crate::ui::search_bar::SearchBar;
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
-use gtk4::{Box, Button, Orientation, Stack};
+use gtk4::{Box, Button, Orientation, Stack, glib};
 use libadwaita::ApplicationWindow as AdwApplicationWindow;
 use libadwaita::prelude::*;
-use std::cell::RefCell;
-use std::process::Command;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::mpsc::{self, TryRecvError};
+use std::time::Duration;
 
 pub struct MainWindow {
     window: AdwApplicationWindow,
@@ -23,6 +24,7 @@ pub struct MainWindow {
     media_details: Rc<RefCell<MediaDetails>>,
     settings_view: SettingsView,
     db_path: String,
+    metadata_sync_running: Rc<Cell<bool>>,
 }
 
 type MainWindowRef = Rc<RefCell<MainWindow>>;
@@ -86,6 +88,7 @@ impl MainWindow {
             media_details,
             settings_view,
             db_path: db_path.clone(),
+            metadata_sync_running: Rc::new(Cell::new(false)),
         }));
 
         this.borrow().window.show();
@@ -154,6 +157,7 @@ impl MainWindow {
                 drop(w);
                 // Recargar medios después de guardar ajustes (pueden haber cambiado las carpetas).
                 Self::load_media(&this_clone, &db_path_for_reload);
+                Self::start_metadata_sync(&this_clone, db_path_for_reload.clone());
             });
 
         // Callbacks de la vista de detalles.
@@ -193,6 +197,19 @@ impl MainWindow {
                 w.play_file();
             });
 
+        // Callback: reproducir un episodio concreto con mpv (proceso externo).
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_play_episode(move |file_path| {
+                let w = this_clone.borrow();
+                if let Err(error) = w.play_episode(&file_path) {
+                    eprintln!("No se pudo reproducir '{}': {}", file_path, error);
+                    w.show_error("No se pudo reproducir el episodio", &error.to_string());
+                }
+            });
+
         // Callback: al hacer clic en "Abrir" de una temporada, navegar a los detalles de esa temporada.
         let this_clone = this.clone();
         this.borrow_mut()
@@ -202,6 +219,9 @@ impl MainWindow {
                 let w = this_clone.borrow();
                 w.show_details(season_id);
             });
+
+        // Completar metadatos y pósters que falten sin bloquear la UI.
+        Self::start_metadata_sync(&this, db_path.clone());
 
         this
     }
@@ -303,15 +323,99 @@ impl MainWindow {
         };
         let mut repo = MediaRepository::new(&mut conn);
         let files = repo.list_files_by_media(media_id).unwrap_or_default();
-        let _ = repo.record_playback(media_id, 0.0, 0.0);
         close_db(conn);
 
         if let Some(f) = files.first() {
-            // Lanzar mpv como proceso externo (no bloquea la UI de GTK4).
-            let _ = Command::new("mpv").arg(&f.file_path).spawn();
+            if let Err(error) =
+                crate::core::player::play_external(&self.db_path, Some(media_id), &f.file_path)
+            {
+                eprintln!("No se pudo reproducir '{}': {}", f.file_path, error);
+                self.show_error("No se pudo reproducir", &error.to_string());
+            }
         } else {
             eprintln!("No hay archivos para el medio {}", media_id);
+            self.show_error(
+                "No hay archivos para reproducir",
+                "El medio seleccionado no tiene ningún archivo indexado.",
+            );
         }
+    }
+
+    fn play_episode(&self, file_path: &str) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
+        let media_id = {
+            let mut conn = open_db(&self.db_path)?;
+            let mut repo = MediaRepository::new(&mut conn);
+            let media_id = repo.find_media_id_by_file(file_path)?;
+            close_db(conn);
+            media_id
+        };
+
+        crate::core::player::play_external(&self.db_path, media_id, file_path)
+    }
+
+    /// Sincroniza metadatos y pósters en segundo plano y refresca la UI al terminar.
+    fn start_metadata_sync(this: &MainWindowRef, db_path: String) {
+        if this.borrow().metadata_sync_running.get() {
+            return;
+        }
+        this.borrow().metadata_sync_running.set(true);
+
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = crate::core::metadata::MetadataService::sync_missing_metadata(&db_path);
+            let _ = sender.send(result);
+        });
+
+        let this = this.clone();
+        glib::timeout_add_local(Duration::from_millis(200), move || {
+            match receiver.try_recv() {
+                Ok(Ok(changed)) => {
+                    this.borrow().metadata_sync_running.set(false);
+                    if changed > 0 {
+                        Self::refresh_views(&this);
+                    }
+                    glib::ControlFlow::Break
+                }
+                Ok(Err(error)) => {
+                    eprintln!("Error sincronizando metadatos: {}", error);
+                    this.borrow().metadata_sync_running.set(false);
+                    glib::ControlFlow::Break
+                }
+                Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(TryRecvError::Disconnected) => {
+                    this.borrow().metadata_sync_running.set(false);
+                    glib::ControlFlow::Break
+                }
+            }
+        });
+    }
+
+    fn refresh_views(this: &MainWindowRef) {
+        let (db_path, visible, media_id) = {
+            let w = this.borrow();
+            (
+                w.db_path.clone(),
+                w.stack.visible_child_name().map(|name| name.to_string()),
+                w.media_details.borrow().media_id(),
+            )
+        };
+
+        Self::load_media(this, &db_path);
+
+        if visible.as_deref() == Some("details") && media_id > 0 {
+            this.borrow().show_details(media_id);
+        }
+    }
+
+    fn show_error(&self, message: &str, detail: &str) {
+        let dialog = gtk4::MessageDialog::builder()
+            .transient_for(&self.window)
+            .modal(true)
+            .message_type(gtk4::MessageType::Error)
+            .text(message)
+            .secondary_text(detail)
+            .build();
+        dialog.present();
     }
 
     pub fn widget(&self) -> &AdwApplicationWindow {
