@@ -65,25 +65,19 @@ fi
 
 echo "Ejecutando binario real: $REAL_BIN" >> "$LOG_FILE"
 
-# Probar cada configuración
+# Probar cada configuración (ejecutar en foreground, sin timeout que mate la app)
 for config in "${CONFIGS[@]}"; do
   echo "" >> "$LOG_FILE"
   echo "Probando configuración: $config" >> "$LOG_FILE"
 
-  # Ejecutar con timeout de 10 segundos
-  if timeout 10 env $config "$REAL_BIN" "$@" >> "$LOG_FILE" 2>&1; then
+  # Ejecutar en foreground: el launcher espera a que el binario termine
+  if env $config "$REAL_BIN" "$@" >> "$LOG_FILE" 2>&1; then
     echo "EXITO: Configuración funcionó: $config" >> "$LOG_FILE"
     echo "" >> "$LOG_FILE"
     exit 0
   else
     exit_code=$?
-    if [[ $exit_code -eq 124 ]]; then
-      echo "TIEMPO AGOTADO (10s) - configuración parece funcionar: $config" >> "$LOG_FILE"
-      echo "" >> "$LOG_FILE"
-      exit 0
-    else
-      echo "FALLÓ con código $exit_code" >> "$LOG_FILE"
-    fi
+    echo "FALLÓ con código $exit_code: $config" >> "$LOG_FILE"
   fi
 done
 
