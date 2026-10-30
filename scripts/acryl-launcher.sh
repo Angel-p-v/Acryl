@@ -2,7 +2,7 @@
 #
 # acryl-launcher.sh — Lanzador de Acryl con múltiples configuraciones Wayland/X11
 #
-# Prueba diferentes configuraciones de entorno para hacer que WebKit2GTK
+# Prueba diferentes configuraciones de entorno para hacer que GTK4/Libadwaita
 # renderice correctamente en Wayland/Hyprland. Guarda los errores en un log.
 #
 # Uso:
@@ -12,26 +12,23 @@ set -euo pipefail
 
 readonly APP_NAME="acryl"
 
-# Posibles ubicaciones del binario real
+# Posibles ubicaciones del binario real (instalado por install.sh como acryl-real)
 readonly REAL_BIN_CANDIDATES=(
   "$HOME/.local/bin/${APP_NAME}-real"
-  "/usr/bin/${APP_NAME}"
-  "/usr/local/bin/${APP_NAME}"
+  "/usr/bin/${APP_NAME}-real"
+  "/usr/local/bin/${APP_NAME}-real"
 )
 
 readonly LOG_DIR="$HOME/.local/share/acryl"
 readonly LOG_FILE="$LOG_DIR/acryl-launch.log"
 
 # Configuraciones de entorno a probar (en orden de preferencia)
+# Si estamos en Wayland, probamos wayland primero; si en X11, x11 primero.
 readonly CONFIGS=(
-  "GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1"
-  "GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1"
-  "GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1"
-  "XDG_SESSION_TYPE=x11 GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1"
+  "GDK_BACKEND=wayland"
+  "GDK_BACKEND=x11"
   "XDG_SESSION_TYPE=x11 GDK_BACKEND=x11"
-  "LIBGL_ALWAYS_SOFTWARE=1 GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1"
-  "GDK_BACKEND=wayland WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1"
-  "GDK_BACKEND=wayland WEBKIT_DISABLE_DMABUF_RENDERER=1"
+  "LIBGL_ALWAYS_SOFTWARE=1 GDK_BACKEND=x11"
 )
 
 # Crear directorio de logs
@@ -69,30 +66,27 @@ fi
 
 echo "Ejecutando binario real: $REAL_BIN" >> "$LOG_FILE"
 
-# Probar cada configuración
+# Probar cada configuración (ejecutar en foreground, sin timeout que mate la app)
 for config in "${CONFIGS[@]}"; do
   echo "" >> "$LOG_FILE"
   echo "Probando configuración: $config" >> "$LOG_FILE"
 
-  # Ejecutar con timeout de 8 segundos
-  if timeout 8 env $config "$REAL_BIN" "$@" >> "$LOG_FILE" 2>&1; then
+  # Ejecutar en foreground: el launcher espera a que el binario termine
+  if env $config "$REAL_BIN" "$@" >> "$LOG_FILE" 2>&1; then
     echo "EXITO: Configuración funcionó: $config" >> "$LOG_FILE"
     echo "" >> "$LOG_FILE"
     exit 0
   else
     exit_code=$?
-    if [[ $exit_code -eq 124 ]]; then
-      echo "TIEMPO AGOTADO (8s) - configuración parece funcionar: $config" >> "$LOG_FILE"
-      echo "" >> "$LOG_FILE"
-      exit 0
-    else
-      echo "FALLÓ con código $exit_code" >> "$LOG_FILE"
-    fi
+    echo "FALLÓ con código $exit_code: $config" >> "$LOG_FILE"
   fi
 done
 
 echo "" >> "$LOG_FILE"
 echo "TODAS LAS CONFIGURACIONES FALLARON" >> "$LOG_FILE"
 echo "" >> "$LOG_FILE"
+
+# Pausa para que el usuario pueda leer los errores si se ejecuta desde .desktop
+sleep 5
 
 exit 1

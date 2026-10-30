@@ -273,10 +273,10 @@ build_and_install() {
     return 1
   fi
 
-  info "Instalando el binario en $BIN_DIR/$APP_NAME..."
+  info "Instalando el binario real en $BIN_DIR/${APP_NAME}-real..."
   mkdir -p "$BIN_DIR"
-  install -Dm755 "$bundle_dir/$APP_NAME" "$BIN_DIR/$APP_NAME"
-  ok "Binario instalado en $BIN_DIR/$APP_NAME"
+  install -Dm755 "$bundle_dir/$APP_NAME" "$BIN_DIR/${APP_NAME}-real"
+  ok "Binario real instalado en $BIN_DIR/${APP_NAME}-real"
 }
 
 # -----------------------------------------------------------------------------
@@ -393,7 +393,7 @@ install_launcher_wrapper() {
   install -Dm755 "$project_dir/scripts/acryl-launcher.sh" "$wrapper_bin"
   ok "Lanzador instalado en $wrapper_bin"
 
-  # Actualizar el .desktop para usar el wrapper
+  # Actualizar el .desktop para usar el wrapper con ruta absoluta
   local desktop_file="$DESKTOP_DIR/$APP_NAME.desktop"
   if [[ -f "$desktop_file" ]]; then
     sed -i "s|^Exec=.*|Exec=$wrapper_bin %F|" "$desktop_file"

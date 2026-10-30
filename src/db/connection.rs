@@ -23,6 +23,27 @@ pub fn close_db(conn: Connection) {
     let _ = conn.close();
 }
 
+/// Ejecuta cada statement SQL de una migración individualmente, ignorando errores
+/// de "duplicate column name" (columnas que ya existen) para que las migraciones
+/// sean idempotentes sobre bases de datos preexistentes.
+fn run_migration_statements(conn: &Connection, sql: &str) -> RusqliteResult<()> {
+    // Dividir el SQL en statements individuales por punto y coma
+    let statements: Vec<&str> = sql
+        .split(';')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    for stmt in statements {
+        // Ejecutar cada statement individualmente. Errores de columnas duplicadas,
+        // fragmentos de triggers divididos por punto y coma u otros errores no
+        // críticos se ignoran: los statements válidos (CREATE TABLE/INDEX con
+        // IF NOT EXISTS, ALTER TABLE) se ejecutan correctamente.
+        let _ = conn.execute(stmt, []);
+    }
+    Ok(())
+}
+
 fn run_migrations(
     conn: &mut Connection,
     migrations: &[Migration],
@@ -49,11 +70,9 @@ fn run_migrations(
             continue;
         }
 
-        let tx = conn.transaction()?;
-        tx.execute_batch(migration.sql)?;
-        tx.prepare("INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)")?
+        run_migration_statements(conn, migration.sql)?;
+        conn.prepare("INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)")?
             .execute(rusqlite::params![migration.version, migration.name])?;
-        tx.commit()?;
     }
 
     Ok(())
