@@ -7,6 +7,7 @@ use crate::db::{MediaRepository, close_db, open_db};
 use crate::ui::media_details::MediaDetails;
 use crate::ui::media_list::MediaList;
 use crate::ui::search_bar::SearchBar;
+use crate::ui::video_player::VideoPlayer;
 use gtk4::prelude::*;
 use gtk4::{Box, Orientation, Stack};
 use libadwaita::prelude::*;
@@ -20,6 +21,7 @@ pub struct MainWindow {
     stack: Stack,
     media_list: MediaList,
     media_details: MediaDetails,
+    video_player: VideoPlayer,
     db_path: String,
     search_bar: SearchBar,
 }
@@ -57,6 +59,10 @@ impl MainWindow {
         let media_details = MediaDetails::new(&db_path, 0);
         stack.add_titled(media_details.widget(), Some("details"), "Detalles");
 
+        let mut video_player = VideoPlayer::new(&db_path);
+        video_player.setup_controls();
+        stack.add_titled(video_player.widget(), Some("player"), "Reproductor");
+
         stack.set_visible_child_name("list");
 
         Self::load_media(&mut media_list, &db_path);
@@ -67,6 +73,7 @@ impl MainWindow {
             stack,
             media_list,
             media_details,
+            video_player,
             db_path: db_path.clone(),
             search_bar,
         }));
@@ -226,7 +233,8 @@ impl MainWindow {
         close_db(conn);
 
         if let Some(f) = files.first() {
-            println!("Reproduciendo: {}", f.file_path);
+            self.stack.set_visible_child_name("player");
+            self.video_player.load_file(&f.file_path);
         } else {
             eprintln!("No hay archivos para el medio {}", media_id);
         }
