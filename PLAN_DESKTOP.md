@@ -389,8 +389,8 @@ LICENSE                   ← Se mantiene
 | Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ✅ completado |
 | Hito 9 | Publicación automática en GitHub Releases | ✅ completado |
 | **Hito E.1** | Prototipo mínimo GTK4 (ventana, lista, póster, búsqueda) | ✅ completado |
-| **Hito E.2** | UI completa GTK4 (detalles, favoritos, visto, navegación) | ⏳ pendiente |
-| **Hito E.3** | Reproductor integrado con libmpv en GTK4 | ⏳ pendiente |
+| **Hito E.2** | UI completa GTK4 (detalles, favoritos, visto, navegación) | ✅ completado |
+| **Hito E.3** | Reproductor integrado con GtkMediaFile en GTK4 | ✅ completado |
 | **Hito E.4** | Empaquetado nativo Linux sin Tauri | ⏳ pendiente |
 | **Hito E.5** | Limpieza y documentación (eliminar frontend/Tauri) | ⏳ pendiente |
 
