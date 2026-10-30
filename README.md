@@ -1,4 +1,8 @@
-<h1 align="center">🖼️ Acryl</h1>
+<p align="center">
+  <img src="icons/acryl.svg" alt="Acryl" width="200"/>
+</p>
+
+<h1 align="center">Acryl</h1>
 
 <p align="center">
   <strong>Gestor de contenido multimedia de escritorio para Linux</strong><br/>
@@ -58,13 +62,13 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 
 ```mermaid
 graph TD
-    Usuario[[Usuario]]
-    UI[UI: GTK4 / Libadwaita (Rust)]
-    Logic[Lógica: Rust puro]
-    Decision{¿Consulta o reproduce?}
-    SQLite[(SQLite: acryl.db)]
-    MPV[[libmpv: FFI]]
-    TVmaze[TVmaze: API pública]
+    Usuario[["Usuario"]]
+    UI[["UI: GTK4 / Libadwaita (Rust)"]]
+    Logic[["Lógica: Rust puro"]]
+    Decision{{"¿Consulta o reproduce?"}}
+    SQLite[["SQLite: acryl.db"]]
+    MPV[["libmpv: FFI"]]
+    TVmaze[["TVmaze: API pública"]]
 
     Usuario -->|busca| UI
     UI -->|llama| Logic
@@ -81,7 +85,7 @@ graph TD
     classDef ui fill:#f0fdf4,stroke:#497975,stroke-width:1px
     classDef logic fill:#fffbeb,stroke:#f59e0b,stroke-width:1px
     classDef db fill:#fce7f3,stroke:#ec4899,stroke-width:1px
-    classDef ext fill:#f3f4f6,stroke:#9ca3af,stroke-width:1px,stroke-dasharray: 3 3
+    classDef ext fill:#f3f4f6,stroke:#9ca3af,stroke-width:1px
 
     class Usuario usuario
     class UI ui
