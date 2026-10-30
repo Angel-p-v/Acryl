@@ -89,6 +89,24 @@ ALTER TABLE media ADD COLUMN parent_id INTEGER REFERENCES media(id);
 CREATE INDEX IF NOT EXISTS idx_media_parent ON media(parent_id);
 "#;
 
+const MEDIA_STREAMS_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS media_streams (
+  id          INTEGER PRIMARY KEY,
+  media_id    INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+  file_path   TEXT    NOT NULL,
+  stream_type TEXT    NOT NULL CHECK (stream_type IN ('audio', 'subtitle')),
+  stream_index INTEGER NOT NULL,
+  language    TEXT,
+  codec       TEXT,
+  title       TEXT,
+  indexed_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_streams_media ON media_streams(media_id);
+CREATE INDEX IF NOT EXISTS idx_media_streams_file ON media_streams(file_path);
+CREATE INDEX IF NOT EXISTS idx_media_streams_type ON media_streams(stream_type);
+"#;
+
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -104,5 +122,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 3,
         name: "media-parent-id",
         sql: MEDIA_PARENT_ID_SQL,
+    },
+    Migration {
+        version: 4,
+        name: "media-streams",
+        sql: MEDIA_STREAMS_SQL,
     },
 ];

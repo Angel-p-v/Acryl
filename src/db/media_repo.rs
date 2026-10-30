@@ -339,6 +339,106 @@ impl<'a> MediaRepository<'a> {
             Err(e) => Err(e),
         }
     }
+
+    /// Inserta o reemplaza los streams de un archivo. Elimina los streams previos
+    /// de ese file_path y vuelve a insertar los nuevos (idempotente por archivo).
+    pub fn replace_streams_for_file(
+        &mut self,
+        media_id: i64,
+        file_path: &str,
+        streams: &[NewMediaStream],
+    ) -> RusqliteResult<()> {
+        let tx = self.conn.transaction()?;
+
+        tx.execute(
+            "DELETE FROM media_streams WHERE file_path = ?1",
+            params![file_path],
+        )?;
+
+        for stream in streams {
+            tx.execute(
+                "INSERT INTO media_streams (media_id, file_path, stream_type, stream_index, language, codec, title)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    media_id,
+                    file_path,
+                    stream.stream_type,
+                    stream.stream_index,
+                    stream.language,
+                    stream.codec,
+                    stream.title,
+                ],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Lista los streams de un medio (todos sus archivos).
+    pub fn list_streams_by_media(&mut self, media_id: i64) -> RusqliteResult<Vec<MediaStream>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, media_id, file_path, stream_type, stream_index, language, codec, title
+             FROM media_streams WHERE media_id = ?1
+             ORDER BY stream_type, stream_index",
+        )?;
+        let rows: Vec<MediaStream> = stmt
+            .query_map(params![media_id], map_media_stream_row)?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
+    }
+
+    /// Lista los streams de un archivo concreto.
+    pub fn list_streams_by_file(&mut self, file_path: &str) -> RusqliteResult<Vec<MediaStream>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, media_id, file_path, stream_type, stream_index, language, codec, title
+             FROM media_streams WHERE file_path = ?1
+             ORDER BY stream_type, stream_index",
+        )?;
+        let rows: Vec<MediaStream> = stmt
+            .query_map(params![file_path], map_media_stream_row)?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
+    }
+}
+
+/// Datos para insertar un stream de audio o subtítulo de un archivo.
+#[derive(Debug, Clone)]
+pub struct NewMediaStream {
+    pub file_path: String,
+    pub stream_type: String, // "audio" | "subtitle"
+    pub stream_index: i32,   // índice relativo al tipo (para --aid/--sid de mpv)
+    pub language: Option<String>,
+    pub codec: Option<String>,
+    pub title: Option<String>,
+}
+
+/// Stream de audio o subtítulo leído de la base de datos.
+#[derive(Debug, Clone)]
+pub struct MediaStream {
+    pub id: i64,
+    pub media_id: i64,
+    pub file_path: String,
+    pub stream_type: String,
+    pub stream_index: i32,
+    pub language: Option<String>,
+    pub codec: Option<String>,
+    pub title: Option<String>,
+}
+
+fn map_media_stream_row(row: &rusqlite::Row<'_>) -> RusqliteResult<MediaStream> {
+    Ok(MediaStream {
+        id: row.get(0)?,
+        media_id: row.get(1)?,
+        file_path: row.get(2)?,
+        stream_type: row.get(3)?,
+        stream_index: row.get(4)?,
+        language: row.get(5)?,
+        codec: row.get(6)?,
+        title: row.get(7)?,
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -392,4 +492,169 @@ fn escape_like(value: &str) -> String {
         })
         .map(|b| b as char)
         .collect::<String>()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::connection::open_db;
+    use tempfile::TempDir;
+
+    fn temp_db() -> (String, TempDir) {
+        let dir = TempDir::new().expect("crear directorio temporal");
+        let path = dir.path().join("test.db");
+        (path.to_str().unwrap().to_string(), dir)
+    }
+
+    fn setup_media_and_file(conn: &mut rusqlite::Connection) -> i64 {
+        // Migración mínima para probar: crear tablas necesarias
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS media (
+                id          INTEGER PRIMARY KEY,
+                type        TEXT    NOT NULL,
+                title       TEXT    NOT NULL,
+                sort_title  TEXT    NOT NULL,
+                year        INTEGER,
+                folder_path TEXT    NOT NULL UNIQUE,
+                created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+                updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+            );
+             CREATE TABLE IF NOT EXISTS media_files (
+                id          INTEGER PRIMARY KEY,
+                media_id    INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+                file_path   TEXT    NOT NULL UNIQUE
+            );
+             CREATE TABLE IF NOT EXISTS media_streams (
+                id          INTEGER PRIMARY KEY,
+                media_id    INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+                file_path   TEXT    NOT NULL,
+                stream_type TEXT    NOT NULL CHECK (stream_type IN ('audio', 'subtitle')),
+                stream_index INTEGER NOT NULL,
+                language    TEXT,
+                codec       TEXT,
+                title       TEXT,
+                indexed_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+             )",
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params!["movie", "Test Movie", "test movie", "/tmp/test"],
+        )
+        .unwrap();
+        let media_id: i64 = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO media_files (media_id, file_path) VALUES (?1, ?2)",
+            rusqlite::params![media_id, "/tmp/test/video.mkv"],
+        )
+        .unwrap();
+
+        media_id
+    }
+
+    #[test]
+    fn replace_streams_for_file_y_list_streams_por_media() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let media_id = setup_media_and_file(&mut conn);
+        let mut repo = MediaRepository::new(&mut conn);
+
+        let streams = vec![
+            NewMediaStream {
+                file_path: "/tmp/test/video.mkv".to_string(),
+                stream_type: "audio".to_string(),
+                stream_index: 0,
+                language: Some("spa".to_string()),
+                codec: Some("aac".to_string()),
+                title: Some("Español".to_string()),
+            },
+            NewMediaStream {
+                file_path: "/tmp/test/video.mkv".to_string(),
+                stream_type: "audio".to_string(),
+                stream_index: 1,
+                language: Some("eng".to_string()),
+                codec: Some("opus".to_string()),
+                title: Some("English".to_string()),
+            },
+            NewMediaStream {
+                file_path: "/tmp/test/video.mkv".to_string(),
+                stream_type: "subtitle".to_string(),
+                stream_index: 0,
+                language: Some("spa".to_string()),
+                codec: Some("subrip".to_string()),
+                title: Some("Subtítulos ES".to_string()),
+            },
+        ];
+
+        repo.replace_streams_for_file(media_id, "/tmp/test/video.mkv", &streams)
+            .expect("insertar streams");
+
+        // Listar por media
+        let by_media = repo
+            .list_streams_by_media(media_id)
+            .expect("listar por media");
+        assert_eq!(by_media.len(), 3);
+        let audios: Vec<_> = by_media
+            .iter()
+            .filter(|s| s.stream_type == "audio")
+            .collect();
+        assert_eq!(audios.len(), 2);
+        assert_eq!(audios[0].stream_index, 0);
+        assert_eq!(audios[1].stream_index, 1);
+
+        // Listar por archivo
+        let by_file = repo
+            .list_streams_by_file("/tmp/test/video.mkv")
+            .expect("listar por archivo");
+        assert_eq!(by_file.len(), 3);
+    }
+
+    #[test]
+    fn replace_streams_for_file_es_idempotente() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let media_id = setup_media_and_file(&mut conn);
+        let mut repo = MediaRepository::new(&mut conn);
+
+        let streams_v1 = vec![NewMediaStream {
+            file_path: "/tmp/test/video.mkv".to_string(),
+            stream_type: "audio".to_string(),
+            stream_index: 0,
+            language: Some("spa".to_string()),
+            codec: None,
+            title: None,
+        }];
+        repo.replace_streams_for_file(media_id, "/tmp/test/video.mkv", &streams_v1)
+            .expect("insertar v1");
+
+        let streams_v2 = vec![
+            NewMediaStream {
+                file_path: "/tmp/test/video.mkv".to_string(),
+                stream_type: "audio".to_string(),
+                stream_index: 0,
+                language: Some("eng".to_string()),
+                codec: None,
+                title: None,
+            },
+            NewMediaStream {
+                file_path: "/tmp/test/video.mkv".to_string(),
+                stream_type: "subtitle".to_string(),
+                stream_index: 0,
+                language: None,
+                codec: None,
+                title: None,
+            },
+        ];
+        repo.replace_streams_for_file(media_id, "/tmp/test/video.mkv", &streams_v2)
+            .expect("reemplazar v2");
+
+        let by_file = repo
+            .list_streams_by_file("/tmp/test/video.mkv")
+            .expect("listar");
+        assert_eq!(by_file.len(), 2);
+        assert!(!by_file.iter().any(|s| s.language.as_deref() == Some("spa")));
+        assert!(by_file.iter().any(|s| s.stream_type == "subtitle"));
+    }
 }
