@@ -23,6 +23,7 @@ pub struct MediaDetails {
     on_favorite: Option<Rc<dyn Fn()>>,
     on_watched: Option<Rc<dyn Fn()>>,
     on_play: Option<Rc<dyn Fn()>>,
+    on_play_episode: Option<Rc<dyn Fn(String)>>,
     on_open_season: Option<Rc<dyn Fn(i64)>>,
 }
 
@@ -90,6 +91,7 @@ impl MediaDetails {
             on_favorite: None,
             on_watched: None,
             on_play: None,
+            on_play_episode: None,
             on_open_season: None,
         }
     }
@@ -251,8 +253,11 @@ impl MediaDetails {
                 play_btn.add_css_class("flat");
                 play_btn.set_tooltip_text(Some(&format!("Reproducir {}", episode_label)));
                 let file_path = f.file_path.clone();
+                let on_play_episode = self.on_play_episode.clone();
                 play_btn.connect_clicked(move |_| {
-                    eprintln!("Reproduciendo: {}", file_path);
+                    if let Some(cb) = &on_play_episode {
+                        cb(file_path.clone());
+                    }
                 });
                 row.append(&play_btn);
 
@@ -308,8 +313,11 @@ impl MediaDetails {
             play_btn.add_css_class("flat");
             play_btn.set_tooltip_text(Some(&format!("Reproducir {}", episode_label)));
             let file_path = f.file_path.clone();
+            let on_play_episode = self.on_play_episode.clone();
             play_btn.connect_clicked(move |_| {
-                eprintln!("Reproduciendo: {}", file_path);
+                if let Some(cb) = &on_play_episode {
+                    cb(file_path.clone());
+                }
             });
             row.append(&play_btn);
 
@@ -385,5 +393,13 @@ impl MediaDetails {
         F: Fn(i64) + 'static,
     {
         self.on_open_season = Some(Rc::new(f));
+    }
+
+    /// Establece el callback de reproducir un episodio (recibe la ruta del archivo).
+    pub fn on_play_episode<F>(&mut self, f: F)
+    where
+        F: Fn(String) + 'static,
+    {
+        self.on_play_episode = Some(Rc::new(f));
     }
 }

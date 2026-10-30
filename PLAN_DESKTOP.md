@@ -396,9 +396,21 @@ LICENSE                   ← Se mantiene
 
 ---
 
+### Hito F.1 — Reproducción de episodios desde la vista de detalles (Semanas 1–2)
+- Conectar los botones "▶ Reproducir" de cada episodio en la vista de detalles al reproductor integrado (`VideoPlayer`)
+- Al hacer clic en un episodio, cargar su archivo en el reproductor y navegar a la vista de reproducción
+- **Criterio de aceptación:** al hacer clic en el botón de reproducción de cualquier episodio, el video se reproduce dentro de la ventana de la aplicación
+
+### Hito F.2 — Controles de reproducción integrados (Semanas 3–4)
+- Controles funcionales en el reproductor: play, pausa, stop, seek, volumen
+- Mostrar información de reproducción (tiempo actual, duración)
+- **Criterio de aceptación:** se puede pausar, reanudar, detener y ajustar el volumen de un video en reproducción
+
+---
+
 ## 16. Próximo paso inmediato
 
-Todos los hitos del plan están completados (E.1 a E.9 y E.1 a E.5). El proyecto está en estado estable: Rust puro + GTK4/Libadwaita, sin Tauri, sin Node.js, sin WebView.
+Implementar el **Hito F.1 — Reproducción de episodios desde la vista de detalles**. Crear la rama `feat/reproduccion-episodios` para el trabajo.
 
 ---
 

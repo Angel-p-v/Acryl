@@ -72,7 +72,7 @@ impl MainWindow {
         stack.add_titled(media_details.borrow().widget(), Some("details"), "Detalles");
 
         let video_player = Rc::new(RefCell::new(VideoPlayer::new()));
-        video_player.borrow_mut().setup_controls();
+        VideoPlayer::setup_controls(&video_player);
         stack.add_titled(
             video_player.borrow().widget(),
             Some("player"),
@@ -201,6 +201,18 @@ impl MainWindow {
             .on_play(move || {
                 let w = this_clone.borrow();
                 w.play_file();
+            });
+
+        // Callback: al hacer clic en "▶ Reproducir" de un episodio, cargar el archivo en el reproductor
+        // y navegar a la vista de reproducción.
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_play_episode(move |file_path| {
+                let w = this_clone.borrow();
+                w.video_player.borrow_mut().load_file(&file_path);
+                w.stack.set_visible_child_name("player");
             });
 
         // Callback: al hacer clic en "Abrir" de una temporada, navegar a los detalles de esa temporada.
