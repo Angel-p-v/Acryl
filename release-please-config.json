@@ -3,7 +3,7 @@
   "bootstrap-sha": "44981aeec3e7b6cb99c3d6aa22bbe3d0ce7a7e3c",
   "packages": {
     ".": {
-      "release-type": "node",
+      "release-type": "rust",
       "changelog-path": "CHANGELOG.md",
       "include-component-in-tag": false
     }
