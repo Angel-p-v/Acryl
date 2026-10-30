@@ -18,9 +18,10 @@ path = "src/lib.rs"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yaml = "0.9"
+serde_yaml = { version = "0.9", default-features = false }
 rusqlite = { version = "0.33", features = ["bundled"] }
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 gtk4 = "0.11"
 libadwaita = "0.9"
 gdk-pixbuf = "0.20"
