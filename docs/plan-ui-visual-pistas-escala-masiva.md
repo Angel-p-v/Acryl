@@ -28,11 +28,23 @@ Este plan aborda esos límites desde el principio, con una arquitectura pensada 
 | Base de datos | SQLite + `rusqlite` | Consultas parametrizadas, WAL, FTS5, índices |
 | Reproducción | `mpv` (proceso externo vía `std::process::Command`) | Fiabilidad de codecs, delegación de reproducción |
 | Pósters / imágenes | `gdk-pixbuf` / `cairo` | Renderizado nativo dentro de GTK4 |
-| Metadatos externos | `reqwest` + TMDB/TVDB | Descarga de pósters e información |
+| Metadatos externos | `reqwest` + APIs públicas (`public-apis`) | Descarga de pósters e información mediante APIs listadas en https://github.com/public-apis/public-apis |
 | Descarga de pósters | Hilos secundarios + canales | No bloquear el hilo principal de GTK4 |
+| API de metadatos y pósters | https://github.com/public-apis/public-apis | Directorio de APIs públicas para descubrir y usar servicios de metadatos y pósters sin acoplarse a un proveedor único |
 | Detección de pistas | `ffprobe` (JSON) | Extraer streams de audio y subtítulos |
 
 No se añaden dependencias nuevas salvo que sea estrictamente necesario. `ffmpeg`/`ffprobe` ya están disponibles en el entorno.
+
+### Uso de APIs públicas (`public-apis`)
+
+Para metadatos y pósters se consultará el directorio https://github.com/public-apis/public-apis para seleccionar una API pública adecuada (cine, series, anime, etc.) en lugar de acoplarse a un único proveedor como TMDB o TVDB. Esto permite:
+
+- Elegir la API con mejor cobertura según el tipo de contenido (películas, series, anime).
+- No depender de una API key específica de un solo proveedor.
+- Cambiar de proveedor sin modificar la arquitectura, solo la implementación del cliente HTTP.
+- Respetar los límites de tasa (rate limits) documentados en cada API pública.
+
+La implementación abstraerá el cliente de metadatos detrás de una interfaz para poder cambiar el proveedor fácilmente.
 
 ---
 
@@ -56,7 +68,7 @@ No se añaden dependencias nuevas salvo que sea estrictamente necesario. `ffmpeg
 ### 3.3. Pósters: descarga y caché en segundo plano
 
 - Directorio de caché local: `~/.cache/acryl/posters/` (configurable).
-- Descarga asíncrona de pósters desde TMDB/TVDB con `reqwest`.
+- Descarga asíncrona de pósters desde una API pública seleccionada de https://github.com/public-apis/public-apis con `reqwest`.
 - No bloquear el hilo principal de GTK4: descarga en hilo separado con canales o `glib::MainContext`.
 - Placeholder (color / ícono) mientras se descarga o si falla.
 - Renderizado con `gdk-pixbuf` cargado en `gtk4::Picture`; bordes redondeados o máscaras con `cairo` sobre `GtkDrawingArea` si es necesario.
@@ -95,7 +107,7 @@ No se añaden dependencias nuevas salvo que sea estrictamente necesario. `ffmpeg
 
 - Reemplazar lista simple por `GtkListView` / `GtkColumnView` con factory de ítems.
 - Renderizado de pósters con `gdk-pixbuf` (placeholder si no hay).
-- Descarga asíncrona de pósters desde TMDB/TVDB con caché en disco.
+- Descarga asíncrona de pósters desde una API pública de https://github.com/public-apis/public-apis con caché en disco.
 - Pruebas: renderizado de muchos ítems sin bloquear UI; descarga de pósters en segundo plano.
 
 ### Hito G.3 — UI moderna con Libadwaita y CSS (semanas 5-6)

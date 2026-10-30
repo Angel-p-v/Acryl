@@ -419,7 +419,7 @@ Objetivo: interfaz visual bonita con Libadwaita + CSS, renderizado de pósters d
 | Hito | Contenido | Estado |
 |------|-----------|--------|
 | **Hito G.1** | Infraestructura de datos masivos: tabla `media_streams`, índices, extracción con `ffprobe`, consultas paginadas | Pendiente |
-| **Hito G.2** | Galería de pósters virtualizada con `GtkListView` y descarga asíncrona desde TMDB/TVDB | Pendiente |
+| **Hito G.2** | Galería de pósters virtualizada con `GtkListView` y descarga asíncrona desde APIs públicas (`public-apis`) | Pendiente |
 | **Hito G.3** | UI moderna con Libadwaita y CSS de GTK4 (`AdwStatusPage`, `AdwToast`, `AdwClamp`) | Pendiente |
 | **Hito G.4** | Selección de pistas audio / subtítulos y reproducción con `mpv` aplicando `--aid` / `--sid` | Pendiente |
 | **Hito G.5** | Pruebas de estrés con colección grande y ajuste de rendimiento | Pendiente |
