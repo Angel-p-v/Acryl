@@ -3,9 +3,9 @@
 # install.sh — Instalador automático de Acryl para Linux
 #
 # Detecta el gestor de paquetes del sistema, instala las dependencias de
-# sistema y de desarrollo, clona el repositorio, compila la aplicación e
-# instala la entrada .desktop para que se pueda buscar desde el lanzador
-# de aplicaciones (menú de inicio / buscador).
+# sistema y de desarrollo, clona el repositorio, compila la aplicación con
+# Rust + GTK4 y crea la entrada .desktop para que se pueda buscar desde el
+# lanzador de aplicaciones.
 #
 # Uso:
 #   curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/install.sh | bash
@@ -21,7 +21,6 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 readonly REPO_URL="https://github.com/Angel-p-v/app-media-manager.git"
 readonly APP_NAME="acryl"
-readonly MIN_NODE_MAJOR=22
 readonly MIN_RUST="1.90"
 
 # Rutas de instalación a nivel de usuario (no requieren root para el .desktop)
@@ -116,152 +115,77 @@ install_system_deps() {
         build-essential \
         curl \
         git \
-        libwebkit2gtk-4.0-dev \
-        libgtk-3-dev \
+        libgtk-4-dev \
+        libadwaita-1-dev \
         librsvg2-dev \
         libayatana-appindicator3-dev \
-        libmpv-dev || {
+        libmpv-dev \
+        libgdk-pixbuf2.0-dev || {
         warn "Algunos paquetes de Debian/Ubuntu no se pudieron instalar."
-        warn "Intenta: sudo apt-get install libwebkit2gtk-4.0-dev libgtk-3-dev librsvg2-dev libmpv-dev"
+        warn "Intenta: sudo apt-get install libgtk-4-dev libadwaita-1-dev librsvg2-dev libmpv-dev libgdk-pixbuf2.0-dev"
       }
       ;;
     pacman)
-      # Arch divide webkit2gtk en paquetes versionados (4.0 / 4.1); Tauri v2
-      # funciona con cualquiera de las dos. mpv se llama simplemente 'mpv'.
-      # Node.js se gestiona por separado en ensure_node() para evitar conflictos
-      # con versiones LTS ya instaladas (p.ej. nodejs-lts-jod).
       sudo pacman -Sy --needed --noconfirm \
         base-devel \
         curl \
         git \
-        gtk3 \
+        gtk4 \
+        libadwaita \
         librsvg \
         libayatana-appindicator \
-        mpv || {
+        mpv \
+        gdk-pixbuf2 || {
         warn "Algunos paquetes base de Arch no se pudieron instalar."
       }
-
-      # webkit2gtk: probar 4.1 primero, luego 4.0
-      if ! try_install_pkgs pacman webkit2gtk-4.1 webkit2gtk-4.0; then
-        warn "No se encontró webkit2gtk-4.1 ni webkit2gtk-4.0 en los repos de Arch."
-        warn "Instala manualmente: sudo pacman -S webkit2gtk-4.1 (o webkit2gtk-4.0)"
-      fi
       ;;
     dnf)
-      # Fedora reciente: webkit2gtk4.0-devel; distros antiguas: webkit2gtk3-devel
-      # Node.js se gestiona por separado en ensure_node().
       sudo dnf install -y \
         gcc gcc-c++ make \
         curl git \
-        gtk3-devel \
+        gtk4-devel \
+        libadwaita-devel \
         librsvg2-devel \
         libayatana-appindicator3-devel \
-        libmpv-devel || {
+        libmpv-devel \
+        gdk-pixbuf2-devel || {
         warn "Algunos paquetes base de dnf no se pudieron instalar."
       }
-
-      if ! try_install_pkgs dnf webkit2gtk4.0-devel webkit2gtk3-devel; then
-        warn "No se encontró webkit2gtk4.0-devel ni webkit2gtk3-devel."
-        warn "Instala manualmente: sudo dnf install webkit2gtk4.0-devel (o webkit2gtk3-devel)"
-      fi
       ;;
     zypper)
       sudo zypper install -y \
         patterns-base-C_C++ \
         curl git \
-        gtk3-devel \
+        gtk4-devel \
+        libadwaita1-devel \
         librsvg2-devel \
         libayatana-appindicator3-devel \
-        libmpv-devel || {
+        libmpv-devel \
+        gdk-pixbuf2-devel || {
         warn "Algunos paquetes base de openSUSE no se pudieron instalar."
       }
-
-      if ! try_install_pkgs zypper libwebkit2gtk-4_0-devel libwebkit2gtk3-devel; then
-        warn "No se encontró libwebkit2gtk-4_0-devel ni libwebkit2gtk3-devel."
-        warn "Instala manualmente: sudo zypper install libwebkit2gtk-4_0-devel"
-      fi
       ;;
     apk)
       sudo apk add \
         build-base \
         curl git \
-        gtk+3-dev \
+        gtk4-dev \
+        libadwaita-dev \
         librsvg-dev \
         libayatana-appindicator3-dev \
-        libmpv-dev || {
+        libmpv-dev \
+        gdk-pixbuf2-dev || {
         warn "Algunos paquetes base de Alpine no se pudieron instalar."
       }
-
-      if ! try_install_pkgs apk webkit2gtk-dev; then
-        warn "No se encontró webkit2gtk-dev en Alpine."
-        warn "Instala manualmente: sudo apk add webkit2gtk-dev"
-      fi
       ;;
     *)
       error "Gestor de paquetes no soportado: '$pm'."
-      error "Instala manualmente: libwebkit2gtk, libgtk-3, librsvg2, libmpv, Node.js ≥ $MIN_NODE_MAJOR, Rust ≥ $MIN_RUST."
+      error "Instala manualmente: libgtk-4, libadwaita-1, librsvg2, libmpv, Rust ≥ $MIN_RUST."
       return 1
       ;;
   esac
 
   ok "Dependencias de sistema instaladas (o advertencias si faltaron algunas)."
-}
-
-# -----------------------------------------------------------------------------
-# Node.js ≥ 22
-# -----------------------------------------------------------------------------
-ensure_node() {
-  if have node && have npm; then
-    local node_version
-    node_version=$(node -v | sed 's/^v//')
-    local node_major
-    node_major="${node_version%%.*}"
-
-    if (( node_major >= MIN_NODE_MAJOR )); then
-      ok "Node.js $node_version ya está instalado (>= $MIN_NODE_MAJOR)."
-      return 0
-    fi
-    warn "Node.js $node_version es inferior a la versión requerida ($MIN_NODE_MAJOR)."
-  fi
-
-  info "Instalando Node.js ≥ $MIN_NODE_MAJOR..."
-
-  local pm
-  pm=$(detect_package_manager)
-
-  # Intento 1: gestor de paquetes de la distro
-  case "$pm" in
-    apt)
-      if ! have node || ! have npm; then
-        sudo apt-get install -y -qq nodejs npm || true
-      fi
-      ;;
-  esac
-
-  if have node && have npm; then
-    local node_version
-    node_version=$(node -v | sed 's/^v//')
-    local node_major="${node_version%%.*}"
-    if (( node_major >= MIN_NODE_MAJOR )); then
-      ok "Node.js $node_version instalado."
-      return 0
-    fi
-  fi
-
-  # Intento 2: NodeSource (solo familias Debian/Ubuntu)
-  if [[ "$pm" == "apt" ]] && have curl; then
-    info "La versión de Node.js del repositorio es antigua; configurando NodeSource ($MIN_NODE_MAJOR.x)..."
-    if curl -fsSL "https://deb.nodesource.com/setup_${MIN_NODE_MAJOR}.x" | sudo -E bash - && \
-       sudo apt-get install -y -qq nodejs; then
-      ok "Node.js instalado vía NodeSource."
-      return 0
-    fi
-    warn "No se pudo instalar Node.js vía NodeSource."
-  fi
-
-  error "No se pudo instalar Node.js ≥ $MIN_NODE_MAJOR automáticamente."
-  error "Instálalo manualmente (nvm, nodesource o el paquete de tu distro) y vuelve a ejecutar este script."
-  return 1
 }
 
 # -----------------------------------------------------------------------------
@@ -273,7 +197,6 @@ ensure_rust() {
   if have cargo && have rustc; then
     local rust_version
     rust_version=$(rustc --version | sed 's/^rustc //')
-    # rustc --version devuelve "1.XX.0"; comparamos major.minor
     local rust_major rust_minor
     rust_major="${rust_version%%.*}"
     rust_minor="${rust_version#*.}"
@@ -290,18 +213,15 @@ ensure_rust() {
   if [[ "$rust_ok" == "false" ]]; then
     info "Instalando Rust vía rustup..."
     if [[ -f "$HOME/.cargo/env" ]]; then
-      # shellcheck disable=SC1090
       . "$HOME/.cargo/env"
     fi
     if ! have cargo; then
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-      # shellcheck disable=SC1090
       . "$HOME/.cargo/env"
     fi
     rustup default stable >/dev/null 2>&1 || true
   fi
 
-  # shellcheck disable=SC1090
   [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
   export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -316,24 +236,6 @@ ensure_rust() {
 }
 
 # -----------------------------------------------------------------------------
-# Tauri CLI
-# -----------------------------------------------------------------------------
-ensure_tauri_cli() {
-  # shellcheck disable=SC1090
-  [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
-  export PATH="$HOME/.cargo/bin:$PATH"
-
-  if cargo tauri --version >/dev/null 2>&1; then
-    ok "Tauri CLI ya está instalado."
-    return 0
-  fi
-
-  info "Instalando Tauri CLI..."
-  cargo install tauri-cli --version 2 --locked
-  ok "Tauri CLI instalado."
-}
-
-# -----------------------------------------------------------------------------
 # Clonar (o actualizar) el repositorio
 # -----------------------------------------------------------------------------
 clone_repo() {
@@ -342,10 +244,9 @@ clone_repo() {
   if [[ -d "$target_dir/.git" ]]; then
     info "El repositorio ya existe en $target_dir. Actualizando..."
     git -C "$target_dir" remote set-url origin "$REPO_URL" >/dev/null 2>&1 || true
-    if ! git -C "$target_dir" pull --rebase --autostash 2>/dev/null; then
+    if ! git -C "$target_dir" pull --ff-only 2>/dev/null; then
       warn "No se pudo actualizar el repositorio automáticamente."
       warn "Posibles cambios locales sin marcar en $target_dir."
-      warn "Ejecuta manualmente: cd $target_dir && git pull --rebase --autostash"
     else
       ok "Repositorio actualizado."
     fi
@@ -363,80 +264,24 @@ build_and_install() {
   local project_dir="$1"
   cd "$project_dir"
 
-  info "Instalando dependencias de Node.js (frontend)..."
-  (cd frontend && npm install)
-
-  info "Compilando frontend con Vite..."
-  (cd frontend && npm run build)
-
-  info "Compilando la aplicación con Tauri (genera .deb / AppImage / .rpm)..."
+  info "Compilando la aplicación con Rust y Tauri..."
   # shellcheck disable=SC1090
   [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
   export PATH="$HOME/.cargo/bin:$PATH"
-  (cd src-tauri && cargo tauri build)
+
+  cargo build --release
 
   local bundle_dir
-  bundle_dir="$project_dir/src-tauri/target/release/bundle"
-  if [[ ! -d "$bundle_dir" ]]; then
-    error "No se encontró el directorio de bundles en $bundle_dir"
+  bundle_dir="$project_dir/target/release"
+  if [[ ! -f "$bundle_dir/$APP_NAME" ]]; then
+    error "No se encontró el binario en $bundle_dir/$APP_NAME"
     return 1
   fi
 
-  info "Instalando el paquete generado..."
-  install_package "$bundle_dir" "$project_dir"
-}
-
-install_package() {
-  local bundle_dir="$1"
-  local project_dir="$2"
-  local pm
-  pm=$(detect_package_manager)
-
-  local deb_file rpm_file appimage_file
-  deb_file=$(find "$bundle_dir" -maxdepth 3 -name '*.deb' -print -quit 2>/dev/null || true)
-  rpm_file=$(find "$bundle_dir" -maxdepth 3 -name '*.rpm' -print -quit 2>/dev/null || true)
-  appimage_file=$(find "$bundle_dir" -maxdepth 3 -name '*.AppImage' -print -quit 2>/dev/null || true)
-
-  case "$pm" in
-    apt)
-      if [[ -n "$deb_file" ]]; then
-        info "Instalando paquete .deb: $(basename "$deb_file")"
-        sudo apt-get install -y -qq "$deb_file"
-        ok "Aplicación instalada desde .deb."
-        return 0
-      fi
-      ;;
-    dnf)
-      if [[ -n "$rpm_file" ]]; then
-        info "Instalando paquete .rpm: $(basename "$rpm_file")"
-        sudo dnf install -y "$rpm_file"
-        ok "Aplicación instalada desde .rpm."
-        return 0
-      fi
-      ;;
-    zypper)
-      if [[ -n "$rpm_file" ]]; then
-        info "Instalando paquete .rpm: $(basename "$rpm_file")"
-        sudo zypper install -y "$rpm_file"
-        ok "Aplicación instalada desde .rpm."
-        return 0
-      fi
-      ;;
-  esac
-
-  # Fallback: AppImage a nivel de usuario
-  if [[ -n "$appimage_file" ]]; then
-    info "No se pudo instalar un paquete nativo; usando AppImage como fallback."
-    mkdir -p "$BIN_DIR"
-    # Instalar el binario real con sufijo -real para que el wrapper no entre en bucle
-    install -Dm755 "$appimage_file" "$BIN_DIR/${APP_NAME}-real"
-    ok "AppImage instalado en $BIN_DIR/${APP_NAME}-real"
-    INSTALLED_BIN="$BIN_DIR/${APP_NAME}-real"
-    return 0
-  fi
-
-  error "No se encontró ningún paquete instalable (.deb, .rpm o .AppImage) en $bundle_dir"
-  return 1
+  info "Instalando el binario en $BIN_DIR/$APP_NAME..."
+  mkdir -p "$BIN_DIR"
+  install -Dm755 "$bundle_dir/$APP_NAME" "$BIN_DIR/$APP_NAME"
+  ok "Binario instalado en $BIN_DIR/$APP_NAME"
 }
 
 # -----------------------------------------------------------------------------
@@ -489,6 +334,74 @@ EOF
 }
 
 # -----------------------------------------------------------------------------
+# Crear base de datos vacía
+# -----------------------------------------------------------------------------
+create_empty_database() {
+  local db_dir="$HOME/.local/share/acryl"
+  local db_file="$db_dir/acryl.db"
+
+  info "Creando base de datos vacía en $db_file..."
+  mkdir -p "$db_dir"
+
+  if [[ ! -f "$db_file" ]]; then
+    sqlite3 "$db_file" \
+      "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));" \
+      "CREATE TABLE IF NOT EXISTS media (id INTEGER PRIMARY KEY, type TEXT NOT NULL CHECK (type IN ('series', 'anime', 'movie')), title TEXT NOT NULL, sort_title TEXT NOT NULL, year INTEGER, folder_path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')), poster_path TEXT, synopsis TEXT, metadata_fetched_at TEXT, is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1)), is_watched INTEGER NOT NULL DEFAULT 0 CHECK (is_watched IN (0, 1)));" \
+      "CREATE TABLE IF NOT EXISTS media_files (id INTEGER PRIMARY KEY, media_id INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE, season INTEGER, episode INTEGER, title TEXT, file_path TEXT NOT NULL UNIQUE, size_bytes INTEGER, mtime_ms INTEGER, indexed_at TEXT NOT NULL DEFAULT (datetime('now')));" \
+      "CREATE TABLE IF NOT EXISTS index_runs (id INTEGER PRIMARY KEY, started_at TEXT NOT NULL DEFAULT (datetime('now')), finished_at TEXT, files_seen INTEGER NOT NULL DEFAULT 0, files_added INTEGER NOT NULL DEFAULT 0, files_removed INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'completed', 'failed')));" \
+      "CREATE TABLE IF NOT EXISTS playback_history (id INTEGER PRIMARY KEY, media_id INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE, played_at TEXT NOT NULL DEFAULT (datetime('now')), position REAL NOT NULL DEFAULT 0, duration REAL NOT NULL DEFAULT 0);" \
+      "CREATE INDEX IF NOT EXISTS idx_media_sort_title ON media(sort_title);" \
+      "CREATE INDEX IF NOT EXISTS idx_media_type ON media(type);" \
+      "CREATE INDEX IF NOT EXISTS idx_files_media ON media_files(media_id);" \
+      "CREATE INDEX IF NOT EXISTS idx_files_season_episode ON media_files(media_id, season, episode);" \
+      "CREATE INDEX IF NOT EXISTS idx_media_type_sort_title ON media(type, sort_title);" \
+      "CREATE INDEX IF NOT EXISTS idx_media_created_at ON media(created_at);" \
+      "CREATE INDEX IF NOT EXISTS idx_media_updated_at ON media(updated_at);" \
+      "CREATE INDEX IF NOT EXISTS idx_index_runs_started_at ON index_runs(started_at);" \
+      "CREATE INDEX IF NOT EXISTS idx_playback_history_media ON playback_history(media_id);" \
+      "CREATE INDEX IF NOT EXISTS idx_playback_history_played_at ON playback_history(played_at);" \
+      2>/dev/null || {
+      warn "No se pudo crear la base de datos vacía (¿falta sqlite3?)."
+      warn "La aplicación la creará automáticamente al ejecutarse por primera vez."
+      return 0
+    }
+
+    # Aplicar FTS5 y triggers si sqlite3 los soporta
+    sqlite3 "$db_file" \
+      "CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(title, content='media', content_rowid='id');" \
+      "CREATE TRIGGER IF NOT EXISTS media_fts_insert AFTER INSERT ON media BEGIN INSERT INTO media_fts(rowid, title) VALUES (new.id, new.title); END;" \
+      "CREATE TRIGGER IF NOT EXISTS media_fts_delete AFTER DELETE ON media BEGIN INSERT INTO media_fts(media_fts, rowid, title) VALUES ('delete', old.id, old.title); END;" \
+      "CREATE TRIGGER IF NOT EXISTS media_fts_update AFTER UPDATE ON media BEGIN INSERT INTO media_fts(media_fts, rowid, title) VALUES ('delete', old.id, old.title); INSERT INTO media_fts(rowid, title) VALUES (new.id, new.title); END;" \
+      2>/dev/null || true
+
+    ok "Base de datos vacía creada en $db_file"
+  else
+    info "La base de datos ya existe en $db_file, no se sobrescribe."
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# Instalar lanzador con captura de errores
+# -----------------------------------------------------------------------------
+install_launcher_wrapper() {
+  local project_dir="$1"
+  local wrapper_bin="$HOME/.local/bin/$APP_NAME"
+
+  info "Instalando lanzador con captura de errores..."
+
+  # Instalar el wrapper que busca y ejecuta el binario real
+  install -Dm755 "$project_dir/scripts/acryl-launcher.sh" "$wrapper_bin"
+  ok "Lanzador instalado en $wrapper_bin"
+
+  # Actualizar el .desktop para usar el wrapper
+  local desktop_file="$DESKTOP_DIR/$APP_NAME.desktop"
+  if [[ -f "$desktop_file" ]]; then
+    sed -i "s|^Exec=.*|Exec=$wrapper_bin %F|" "$desktop_file"
+    ok "Entrada .desktop actualizada para usar el lanzador"
+  fi
+}
+
+# -----------------------------------------------------------------------------
 # Flujo principal
 # -----------------------------------------------------------------------------
 main() {
@@ -508,9 +421,7 @@ main() {
   info "Gestor de paquetes detectado: $pm"
 
   install_system_deps "$pm"
-  ensure_node
   ensure_rust
-  ensure_tauri_cli
 
   clone_repo "$target_dir"
 
@@ -560,76 +471,6 @@ main() {
   echo
   echo "Código fuente: $target_dir"
   echo "Repositorio:   $REPO_URL"
-}
-
-# -----------------------------------------------------------------------------
-# Crear base de datos vacía
-# -----------------------------------------------------------------------------
-create_empty_database() {
-  local db_dir="$HOME/.local/share/acryl"
-  local db_file="$db_dir/acryl.db"
-
-  info "Creando base de datos vacía en $db_file..."
-  mkdir -p "$db_dir"
-
-  if [[ ! -f "$db_file" ]]; then
-    # Crear una base de datos SQLite vacía con el esquema
-    sqlite3 "$db_file" \
-      "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));" \
-      "CREATE TABLE IF NOT EXISTS media (id INTEGER PRIMARY KEY, type TEXT NOT NULL CHECK (type IN ('series', 'anime', 'movie')), title TEXT NOT NULL, sort_title TEXT NOT NULL, year INTEGER, folder_path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')), poster_path TEXT, synopsis TEXT, metadata_fetched_at TEXT, is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1)), is_watched INTEGER NOT NULL DEFAULT 0 CHECK (is_watched IN (0, 1)));" \
-      "CREATE TABLE IF NOT EXISTS media_files (id INTEGER PRIMARY KEY, media_id INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE, season INTEGER, episode INTEGER, title TEXT, file_path TEXT NOT NULL UNIQUE, size_bytes INTEGER, mtime_ms INTEGER, indexed_at TEXT NOT NULL DEFAULT (datetime('now')));" \
-      "CREATE TABLE IF NOT EXISTS index_runs (id INTEGER PRIMARY KEY, started_at TEXT NOT NULL DEFAULT (datetime('now')), finished_at TEXT, files_seen INTEGER NOT NULL DEFAULT 0, files_added INTEGER NOT NULL DEFAULT 0, files_removed INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'completed', 'failed')));" \
-      "CREATE TABLE IF NOT EXISTS playback_history (id INTEGER PRIMARY KEY, media_id INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE, played_at TEXT NOT NULL DEFAULT (datetime('now')), position REAL NOT NULL DEFAULT 0, duration REAL NOT NULL DEFAULT 0);" \
-      "CREATE INDEX IF NOT EXISTS idx_media_sort_title ON media(sort_title);" \
-      "CREATE INDEX IF NOT EXISTS idx_media_type ON media(type);" \
-      "CREATE INDEX IF NOT EXISTS idx_files_media ON media_files(media_id);" \
-      "CREATE INDEX IF NOT EXISTS idx_files_season_episode ON media_files(media_id, season, episode);" \
-      "CREATE INDEX IF NOT EXISTS idx_media_type_sort_title ON media(type, sort_title);" \
-      "CREATE INDEX IF NOT EXISTS idx_media_created_at ON media(created_at);" \
-      "CREATE INDEX IF NOT EXISTS idx_media_updated_at ON media(updated_at);" \
-      "CREATE INDEX IF NOT EXISTS idx_index_runs_started_at ON index_runs(started_at);" \
-      "CREATE INDEX IF NOT EXISTS idx_playback_history_media ON playback_history(media_id);" \
-      "CREATE INDEX IF NOT EXISTS idx_playback_history_played_at ON playback_history(played_at);" \
-      2>/dev/null || {
-      warn "No se pudo crear la base de datos vacía (¿falta sqlite3?)."
-      warn "La aplicación la creará automáticamente al ejecutarse por primera vez."
-      return 0
-    }
-
-    # Aplicar FTS5 y triggers si sqlite3 los soporta
-    sqlite3 "$db_file" \
-      "CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(title, content='media', content_rowid='id');" \
-      "CREATE TRIGGER IF NOT EXISTS media_fts_insert AFTER INSERT ON media BEGIN INSERT INTO media_fts(rowid, title) VALUES (new.id, new.title); END;" \
-      "CREATE TRIGGER IF NOT EXISTS media_fts_delete AFTER DELETE ON media BEGIN INSERT INTO media_fts(media_fts, rowid, title) VALUES ('delete', old.id, old.title); END;" \
-      "CREATE TRIGGER IF NOT EXISTS media_fts_update AFTER UPDATE ON media BEGIN INSERT INTO media_fts(media_fts, rowid, title) VALUES ('delete', old.id, old.title); INSERT INTO media_fts(rowid, title) VALUES (new.id, new.title); END;" \
-      2>/dev/null || true
-
-    ok "Base de datos vacía creada en $db_file"
-  else
-    info "La base de datos ya existe en $db_file, no se sobrescribe."
-  fi
-}
-
-# -----------------------------------------------------------------------------
-# Instalar lanzador con captura de errores
-# -----------------------------------------------------------------------------
-install_launcher_wrapper() {
-  local project_dir="$1"
-  local real_bin="$HOME/.local/bin/${APP_NAME}-real"
-  local wrapper_bin="$HOME/.local/bin/${APP_NAME}"
-
-  info "Instalando lanzador con captura de errores..."
-
-  # Instalar el wrapper que busca y ejecuta el binario real
-  install -Dm755 "$project_dir/scripts/acryl-launcher.sh" "$wrapper_bin"
-  ok "Lanzador instalado en $wrapper_bin"
-
-  # Actualizar el .desktop para usar el wrapper
-  local desktop_file="$DESKTOP_DIR/$APP_NAME.desktop"
-  if [[ -f "$desktop_file" ]]; then
-    sed -i "s|^Exec=.*|Exec=$wrapper_bin %F|" "$desktop_file"
-    ok "Entrada .desktop actualizada para usar el lanzador"
-  fi
 }
 
 main "$@"
