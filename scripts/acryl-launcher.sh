@@ -23,10 +23,11 @@ readonly LOG_DIR="$HOME/.local/share/acryl"
 readonly LOG_FILE="$LOG_DIR/acryl-launch.log"
 
 # Configuraciones de entorno a probar (en orden de preferencia)
+# Si estamos en Wayland, probamos wayland primero; si en X11, x11 primero.
 readonly CONFIGS=(
+  "GDK_BACKEND=wayland"
   "GDK_BACKEND=x11"
   "XDG_SESSION_TYPE=x11 GDK_BACKEND=x11"
-  "GDK_BACKEND=wayland"
   "LIBGL_ALWAYS_SOFTWARE=1 GDK_BACKEND=x11"
 )
 
@@ -84,5 +85,8 @@ done
 echo "" >> "$LOG_FILE"
 echo "TODAS LAS CONFIGURACIONES FALLARON" >> "$LOG_FILE"
 echo "" >> "$LOG_FILE"
+
+# Pausa para que el usuario pueda leer los errores si se ejecuta desde .desktop
+sleep 5
 
 exit 1
