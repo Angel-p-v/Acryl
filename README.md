@@ -1,8 +1,4 @@
-<p align="center">
-  <img src="src-tauri/icons/acryl.svg" alt="Acryl" width="200"/>
-</p>
-
-<h1 align="center">Acryl</h1>
+<h1 align="center">🖼️ Acryl</h1>
 
 <p align="center">
   <strong>Gestor de contenido multimedia de escritorio para Linux</strong><br/>
@@ -63,12 +59,12 @@ media-manager (Acryl) sigue una arquitectura de capas separadas que garantiza ma
 ```mermaid
 graph TD
     Usuario[[Usuario]]
-    UI[UI<br/>GTK4 / Libadwaita (Rust)]
-    Logic[Lógica<br/>Rust puro]
-    Decision{¿Consulta<br/>o reproduce?}
-    SQLite[(SQLite<br/>acryl.db)]
-    MPV[[libmpv<br/>FFI]]
-    TVmaze[TVmaze<br/>API pública]
+    UI[UI: GTK4 / Libadwaita (Rust)]
+    Logic[Lógica: Rust puro]
+    Decision{¿Consulta o reproduce?}
+    SQLite[(SQLite: acryl.db)]
+    MPV[[libmpv: FFI]]
+    TVmaze[TVmaze: API pública]
 
     Usuario -->|busca| UI
     UI -->|llama| Logic
@@ -232,13 +228,11 @@ cd acryl
 
 ### Instaladores nativos
 
-Una vez compilado, los instaladores también se generan en:
+Una vez compilado, el binario se genera en:
 
 ```
-src-tauri/target/release/bundle/
+target/release/acryl
 ```
-
-Formatos disponibles: `.deb`, AppImage, `.rpm`.
 
 ---
 
@@ -317,7 +311,7 @@ app-media-manager/
 | `cargo test` | Ejecuta las pruebas de Rust |
 | `cargo clippy` | Ejecuta el linter de Rust |
 | `cargo fmt` | Aplica formato de Rust |
-| `cargo tauri build` | Genera instaladores nativos Linux (`.deb`, AppImage, `.rpm`) |
+| `cargo build --release` | Genera el binario nativo Linux optimizado |
 
 
 ---
