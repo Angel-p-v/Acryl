@@ -424,7 +424,7 @@ impl MainWindow {
             .buttons(gtk4::ButtonsType::YesNo)
             .text("¿Actualizar todos los metadatos?")
             .secondary_text(
-                "Se consultará TVmaze y se sobrescribirán el título, el año, la sinopsis y el póster de todos los medios indexados. Esta acción no se puede deshacer.",
+                "Se consultará TVmaze (y AniList para anime) y se sobrescribirán el título, el año, la sinopsis, el póster y el banner de todos los medios indexados. Esta acción no se puede deshacer.",
             )
             .build();
 
@@ -559,6 +559,12 @@ fn metadata_refresh_summary(result: &RefreshMetadataResult) -> String {
         summary.push_str(&format!(
             " {} pósters no se pudieron descargar; se conservó el anterior.",
             result.poster_failed
+        ));
+    }
+    if result.banner_failed > 0 {
+        summary.push_str(&format!(
+            " {} banners no se pudieron descargar; se conservó el anterior.",
+            result.banner_failed
         ));
     }
     summary

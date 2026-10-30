@@ -121,7 +121,7 @@ impl SettingsView {
         metadata_section.append(&metadata_title);
 
         let metadata_label = Label::new(Some(
-            "Vuelve a consultar TVmaze y sobrescribe el título, el año, la sinopsis y el póster de todos los medios indexados.",
+            "Vuelve a consultar TVmaze (y AniList para anime) y sobrescribe el título, el año, la sinopsis, el póster y el banner de todos los medios indexados.",
         ));
         metadata_label.set_halign(gtk4::Align::Start);
         metadata_label.set_wrap(true);

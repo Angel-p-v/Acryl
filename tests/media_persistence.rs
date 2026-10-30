@@ -3,7 +3,9 @@
 
 use acryl::db::connection::open_db;
 use acryl::db::file_repo::{FileRepository, MediaFileInput};
-use acryl::db::media_repo::{ListMediaOptions, MediaInput, MediaRepository, SearchMediaOptions};
+use acryl::db::media_repo::{
+    ListMediaOptions, MediaInput, MediaMetadataInput, MediaRepository, SearchMediaOptions,
+};
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -456,6 +458,36 @@ fn migracion_repara_triggers_fts_de_una_bd_existente() {
 }
 
 #[test]
+fn migracion_anade_banner_path_a_una_bd_existente() {
+    let (db_path, _dir) = temp_db();
+
+    {
+        let conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+        // Simula una base de datos anterior a la migración 6.
+        conn.execute_batch(
+            "ALTER TABLE media DROP COLUMN banner_path;
+             DELETE FROM schema_migrations WHERE version = 6;",
+        )
+        .expect("simular BD antigua sin banner_path");
+    }
+
+    let conn = open_db(db_path.to_str().unwrap()).expect("reabrir BD");
+    let mut has_banner = false;
+    for column in conn
+        .prepare("PRAGMA table_info(media)")
+        .expect("preparar pragma")
+        .query_map([], |row| row.get::<_, String>(1))
+        .expect("consultar columnas")
+    {
+        if column.expect("columna") == "banner_path" {
+            has_banner = true;
+        }
+    }
+
+    assert!(has_banner, "la migración debe añadir banner_path");
+}
+
+#[test]
 fn update_metadata_actualiza_anio_poster_y_sinopsis() {
     let (db_path, _dir) = temp_db();
     let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
@@ -479,6 +511,7 @@ fn update_metadata_actualiza_anio_poster_y_sinopsis() {
             media.id,
             Some(2024),
             Some("https://example.com/poster.jpg"),
+            Some("https://example.com/banner.jpg"),
             Some("Sinopsis de prueba"),
         )
         .expect("actualizar metadatos");
@@ -496,8 +529,63 @@ fn update_metadata_actualiza_anio_poster_y_sinopsis() {
         updated.poster_path.as_deref(),
         Some("https://example.com/poster.jpg")
     );
+    assert_eq!(
+        updated.banner_path.as_deref(),
+        Some("https://example.com/banner.jpg")
+    );
     assert_eq!(updated.synopsis.as_deref(), Some("Sinopsis de prueba"));
     assert!(updated.metadata_fetched_at.is_some());
+}
+
+#[test]
+fn update_metadata_conserva_el_banner_si_no_se_recibe_uno_nuevo() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let media = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "anime".to_string(),
+            title: "Solo Leveling".to_string(),
+            sort_title: "solo leveling".to_string(),
+            year: None,
+            folder_path: "/media/solo-leveling".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert media")
+    };
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.update_metadata(
+            media.id,
+            Some(2024),
+            Some("https://example.com/poster.jpg"),
+            Some("https://example.com/banner.jpg"),
+            Some("Sinopsis"),
+        )
+        .expect("guardar metadatos con banner");
+        // Una sincronización posterior sin banner no debe borrarlo.
+        repo.update_metadata(
+            media.id,
+            Some(2024),
+            Some("https://example.com/poster.jpg"),
+            None,
+            None,
+        )
+        .expect("actualizar sin banner");
+    }
+
+    let updated = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.find_by_id(media.id)
+            .expect("buscar media")
+            .expect("media existente")
+    };
+    assert_eq!(
+        updated.banner_path.as_deref(),
+        Some("https://example.com/banner.jpg")
+    );
 }
 
 #[test]
@@ -521,6 +609,7 @@ fn overwrite_metadata_reemplaza_campos_y_actualiza_fts() {
             media.id,
             Some(2001),
             Some("https://example.com/old.jpg"),
+            Some("https://example.com/old-banner.jpg"),
             Some("Sinopsis antigua"),
         )
         .expect("guardar metadatos antiguos");
@@ -531,11 +620,14 @@ fn overwrite_metadata_reemplaza_campos_y_actualiza_fts() {
         let mut repo = MediaRepository::new(&mut conn);
         repo.overwrite_metadata(
             media_id,
-            "Esmeralda Nueva",
-            "esmeralda nueva",
-            Some(2025),
-            Some("https://example.com/new.jpg"),
-            Some("Sinopsis nueva"),
+            &MediaMetadataInput {
+                title: "Esmeralda Nueva",
+                sort_title: "esmeralda nueva",
+                year: Some(2025),
+                poster_path: Some("https://example.com/new.jpg"),
+                banner_path: Some("https://example.com/new-banner.jpg"),
+                synopsis: Some("Sinopsis nueva"),
+            },
         )
         .expect("sobrescribir metadatos");
     }
@@ -551,6 +643,10 @@ fn overwrite_metadata_reemplaza_campos_y_actualiza_fts() {
     assert_eq!(
         media.poster_path.as_deref(),
         Some("https://example.com/new.jpg")
+    );
+    assert_eq!(
+        media.banner_path.as_deref(),
+        Some("https://example.com/new-banner.jpg")
     );
     assert_eq!(media.synopsis.as_deref(), Some("Sinopsis nueva"));
 

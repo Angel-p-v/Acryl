@@ -131,6 +131,12 @@ END;
 INSERT INTO media_fts(media_fts) VALUES ('rebuild');
 "#;
 
+/// Añade la URL del banner ancho (background/banner de TVmaze o AniList),
+/// independiente del póster vertical.
+const MEDIA_BANNER_PATH_SQL: &str = r#"
+ALTER TABLE media ADD COLUMN banner_path TEXT;
+"#;
+
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -156,5 +162,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 5,
         name: "fts-triggers-repair",
         sql: FTS_TRIGGERS_REPAIR_SQL,
+    },
+    Migration {
+        version: 6,
+        name: "media-banner-path",
+        sql: MEDIA_BANNER_PATH_SQL,
     },
 ];

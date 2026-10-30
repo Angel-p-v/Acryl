@@ -22,7 +22,7 @@ serde_yaml = { version = "0.9", default-features = false }
 rusqlite = { version = "0.33", features = ["bundled"] }
 reqwest = { version = "0.13", features = ["json"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-gtk4 = "0.11"
+gtk4 = { version = "0.11", features = ["v4_8"] }
 libadwaita = "0.9"
 gdk-pixbuf = "0.20"
 glib = "0.20"
