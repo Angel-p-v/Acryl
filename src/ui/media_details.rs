@@ -36,7 +36,7 @@ impl MediaDetails {
         box_.set_margin_start(10);
         box_.set_margin_end(10);
 
-        let poster = crate::ui::poster::Poster::new("", &None);
+        let poster = crate::ui::poster::Poster::new("", None);
 
         let title_label = Label::new(None);
         title_label.set_markup("<b>Título</b>");
@@ -128,7 +128,8 @@ impl MediaDetails {
             .set_markup(&format!("<b>{}</b>", media.title));
         self.synopsis_label
             .set_label(&media.synopsis.clone().unwrap_or_default());
-        self.poster.set_poster(media.poster_path.as_deref());
+        self.poster
+            .set_poster_url(media.poster_path.as_deref().unwrap_or(""));
 
         let fav_label = if media.is_favorite {
             "★ Favorito (activo)"

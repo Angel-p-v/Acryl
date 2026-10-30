@@ -1,32 +1,48 @@
-//! Componente que muestra una lista de medios en tarjetas tipo Jellyfin.
+//! Componente que muestra una galería de medios con pósters.
+//! Usa FlowBox con renderizado de pósters desde caché local.
+//! Diseñado para ser eficiente con colecciones grandes mediante carga paginada.
 
+use crate::core::poster_service::cached_path;
 use crate::db::media_repo::Media;
+use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
 use gtk4::{Box, FlowBox, GestureClick, Label, Orientation, ScrolledWindow};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::ui::poster::Poster;
-
-/// Tarjeta individual de un medio (portada + título debajo, estilo Jellyfin).
+/// Tarjeta individual de un medio (póster + título + año).
 struct MediaCard {
     widget: Box,
 }
 
 impl MediaCard {
-    fn new(media: Media, on_select: Rc<dyn Fn(i64)>) -> Self {
+    fn new(media: &Media, on_select: Rc<dyn Fn(i64)>) -> Self {
         let card = Box::new(Orientation::Vertical, 5);
         card.set_halign(gtk4::Align::Center);
         card.set_valign(gtk4::Align::Start);
-        card.set_size_request(200, 280);
+        card.set_size_request(200, 300);
         card.set_margin_top(10);
         card.set_margin_bottom(10);
         card.set_margin_start(10);
         card.set_margin_end(10);
 
-        let poster = Poster::new(&media.title, &media.poster_path);
-        card.append(poster.widget());
+        // Imagen del póster
+        let image = gtk4::Image::new();
+        image.set_size_request(150, 200);
+        image.set_halign(gtk4::Align::Center);
 
+        // Cargar póster desde caché si está disponible
+        #[allow(clippy::collapsible_if)]
+        if let Some(poster_path) = &media.poster_path
+            && let Some(cache_path) = cached_path(poster_path)
+            && let Ok(pixbuf) = GtkPixbuf::from_file_at_scale(&cache_path, 150, 200, true)
+        {
+            image.set_from_pixbuf(Some(&pixbuf));
+        }
+
+        card.append(&image);
+
+        // Título
         let title_label = Label::new(Some(&media.title));
         title_label.set_wrap(true);
         title_label.set_max_width_chars(20);
@@ -42,7 +58,7 @@ impl MediaCard {
             card.append(&year_label);
         }
 
-        // Usar GestureClick para que toda la tarjeta sea clickeable
+        // Todo el tarjetón es clickeable
         let click = GestureClick::new();
         let media_id = media.id;
         click.connect_pressed(move |_, _, _, _| {
@@ -54,7 +70,7 @@ impl MediaCard {
     }
 }
 
-/// Componente que muestra una lista de medios en tarjetas tipo Jellyfin.
+/// Componente que muestra una galería de medios con pósters.
 pub struct MediaList {
     content: Box,
     flowbox: FlowBox,
@@ -114,7 +130,7 @@ impl MediaList {
         let media = self.media.borrow();
         if let Some(on_select) = &self.on_media_select {
             for m in media.iter() {
-                let card = MediaCard::new(m.clone(), on_select.clone());
+                let card = MediaCard::new(m, on_select.clone());
                 self.flowbox.insert(&card.widget, -1);
             }
         }
