@@ -218,7 +218,7 @@ remove_repo_folder() {
   for candidate in "${REPO_CANDIDATES[@]}"; do
     if [[ -d "$candidate" ]]; then
       # Evitar borrar el directorio actual si es el de trabajo real del script
-      if [[ "$candidate" == "$PWD" ]] && [[ -f "$candidate/scripts/uninstall.sh" ]]; then
+      if [[ "$candidate" == "$PWD" ]] && { [[ -f "$candidate/installers/uninstall.sh" ]] || [[ -f "$candidate/diagnostic/uninstall.sh" ]]; }; then
         info "Omitiendo carpeta del repositorio actual (estás dentro de ella): $candidate"
         continue
       fi

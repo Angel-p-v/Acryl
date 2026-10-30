@@ -390,7 +390,7 @@ install_launcher_wrapper() {
   info "Instalando lanzador con captura de errores..."
 
   # Instalar el wrapper que busca y ejecuta el binario real
-  install -Dm755 "$project_dir/scripts/acryl-launcher.sh" "$wrapper_bin"
+  install -Dm755 "$project_dir/installers/acryl-launcher.sh" "$wrapper_bin"
   ok "Lanzador instalado en $wrapper_bin"
 
   # Actualizar el .desktop para usar el wrapper con ruta absoluta
@@ -462,7 +462,7 @@ main() {
   echo "4. SOLUCIÓN DE PROBLEMAS:"
   echo "   Si la aplicación no se abre o se queda en blanco, ejecuta el diagnóstico:"
   echo ""
-  echo "     ./scripts/diagnose-blank.sh"
+  echo "     ./diagnostic/diagnose-blank.sh"
   echo ""
   echo "   O ejecuta directamente para ver errores:"
   echo "     RUST_BACKTRACE=1 GDK_BACKEND=x11 $APP_NAME"
