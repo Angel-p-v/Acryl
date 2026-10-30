@@ -17,42 +17,6 @@ permissions:
   contents: read
 
 jobs:
-  verify-frontend:
-    name: verify (frontend, node ${{ matrix.node }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        node: ['22', '24', '26']
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: cd frontend && npm ci
-      - run: cd frontend && npm run lint
-      - run: cd frontend && npm run format:check
-      - run: cd frontend && npm run typecheck
-      - run: cd frontend && npm run build
-      - run: cd frontend && npm test
-
-  audit-frontend:
-    name: audit (frontend, production)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: cd frontend && npm ci
-      - run: cd frontend && npm audit --audit-level=moderate
-
   verify-rust:
     name: verify (Rust backend)
     runs-on: ubuntu-latest
@@ -64,147 +28,16 @@ jobs:
           toolchain: stable
           components: clippy
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-      - name: Install system dependencies (Tauri/Linux)
+      - name: Instalar dependencias de sistema (GTK4/Linux)
         run: |
           sudo apt-get update -qq
-          # Ubuntu 24.04+ renombró libwebkit2gtk-4.0-dev a libwebkit2gtk-4.1-dev
-          if apt-cache search '^libwebkit2gtk-4\.[0-9]-dev$' | grep -q '^libwebkit2gtk-4.1-dev '; then
-            WEBKIT_DEV=libwebkit2gtk-4.1-dev
-          else
-            WEBKIT_DEV=libwebkit2gtk-4.0-dev
-          fi
           sudo apt-get install -y -qq \
-            "$WEBKIT_DEV" \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libmpv-dev
-      - run: cargo fmt --check
-        working-directory: src-tauri
-      - run: cargo clippy --all-targets
-        working-directory: src-tauri
-      - run: cargo build --locked
-        working-directory: src-tauri
-      - run: cargo test --locked
-        working-directory: src-tauri
-
-  build-tauri:
-    name: build (Tauri instaladores Linux)
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    needs: [verify-frontend, verify-rust]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: '>=22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: cd frontend && npm ci
-      - run: cd frontend && npm run build
-
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-
-      - name: Instalar dependencias de sistema de Tauri (Linux)
-        run: |
-          sudo apt-get update -qq
-          # Ubuntu 24.04+ renombró libwebkit2gtk-4.0-dev a libwebkit2gtk-4.1-dev
-          if apt-cache search '^libwebkit2gtk-4\.[0-9]-dev$' | grep -q '^libwebkit2gtk-4.1-dev '; then
-            WEBKIT_DEV=libwebkit2gtk-4.1-dev
-          else
-            WEBKIT_DEV=libwebkit2gtk-4.0-dev
-          fi
-          sudo apt-get install -y -qq \
-            "$WEBKIT_DEV" \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libmpv-dev
-
-      - name: Instalar tauri-cli
-        run: cargo install tauri-cli
-
-      - name: Construir instaladores con Tauri
-        run: cargo tauri build
-        working-directory: src-tauri
-
-      - name: Listar artifacts generados
-        run: find src-tauri/target/release/bundle -type f | sort
-
-      - name: Subir artifacts de build
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: tauri-bundles
-          path: src-tauri/target/release/bundle/
-          retention-days: 7
-
-  e2e:
-    name: e2e (flujos críticos de la aplicación)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: [build-tauri]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: '>=22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: cd frontend && npm ci
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: tauri-bundles
-          path: src-tauri/target/release/bundle/
-
-      - name: Instalar dependencias del sistema para E2E
-        run: |
-          sudo apt-get update -qq
-          # Ubuntu 24.04+ renombró libwebkit2gtk-4.0-dev a libwebkit2gtk-4.1-dev
-          if apt-cache search '^libwebkit2gtk-4\.[0-9]-dev$' | grep -q '^libwebkit2gtk-4.1-dev '; then
-            WEBKIT_DEV=libwebkit2gtk-4.1-dev
-          else
-            WEBKIT_DEV=libwebkit2gtk-4.0-dev
-          fi
-          sudo apt-get install -y -qq \
-            "$WEBKIT_DEV" \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
+            libgtk-4-dev \
+            libadwaita-1-dev \
             librsvg2-dev \
             libmpv-dev \
-            xvfb
-
-      - name: Instalar tauri-cli
-        run: cargo install tauri-cli
-
-      - name: Compilar la aplicación Tauri
-        run: cargo tauri build
-        working-directory: src-tauri
-
-      - name: Iniciar la aplicación Tauri con xvfb y ejecutar pruebas E2E
-        run: |
-          cd src-tauri
-          # Iniciar la aplicación en background con xvfb
-          ./target/release/media-manager &
-          APP_PID=$!
-          # Esperar a que la aplicación inicie (máximo 30 segundos)
-          for i in $(seq 1 30); do
-            if pgrep -f "media-manager" > /dev/null; then
-              echo "Aplicación iniciada (PID: $APP_PID)"
-              break
-            fi
-            sleep 1
-          done
-          # Ejecutar pruebas E2E
-          cd ../frontend
-          npm run test:e2e
-          E2E_EXIT_CODE=$?
-          # Detener la aplicación
-          kill $APP_PID 2>/dev/null || true
-          wait $APP_PID 2>/dev/null || true
-          exit $E2E_EXIT_CODE
-
+            pkg-config
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo check --all-targets
+      - run: cargo test --all-targets --all-features
