@@ -1,4 +1,4 @@
-# AGENTS.md — media-manager
+# AGENTS.md — Acryl
 
 Normas obligatorias para cualquier agente de IA o desarrollador que trabaje en este repositorio. Lee este archivo antes de inspeccionar, modificar, probar, confirmar o fusionar código.
 
@@ -10,9 +10,9 @@ Estas instrucciones complementan las configuraciones del repositorio, las polít
 
 ## 1. Objetivo del proyecto
 
-`media-manager` es una aplicación de escritorio para Linux que indexa y gestiona colecciones locales de películas, series y anime mediante una base de datos SQLite. Permite buscar, consultar información y reproducir contenido dentro de la propia aplicación, sin depender de reproductores externos ejecutados mediante `spawn`.
+`acryl` es una aplicación de escritorio nativa para Linux que indexa y gestiona colecciones locales de películas, series y anime mediante una base de datos SQLite. Permite buscar, consultar información y reproducir contenido dentro de la propia aplicación, sin depender de reproductores externos ejecutados mediante `spawn`.
 
-El proyecto migra la capa de presentación de la aplicación CLI/TUI anterior a una aplicación de escritorio nativa basada en Tauri, manteniendo y trasladando progresivamente la lógica de negocio.
+La capa de presentación está implementada en Rust puro con GTK4 / Libadwaita (sin motor Web, sin Tauri, sin frontend web). La lógica de negocio reside en capas de dominio y persistencia en Rust.
 
 Documentación principal:
 
@@ -23,22 +23,22 @@ Documentación principal:
 
 Antes de empezar cualquier tarea, comprueba el estado real del repositorio. No asumas que la documentación, las rutas, los scripts, las dependencias o el estado de los hitos coinciden con el código actual.
 
+---
+
 ## 2. Stack tecnológico
 
 El stack está fijado. No cambies tecnologías, versiones principales ni arquitectura sin una justificación técnica y, cuando corresponda, un ADR aprobado.
 
 | Capa | Tecnología | Requisitos |
 |---|---|---|
-| Backend | Rust, edición 2024 | Ownership correcto, errores controlados y API segura |
-| Frontend | TypeScript + React | Modo estricto y componentes mantenibles |
-| Herramientas frontend | Node.js >= 22 | Respetar las versiones declaradas en el repositorio |
-| Aplicación de escritorio | Tauri v2 | Permisos mínimos y comunicación tipada |
-| Base de datos | SQLite + `rusqlite` | Consultas parametrizadas, migraciones y FTS5 |
-| Reproducción | libmpv vía FFI o GStreamer | Integración nativa segura y sin bloquear la UI |
+| Backend / UI | Rust, edición 2024 | Ownership correcto, errores controlados, API segura |
+| Interfaz gráfica | GTK4 + Libadwaita (gdk-rs) | Renderizado nativo, sin WebView, soporte Wayland/Hyprland |
+| Base de datos | SQLite + `rusqlite` | Consultas parametrizadas, migraciones y FTS5, WAL |
+| Reproducción | libmpv vía FFI | Integración nativa segura, sin bloquear la UI |
 | Configuración | YAML + Serde | Deserialización y validación explícitas |
-| Tests frontend | Vitest | Unitarios, integración y componentes |
+| Pósters / imágenes | `gdk-pixbuf` / `cairo` | Renderizado nativo dentro de GTK4 |
 | Tests backend | Cargo | Unitarios, integración y regresión |
-| E2E | Herramientas compatibles con Tauri | Flujos críticos de la aplicación |
+| E2E | Herramientas compatibles con GTK4 | Flujos críticos de la aplicación |
 
 No migres a otro framework, ORM, reproductor, sistema de configuración o herramienta de tests únicamente por preferencia personal.
 
@@ -46,93 +46,108 @@ Si una dependencia propuesta tiene alternativas relevantes, compara mantenimient
 
 No añadas dependencias si la funcionalidad puede resolverse de forma clara y segura con las herramientas existentes.
 
+No uses Node.js, npm, Tauri, React, TypeScript ni WebView: han sido eliminados (ver ADR-0017 y PLAN_DESKTOP.md).
+
+---
+
 ## 3. Estructura del repositorio
 
-La estructura prevista es:
+La estructura real es:
 
 ```text
 app-media-manager/
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── services/
-│   │   ├── types/
-│   │   ├── __tests__/
-│   │   ├── App.tsx
-│   │   ├── main.tsx
-│   │   └── index.css
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── tsconfig.json
-├── src-tauri/
-│   ├── src/
-│   │   ├── main.rs
-│   │   ├── lib.rs
-│   │   ├── commands.rs
-│   │   ├── media.rs
-│   │   ├── db.rs
-│   │   └── core/
-│   ├── tests/
-│   ├── Cargo.toml
-│   ├── Cargo.lock
-│   └── tauri.conf.json
+├── src/
+│   ├── main.rs             Punto de entrada GTK4
+│   ├── lib.rs              Biblioteca (config, core, db, ui)
+│   ├── config/             Gestión de configuración YAML (mod.rs)
+│   ├── core/               Lógica de negocio (library, metadata, player, mod.rs)
+│   ├── db/                 SQLite, migraciones, repositorios, FTS5
+│   │   ├── connection.rs   Apertura de BD, migraciones, PRAGMA
+│   │   ├── file_repo.rs    Repositorio de archivos multimedia
+│   │   ├── media_repo.rs   Repositorio de medios y búsquedas
+│   │   ├── migrations.rs   Migraciones versionadas (schema_migrations)
+│   │   └── mod.rs
+│   └── ui/                 Interfaz GTK4 / Libadwaita
+│       ├── mod.rs
+│       ├── main_window.rs  Ventana principal
+│       ├── media_list.rs   Lista de medios
+│       ├── media_details.rs Vista de detalles
+│       ├── search_bar.rs   Barra de búsqueda
+│       ├── poster.rs       Renderizado de pósters con gdk-pixbuf
+│       └── video_player.rs Reproductor embebido
 ├── tests/
-│   └── e2e/
+│   └── media_persistence.rs Tests de integración con SQLite temporal
+├── scripts/
+│   ├── install.sh          Instalador (sin Node.js, solo Rust + GTK)
+│   ├── uninstall.sh        Desinstalador
+│   ├── diagnose-*.sh       Diagnósticos Wayland/Hyprland
+│   ├── fix-blank-screen.sh Scripts de solución pantalla en blanco
+│   └── acryl-launcher.sh   Lanzador con captura de errores
 ├── docs/
-│   └── adr/
-├── PLAN_DESKTOP.md
-├── AGENTS.md
-├── README.md
-└── package.json
+│   ├── adr/                Decisiones de arquitectura (ADR-0017: migración GTK4)
+│   ├── guides/             Guías de arquitectura, ejemplos, migración, performance, release
+│   └── README.md
+├── PLAN_DESKTOP.md         Plan de migración y hitos (incluye hitos E.1-E.5)
+├── AGENTS.md               Este archivo
+├── README.md               Documentación de usuario
+├── CONTRIBUTING.md         Flujo de trabajo y Pull Requests
+├── SECURITY.md             Política de seguridad
+├── LICENSE                 Licencia MIT
+├── Cargo.toml              Proyecto Rust único (edición 2024, rust 1.90)
+├── Cargo.lock
+├── CHANGELOG.md
+└── icons/                  Recursos gráficos (icono, etc.)
 ```
 
 Esta estructura es orientativa. Comprueba las rutas reales antes de utilizarlas y no crees directorios vacíos o estructuras duplicadas innecesariamente.
+
+No existen las carpetas `frontend/` ni `src-tauri/` ni un `package.json` en la raíz. No las recrees.
+
+---
 
 ## 4. Principios arquitectónicos obligatorios
 
 ### 4.1. Separación de responsabilidades
 
-1. El dominio no depende del frontend, del WebView ni de los comandos de Tauri.
-2. El frontend no ejecuta SQL ni accede directamente al sistema de archivos mediante APIs de Node.js.
-3. El acceso a SQLite se concentra en la capa de persistencia.
-4. Los comandos de Tauri actúan como adaptadores de entrada: validan la solicitud, delegan en los servicios correspondientes y convierten los resultados en respuestas serializables.
-5. La lógica de negocio no debe duplicarse entre React y Rust.
+1. El dominio no depende de la UI, de GTK ni de libmpv directamente en capas superiores.
+2. La UI no ejecuta SQL ni accede directamente al sistema de archivos mediante llamadas sueltas.
+3. El acceso a SQLite se concentra en la capa de persistencia (`src/db/`).
+4. La lógica de negocio reside en `src/core/` y es llamada directamente desde la UI (sin serialización JSON intermedia ni comandos Tauri).
+5. La lógica de negocio no debe duplicarse entre UI y Rust.
 6. La UI no debe conocer detalles internos de SQLite, FFI o del reproductor.
 7. Las dependencias deben apuntar hacia el dominio, no al contrario.
 8. Las interfaces deben ser pequeñas y específicas; no introduzcas abstracciones hasta que aporten una ventaja real.
 
-Mantén una separación clara entre dominio, persistencia, servicios, configuración, comandos y presentación, adaptándola a la complejidad real del proyecto.
+Mantén una separación clara entre dominio, persistencia, servicios, configuración y presentación, adaptándola a la complejidad real del proyecto.
 
 ### 4.2. Inyección de dependencias
 
 - Prefiere dependencias explícitas y controladas.
 - Evita singletons globales y estado global mutable sin necesidad justificada.
-- En Tauri, utiliza el mecanismo de estado gestionado cuando corresponda, con sincronización y ciclo de vida adecuados.
-- No abras y cierres innecesariamente la base de datos en cada comando si existe una conexión gestionada de forma segura y compartida.
-- Define la estrategia de concurrencia según las restricciones reales de SQLite, Tauri y `rusqlite`.
-- Evita bloquear el hilo principal o el runtime asíncrono con operaciones costosas.
+- No abras y cierres innecesariamente la base de datos en cada operación si existe una conexión gestionada de forma segura.
+- Define la estrategia de concurrencia según las restricciones reales de SQLite y `rusqlite`.
+- Evita bloquear el hilo principal de la interfaz con operaciones costosas.
 
-### 4.3. Contratos Rust ↔ TypeScript
+### 4.3. Contratos internos Rust
 
-Cada comando expuesto al frontend debe tener un contrato claro y estable.
+Cada función expuesta entre capas debe tener un contrato claro y estable.
 
 - Define entradas y salidas explícitas.
-- Usa Serde para serialización y deserialización.
-- Mantén sincronizados los tipos de TypeScript con los contratos reales de Rust.
+- Usa Serde para serialización interna cuando corresponda.
 - Valida los datos en el límite de entrada.
-- No confíes en que TypeScript valida datos en tiempo de ejecución.
-- Evita duplicar manualmente tipos compartidos cuando pueda generarse un contrato fiable sin añadir complejidad innecesaria.
-- Define errores que permitan al frontend distinguir errores recuperables, datos no encontrados, entradas inválidas y fallos internos sin revelar información sensible.
+- Define errores que permitan distinguir errores recuperables, datos no encontrados, entradas inválidas y fallos internos sin revelar información sensible.
 
 ### 4.4. Compatibilidad de datos
 
-- Investiga el esquema de SQLite existente antes de modificarlo.
+- Investiga el esquema de SQLite existente antes de modificarlo (`src/db/migrations.rs`).
 - Preserva los datos del usuario durante las actualizaciones.
 - No recrees ni elimines bases de datos automáticamente para resolver errores.
 - Toda modificación incompatible del esquema debe tener una migración versionada y probada.
-- Las migraciones deben ser transaccionales cuando sea posible, idempotentes cuando proceda y seguras frente a interrupciones.
+- Las migraciones deben ser transaccionales, idempotentes cuando proceda y seguras frente a interrupciones.
 - Comprueba la compatibilidad con bases de datos existentes y con instalaciones nuevas.
 - No elimines columnas, índices, archivos o metadatos sin justificar la necesidad y definir una migración segura.
+
+---
 
 ## 5. Flujo obligatorio antes de modificar código
 
@@ -142,8 +157,8 @@ Antes de implementar una tarea:
 2. Comprueba la rama actual y si hay cambios sin confirmar.
 3. Lee las instrucciones `AGENTS.md` aplicables y la documentación relevante.
 4. Inspecciona el código existente y los tests relacionados.
-5. Identifica los scripts reales de `package.json`, `frontend/package.json` y `Cargo.toml`.
-6. Comprueba las versiones de Node.js, Rust y las herramientas requeridas.
+5. Identifica los scripts reales de `Cargo.toml` y `scripts/`.
+6. Comprueba las versiones de Rust y las herramientas requeridas.
 7. Identifica los comportamientos existentes que no deben romperse.
 8. Determina el alcance, los riesgos y las dependencias de la tarea.
 9. Establece qué pruebas y verificaciones demostrarán que el cambio es correcto.
@@ -167,6 +182,8 @@ Para funcionalidades complejas, migraciones, cambios de arquitectura o modificac
 - Documentación que deberá actualizarse.
 
 Divide las tareas complejas en pasos verificables. No amplíes el alcance de un hito sin justificarlo.
+
+---
 
 ## 6. Buenas prácticas obligatorias de Rust
 
@@ -215,7 +232,7 @@ Aplica las convenciones oficiales de Rust y los patrones recomendados por el eco
 - No conviertas punteros en referencias sin demostrar las garantías necesarias.
 - Gestiona explícitamente la adquisición y liberación de recursos nativos.
 - Implementa `Drop` cuando corresponda y evita liberaciones dobles, use-after-free y fugas.
-- Para libmpv o GStreamer, comprueba los requisitos de inicialización, destrucción, callbacks y afinidad de hilos.
+- Para libmpv, comprueba los requisitos de inicialización, destrucción, callbacks y afinidad de hilos.
 - No invoques funciones nativas después de destruir sus recursos.
 
 ### 6.5. Dependencias y compilación
@@ -227,66 +244,9 @@ Aplica las convenciones oficiales de Rust y los patrones recomendados por el eco
 - Utiliza las herramientas de lint de forma estricta y corrige las advertencias reales.
 - No añadas atributos `allow` para ocultar problemas sin justificación.
 
-## 7. Buenas prácticas obligatorias de TypeScript y React
+---
 
-### 7.1. Tipado estricto
-
-- Mantén `strict: true` y las opciones de seguridad de tipos adecuadas en TypeScript.
-- No utilices `any`, ni siquiera temporalmente en código que se vaya a confirmar.
-- Para valores desconocidos, utiliza `unknown` y valida antes de operar con ellos.
-- Evita conversiones de tipo inseguras.
-- No utilices `as` para silenciar errores que deberían resolverse mediante un contrato o una validación correcta.
-- Las aserciones justificadas son aceptables si existe una garantía verificable.
-- Evita el operador de no nulidad `!` salvo que la garantía esté documentada o resulte evidente.
-- Usa tipos explícitos en interfaces públicas, parámetros y retornos de API; permite la inferencia local cuando sea segura y legible.
-- Activa, cuando sea compatible con el proyecto, opciones como `noUncheckedIndexedAccess` y `exactOptionalPropertyTypes`.
-- No debilites la configuración del compilador para hacer pasar una implementación.
-
-### 7.2. Modelado de datos
-
-- Utiliza `interface` para contratos de objetos cuando favorezca su extensión y `type` para uniones, intersecciones y composiciones.
-- Emplea uniones discriminadas para representar estados y resultados excluyentes.
-- Usa `readonly` e inmutabilidad cuando sean apropiados.
-- Evita tipos excesivamente genéricos y abstracciones que no aporten valor.
-- No dupliques modelos de dominio entre componentes si pueden centralizarse correctamente.
-- Valida datos externos en tiempo de ejecución cuando el contrato no sea plenamente confiable.
-
-### 7.3. React y estado
-
-- Sigue las reglas de los Hooks.
-- No llames Hooks de forma condicional ni dentro de bucles.
-- Utiliza componentes con una única responsabilidad clara.
-- Evita efectos secundarios dentro del renderizado.
-- No uses `useEffect` para derivar estado que pueda calcularse directamente.
-- No introduzcas `useMemo` o `useCallback` indiscriminadamente; utilízalos cuando exista una razón concreta.
-- Define correctamente las dependencias de los efectos.
-- Limpia listeners, suscripciones, temporizadores y recursos cuando corresponda.
-- Evita condiciones de carrera y actualizaciones de estado obsoletas.
-- Usa identificadores estables en listas; no uses índices como claves si la colección puede cambiar de orden.
-- Representa correctamente los estados de carga, vacío, error y éxito.
-- Evita que los componentes acumulen lógica de acceso a datos, negocio y presentación.
-
-### 7.4. Calidad de la interfaz
-
-- Mantén una interfaz coherente, accesible y adaptable a diferentes tamaños de ventana.
-- Utiliza HTML semántico, etiquetas accesibles y navegación por teclado.
-- Respeta el foco, los estados de interacción y los mensajes de error.
-- Añade atributos ARIA únicamente cuando sean necesarios.
-- Evita regresiones visuales en los componentes existentes.
-- Mantén las proporciones, el recorte y la posición de imágenes y pósteres de acuerdo con el diseño establecido.
-- No cambies el diseño o el comportamiento visual fuera del alcance solicitado.
-- No añadas dependencias para resolver problemas que puedan solucionarse correctamente con CSS, React o las herramientas existentes.
-
-### 7.5. Asincronía y servicios
-
-- Centraliza las llamadas a comandos de Tauri en la capa de servicios.
-- Tipifica entradas, respuestas y errores.
-- Gestiona correctamente las operaciones asíncronas y su cancelación cuando proceda.
-- Evita llamadas duplicadas, condiciones de carrera y actualizaciones de componentes desmontados.
-- No dependas de APIs de Node.js disponibles únicamente en entornos de servidor.
-- No expongas tokens, rutas sensibles ni información interna en mensajes visibles al usuario.
-
-## 8. Base de datos y sistema de archivos
+## 7. Base de datos y sistema de archivos
 
 ### SQLite
 
@@ -297,7 +257,7 @@ Aplica las convenciones oficiales de Rust y los patrones recomendados por el eco
 - Comprueba índices y planes de consulta si hay problemas de rendimiento.
 - Evita consultas N+1 y lecturas repetidas innecesarias.
 - Respeta las garantías de concurrencia y las limitaciones de SQLite.
-- Configura WAL y FTS5 según los requisitos reales de la aplicación.
+- Configura WAL y FTS5 según los requisitos reales de la aplicación (`PRAGMA journal_mode = WAL` en `connection.rs`).
 - Comprueba la recuperación tras fallos y la integridad de los datos cuando corresponda.
 - No almacenes secretos ni información sensible sin una necesidad justificada.
 
@@ -313,26 +273,25 @@ Aplica las convenciones oficiales de Rust y los patrones recomendados por el eco
 
 ### Migraciones
 
-- Versiona los cambios del esquema.
+- Versiona los cambios del esquema en `src/db/migrations.rs`.
 - Prueba las migraciones desde bases de datos antiguas y desde instalaciones limpias.
 - Verifica que una migración fallida no deje datos parcialmente modificados.
 - Conserva los datos existentes.
 - Documenta cualquier incompatibilidad inevitable y cómo se gestiona.
 
-## 9. Seguridad de Tauri y de la aplicación
+---
+
+## 8. Seguridad de la aplicación
 
 La aplicación debe seguir el principio de mínimo privilegio.
 
-- Configura los permisos y capabilities de Tauri estrictamente según las necesidades reales.
 - No concedas acceso general al sistema de archivos, shell o procesos si basta con una operación limitada.
-- Valida en Rust las entradas recibidas desde el frontend.
-- No consideres el frontend una frontera de seguridad confiable.
+- Valida en Rust las entradas recibidas desde la UI.
+- No consideres la UI una frontera de seguridad confiable.
 - No construyas comandos de shell con datos de usuario.
 - Evita ejecutar procesos externos; cualquier excepción debe estar justificada y restringida.
 - No expongas rutas arbitrarias, operaciones de borrado ni ejecución de comandos a través de interfaces genéricas.
 - Protege contra traversal de directorios y accesos no autorizados.
-- Evita XSS y la inserción de HTML no confiable.
-- No desactives mecanismos de seguridad de la WebView para resolver problemas de compatibilidad.
 - No incluyas secretos, tokens, contraseñas o datos personales en el código, los logs o los commits.
 - Utiliza `.env.example` para documentar variables de ejemplo sin credenciales reales.
 - Mantén las dependencias actualizadas de forma controlada.
@@ -340,13 +299,17 @@ La aplicación debe seguir el principio de mínimo privilegio.
 
 Si una funcionalidad requiere privilegios adicionales, explica la necesidad y utiliza el mecanismo más restrictivo posible.
 
-## 10. Política obligatoria de pruebas
+No hay WebView ni comandos Tauri, por tanto no aplican permisos de Tauri ni sanitización de IPC web.
+
+---
+
+## 9. Política obligatoria de pruebas
 
 Cada cambio debe incluir pruebas proporcionales al riesgo y al comportamiento modificado.
 
 No basta con comprobar que el proyecto compila. Los tests deben demostrar que la funcionalidad se comporta correctamente y que los casos de error están controlados.
 
-### 10.1. Tests unitarios
+### 9.1. Tests unitarios
 
 Comprueba, según corresponda:
 
@@ -355,41 +318,25 @@ Comprueba, según corresponda:
 - Errores y recuperación.
 - Transformaciones de datos.
 - Reglas de negocio.
-- Estados de carga, error y éxito.
 - Funciones puras y utilidades.
 - Parsing y validación de datos.
 
 Los tests deben ser deterministas, rápidos, aislados y fáciles de entender.
 
-### 10.2. Tests de integración
+### 9.2. Tests de integración
 
 Comprueba la interacción real entre módulos:
 
 - Repositorios y SQLite.
 - Transacciones y migraciones.
 - Servicios y lógica de dominio.
-- Comandos de Tauri y contratos de entrada/salida.
 - Lectura de archivos y metadatos.
 - Configuración YAML.
 - Manejo de errores y permisos.
 
-Utiliza una base de datos y directorios temporales independientes por test. No dependas de la biblioteca personal del usuario ni de datos reales de su equipo.
+Utiliza una base de datos y directorios temporales independientes por test (`tests/media_persistence.rs` usa `tempfile`). No dependas de la biblioteca personal del usuario ni de datos reales de su equipo.
 
-### 10.3. Tests frontend
-
-Utiliza Vitest y las herramientas ya presentes en el proyecto para probar:
-
-- Renderizado y estados de componentes.
-- Interacciones del usuario.
-- Búsqueda, filtros y ordenación.
-- Servicios y comandos invocados.
-- Manejo de errores y datos ausentes.
-- Accesibilidad y navegación por teclado en flujos relevantes.
-- Regresiones de comportamiento en componentes existentes.
-
-Prefiere comprobar el comportamiento observable en lugar de los detalles internos de implementación.
-
-### 10.4. Tests de regresión
+### 9.3. Tests de regresión
 
 Cuando se corrija un bug:
 
@@ -401,12 +348,12 @@ Cuando se corrija un bug:
 
 No elimines, desactives ni debilites un test porque revele un fallo de la implementación.
 
-### 10.5. Tests E2E
+### 9.4. Tests E2E
 
 Para los flujos críticos, comprueba la aplicación integrada cuando la infraestructura lo permita:
 
-- Inicio de la aplicación.
-- Carga de la biblioteca.
+- Inicio de la aplicación GTK4.
+- Carga de la biblioteca desde SQLite.
 - Búsqueda y navegación.
 - Apertura de los detalles de un elemento.
 - Gestión de imágenes y pósteres.
@@ -417,15 +364,15 @@ Para los flujos críticos, comprueba la aplicación integrada cuando la infraest
 
 Si el E2E requiere hardware, codecs, servicios o una sesión gráfica no disponible, ejecuta las verificaciones alternativas posibles y documenta exactamente la limitación. No declares que una prueba se ha superado si no se ha ejecutado.
 
-### 10.6. Cobertura
+### 9.5. Cobertura
 
 - Mantén o mejora la cobertura de las rutas importantes.
 - Define umbrales de cobertura cuando exista una configuración adecuada.
-- No persigas un porcentaje elevado mediante tests triviales que no comprueban comportamientos reales.
+- No persigas un porcentaje elevado mediante tests triviales que no comprueben comportamientos reales.
 - Prioriza las reglas de negocio, persistencia, seguridad, manejo de errores y flujos críticos.
 - No reduzcas los umbrales existentes sin justificación y revisión explícitas.
 
-### 10.7. Calidad de los propios tests
+### 9.6. Calidad de los propios tests
 
 - Evita tests frágiles basados en detalles internos.
 - No uses sleeps arbitrarios cuando puedan emplearse condiciones o sincronización determinista.
@@ -435,28 +382,15 @@ Si el E2E requiere hardware, codecs, servicios o una sesión gráfica no disponi
 - No introduzcas dependencias de red en la suite ordinaria si no son necesarias.
 - Los tests que requieren recursos externos deben identificarse claramente.
 
-## 11. Puertas de calidad antes de confirmar cambios
+---
+
+## 10. Puertas de calidad antes de confirmar cambios
 
 Antes de hacer un commit, ejecuta las comprobaciones pertinentes para las capas modificadas.
 
-### Frontend
-
-Desde la raíz del proyecto, utiliza los scripts que realmente existan:
-
-```bash
-npm run typecheck
-npm run lint
-npm test
-npm run build
-```
-
-Si el proyecto dispone de `npm run verify`, execútalo también. Comprueba su definición antes de asumir qué incluye.
-
-No des por hecho que todos los scripts existen. Si falta una comprobación necesaria, utiliza el comando equivalente disponible o documenta lo que falta. Añade scripts permanentes cuando sea parte del alcance y exista una justificación clara.
-
 ### Backend Rust
 
-Desde `src-tauri/`:
+Desde la raíz del proyecto:
 
 ```bash
 cargo fmt --all -- --check
@@ -467,20 +401,9 @@ cargo build --all-features
 
 Ajusta los comandos si existen características incompatibles entre sí, targets específicos o dependencias opcionales que requieran otro entorno. No omitas una verificación silenciosamente.
 
-### Aplicación completa
-
-Cuando corresponda, comprueba también:
+Si se han modificado dependencias, ejecuta las comprobaciones de seguridad pertinentes:
 
 ```bash
-npm run tauri build
-```
-
-Utiliza el comando y el entorno adecuados para la configuración real del proyecto.
-
-Si se han modificado dependencias, ejecuta las comprobaciones de seguridad pertinentes, por ejemplo:
-
-```bash
-npm audit
 cargo audit
 ```
 
@@ -500,9 +423,11 @@ Comprueba la disponibilidad de las herramientas y revisa los resultados. Disting
 
 Si una comprobación falla, investiga la causa y corrígela antes de continuar. No repitas comandos sin modificar nada esperando un resultado distinto.
 
-## 12. Git, commits y protección de cambios
+---
 
-### 12.1. Ramas
+## 11. Git, commits y protección de cambios
+
+### 11.1. Ramas
 
 - Nunca trabajes directamente en `main`.
 - Utiliza ramas específicas por funcionalidad, corrección o tarea técnica.
@@ -513,12 +438,12 @@ Si una comprobación falla, investiga la causa y corrígela antes de continuar. 
 Ejemplo:
 
 ```text
-feat/hito-2-capa-dominio-rust
+feat/hito-e2-ui-completa
 fix/poster-rendering
 test/sqlite-migrations
 ```
 
-### 12.2. Commits
+### 11.2. Commits
 
 Utiliza Conventional Commits con scopes coherentes:
 
@@ -550,11 +475,11 @@ git diff
 - No confirmes código que no hayas inspeccionado.
 - Cada commit debe dejar el código en un estado coherente.
 
-### 12.3. No falsificar verificaciones
+### 11.3. No falsificar verificaciones
 
 Nunca afirmes que se han ejecutado o superado tests, compilaciones, revisiones o checks si no existe evidencia de ello.
 
-Distingue entre:
+Distínguete entre:
 
 - Ejecutado y superado.
 - Ejecutado y fallido.
@@ -564,11 +489,13 @@ Distingue entre:
 
 No ocultes fallos mediante redirecciones, `|| true`, desactivación de reglas o eliminación de tests.
 
-## 13. Política obligatoria de Pull Requests
+---
+
+## 12. Política obligatoria de Pull Requests
 
 Toda funcionalidad o corrección que llegue a `main` debe pasar por una Pull Request, salvo que exista una política de repositorio aprobada que establezca otra cosa.
 
-### 13.1. Antes de abrir la PR
+### 12.1. Antes de abrir la PR
 
 1. Confirma que la rama contiene únicamente cambios relacionados.
 2. Revisa `git diff main...HEAD` y los commits de la rama.
@@ -590,7 +517,7 @@ Abre la PR con un título descriptivo y un cuerpo que incluya:
 - Capturas de pantalla cuando haya cambios visuales relevantes.
 - Migraciones o pasos de actualización cuando proceda.
 
-### 13.2. Revisión técnica de la PR
+### 12.2. Revisión técnica de la PR
 
 Antes de fusionar, revisa la PR como si fueras un revisor independiente. No te limites a leer el mensaje del commit ni a comprobar que el código compila.
 
@@ -600,8 +527,6 @@ Inspecciona:
 - Regresiones respecto al comportamiento anterior.
 - Seguridad, permisos y validación de entradas.
 - Errores de ownership, concurrencia y gestión de recursos en Rust.
-- Contratos inconsistentes entre TypeScript y Rust.
-- Problemas de asincronía y estado en React.
 - Consultas SQL inseguras y migraciones destructivas.
 - Manejo incompleto de errores.
 - Fugas de memoria o recursos nativos.
@@ -612,37 +537,9 @@ Inspecciona:
 - Documentación obsoleta.
 - Cambios accidentales fuera del alcance.
 
-Utiliza `gh pr diff`, `gh pr view` y las herramientas de revisión disponibles para examinar el cambio real. Si hay comentarios de revisión o resultados de herramientas automáticas, analízalos y resuelve los problemas relevantes.
-
 No marques un comentario como resuelto hasta haber comprobado su corrección.
 
-### 13.3. Checks de GitHub
-
-Antes de fusionar:
-
-1. Comprueba que la PR apunta a la rama de destino correcta.
-2. Comprueba que todos los checks obligatorios han finalizado.
-3. Confirma que los checks requeridos están en verde.
-4. Inspecciona los fallos de CI aunque sean intermitentes.
-5. Confirma que la rama está actualizada según la política del repositorio.
-6. Revisa los comentarios de revisión y las conversaciones pendientes.
-7. Comprueba que no se han añadido cambios inesperados desde la última revisión.
-8. Si se han modificado archivos después de la revisión o de los tests, repite las verificaciones afectadas y revisa el diff actualizado.
-
-Comandos orientativos:
-
-```bash
-gh pr view <PR> --json state,baseRefName,headRefName,mergeStateStatus,reviewDecision,statusCheckRollup
-gh pr checks <PR>
-gh pr diff <PR>
-gh pr view <PR> --comments
-```
-
-Adapta los campos a la versión de GitHub CLI disponible. Si un comando no permite verificar un requisito, utiliza otra forma de obtener la evidencia.
-
-Un check pendiente, fallido, obligatorio ausente o cuyo resultado no pueda determinarse no equivale a un check superado.
-
-### 13.4. Condiciones de merge
+### 12.3. Condiciones de merge
 
 **Está prohibido fusionar una PR si se cumple cualquiera de estas condiciones:**
 
@@ -666,7 +563,7 @@ No uses `--admin`, no omitas checks, no desactives protecciones ni fuerces un me
 
 Si GitHub no permite fusionar por una restricción legítima, informa del bloqueo. No busques formas de eludirlo.
 
-### 13.5. Después del merge
+### 12.4. Después del merge
 
 - Comprueba que GitHub confirma el merge.
 - Actualiza `main` localmente de forma segura.
@@ -678,7 +575,9 @@ Si GitHub no permite fusionar por una restricción legítima, informa del bloque
 
 No empieces el siguiente hito hasta que el actual esté fusionado y sus verificaciones requeridas estén completas.
 
-## 14. Integración continua obligatoria
+---
+
+## 13. Integración continua obligatoria
 
 La calidad no debe depender exclusivamente de la memoria del agente. Siempre que el repositorio lo permita, implementa y mantiene una CI reproducible en GitHub Actions.
 
@@ -687,22 +586,17 @@ La CI debe ejecutarse en Pull Requests y en las ramas relevantes, como `main`.
 Como mínimo, debe comprobar:
 
 - Instalación reproducible de dependencias.
-- Formato de Rust.
+- Formato de Rust (`cargo fmt --check`).
 - Clippy sin advertencias no justificadas.
-- Tests unitarios y de integración de Rust.
-- Typecheck de TypeScript.
-- Lint del frontend.
-- Tests de Vitest.
-- Build de producción del frontend.
-- Build de Tauri cuando el runner disponga de las dependencias nativas necesarias.
-- Auditoría de dependencias cuando esté configurada de forma estable.
+- Tests unitarios y de integración de Rust (`cargo test`).
+- Build de Rust (`cargo build`).
+- Auditoría de dependencias (`cargo audit`) cuando esté configurada de forma estable.
 
 Añade pruebas E2E y builds de distribución en Linux cuando sean viables y aporten cobertura relevante.
 
 Buenas prácticas de CI:
 
 - Fija versiones de acciones y herramientas de forma controlada.
-- Usa `npm ci` cuando exista un lockfile compatible.
 - Respeta `Cargo.lock`.
 - Configura permisos mínimos para los `GITHUB_TOKEN`.
 - No expongas secretos en logs.
@@ -719,7 +613,9 @@ Antes de crear un workflow, inspecciona `.github/workflows/` y reutiliza lo que 
 
 Las protecciones de `main` deben configurarse en GitHub cuando corresponda; escribirlas en este archivo no las activa automáticamente.
 
-## 15. Estrategia de rendimiento
+---
+
+## 14. Estrategia de rendimiento
 
 No introduzcas optimizaciones especulativas.
 
@@ -738,16 +634,17 @@ Presta especial atención a:
 - Consultas SQLite y búsquedas FTS5.
 - Lectura de metadatos y archivos.
 - Renderizado de listas e imágenes.
-- Decodificación de pósteres.
+- Decodificación de pósteres con gdk-pixbuf.
 - Memoria y copias innecesarias.
-- Comunicación entre Rust y TypeScript.
-- Operaciones nativas de reproducción.
+- Operaciones nativas de reproducción con libmpv.
 
 Evita bloquear la interfaz, cargar colecciones completas cuando no sea necesario o repetir consultas costosas en cada renderizado.
 
 No añadas concurrencia, cachés o sistemas de virtualización sin demostrar que resuelven un problema real o un requisito del proyecto.
 
-## 16. Documentación y decisiones técnicas
+---
+
+## 15. Documentación y decisiones técnicas
 
 - El código, los identificadores, los nombres de tipos y los comentarios técnicos se escriben en inglés.
 - La documentación dirigida al usuario se escribe en español, salvo que el proyecto establezca otra convención.
@@ -770,7 +667,9 @@ Anota la decisión en el plan cuando afecte a los hitos.
 
 No crees ADR para decisiones triviales que puedan resolverse mediante las convenciones existentes.
 
-## 17. Política de dependencias
+---
+
+## 16. Política de dependencias
 
 Antes de añadir o actualizar una dependencia:
 
@@ -779,7 +678,7 @@ Antes de añadir o actualizar una dependencia:
 - Revisa el impacto en el tamaño del binario y los requisitos del sistema.
 - Comprueba las versiones compatibles con el toolchain.
 - Añade únicamente las dependencias necesarias.
-- Actualiza el lockfile correspondiente.
+- Actualiza el lockfile correspondiente (`Cargo.lock`).
 - Ejecuta los tests y builds pertinentes.
 - Documenta los cambios relevantes.
 
@@ -787,7 +686,11 @@ No ejecutes actualizaciones generales de dependencias dentro de una tarea funcio
 
 No elimines dependencias basándote únicamente en una búsqueda textual; verifica su uso indirecto, los scripts y la configuración de compilación.
 
-## 18. Política de alcance y cambios visuales
+No añadas dependencias de Node.js, npm, Tauri, React o TypeScript: han sido eliminadas del proyecto.
+
+---
+
+## 17. Política de alcance y cambios visuales
 
 - Implementa únicamente el alcance acordado.
 - No refactorices módulos no relacionados durante una corrección puntual.
@@ -801,7 +704,9 @@ No elimines dependencias basándote únicamente en una búsqueda textual; verifi
 
 La ausencia de instrucciones detalladas no autoriza a rediseñar partes existentes ni a eliminar funcionalidades.
 
-## 19. Política de commits, PR y autonomía
+---
+
+## 18. Política de commits, PR y autonomía
 
 El agente debe completar las tareas de forma autónoma siempre que disponga de permisos, herramientas y contexto suficientes.
 
@@ -837,7 +742,9 @@ Detente y solicita intervención humana cuando sea necesario para:
 
 Nunca inventes resultados ni ocultes bloqueos para aparentar que la tarea está terminada.
 
-## 20. Criterios de finalización de una tarea
+---
+
+## 19. Criterios de finalización de una tarea
 
 Una tarea no se considera completada hasta que se hayan satisfecho todos los criterios aplicables:
 
@@ -868,7 +775,9 @@ Al terminar, proporciona un resumen conciso con:
 
 No incluyas resultados hipotéticos ni afirmaciones de éxito sin evidencia.
 
-## 21. Reglas finales no negociables
+---
+
+## 20. Reglas finales no negociables
 
 1. Nunca trabajes directamente en `main`.
 2. Nunca fusiones una PR con checks obligatorios fallidos o pendientes.
@@ -882,5 +791,7 @@ No incluyas resultados hipotéticos ni afirmaciones de éxito sin evidencia.
 10. Nunca cambies la arquitectura o las tecnologías principales sin una justificación adecuada.
 11. Nunca marques un hito como terminado antes de completar su proceso de revisión y verificación.
 12. Prioriza siempre la corrección, la seguridad, la mantenibilidad y la experiencia de usuario.
+13. No reintroduzcas Node.js, npm, Tauri, React, TypeScript ni WebView; el proyecto es Rust puro + GTK4/Libadwaita.
 
 **Principio rector:** una funcionalidad no está terminada porque funcione en un caso concreto; está terminada cuando su comportamiento es correcto, sus errores están controlados, sus pruebas aportan confianza, sus cambios han sido revisados y la integración en `main` cumple las garantías del proyecto.
+
