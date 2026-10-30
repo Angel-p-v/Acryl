@@ -1,6 +1,6 @@
 [package]
 name = "acryl"
-version = "0.2.0"
+version = "0.3.0"
 description = "Gestor de contenido multimedia de escritorio para Linux"
 authors = ["Angel-p-v"]
 license = "MIT"
