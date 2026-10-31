@@ -76,6 +76,15 @@ pub fn show_track_dialog(
     subtitle_dropdown.set_hexpand(true);
     content.append(&subtitle_dropdown);
 
+    // Botón para forzar la re-detección con ffprobe (útil cuando la BD tiene
+    // pistas cacheadas de una indexación previa incompleta).
+    let redetect_button = Button::with_label("🔄 Volver a detectar pistas");
+    redetect_button.set_halign(gtk4::Align::Start);
+    redetect_button.set_tooltip_text(Some(
+        "Ejecuta ffprobe de nuevo para leer todas las pistas del archivo",
+    ));
+    content.append(&redetect_button);
+
     let buttons = Box::new(Orientation::Horizontal, 8);
     buttons.set_halign(gtk4::Align::End);
     buttons.set_margin_top(6);
@@ -114,6 +123,7 @@ pub fn show_track_dialog(
     } else {
         status_label.set_label("Detectando pistas con ffprobe…");
         detect_streams_in_background(
+            false,
             db_path.to_string(),
             file_path.to_string(),
             status_label.clone(),
@@ -162,6 +172,32 @@ pub fn show_track_dialog(
                 status_for_save.set_visible(true);
             }
         }
+    });
+
+    // Botón: volver a detectar todas las pistas con ffprobe (ignora caché de BD).
+    let redetect_for_click = redetect_button.clone();
+    let db_path_red = db_path.to_string();
+    let file_path_red = file_path.to_string();
+    let status_red = status_label.clone();
+    let audio_dropdown_red = audio_dropdown.clone();
+    let subtitle_dropdown_red = subtitle_dropdown.clone();
+    let audio_streams_red = audio_streams.clone();
+    let subtitle_streams_red = subtitle_streams.clone();
+    let selection_red = selection.clone();
+    redetect_for_click.connect_clicked(move |_| {
+        status_red.set_label("Detectando pistas con ffprobe…");
+        status_red.set_visible(true);
+        detect_streams_in_background(
+            true,
+            db_path_red.to_string(),
+            file_path_red.to_string(),
+            status_red.clone(),
+            audio_dropdown_red.clone(),
+            subtitle_dropdown_red.clone(),
+            audio_streams_red.clone(),
+            subtitle_streams_red.clone(),
+            selection_red.clone(),
+        );
     });
 
     window.present();
@@ -220,8 +256,11 @@ fn save_selection(
 }
 
 /// Lanza `ffprobe` en un hilo y actualiza la ventana en el hilo de GTK.
+/// Cuando `force` es `true`, ignora la caché de la BD y vuelve a ejecutar
+/// `ffprobe` para leer todas las pistas del archivo.
 #[allow(clippy::too_many_arguments)]
 fn detect_streams_in_background(
+    force: bool,
     db_path: String,
     file_path: String,
     status_label: Label,
@@ -233,7 +272,8 @@ fn detect_streams_in_background(
 ) {
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = ensure_media_streams(&db_path, &file_path).map_err(|error| error.to_string());
+        let result =
+            ensure_media_streams(&db_path, &file_path, force).map_err(|error| error.to_string());
         let _ = sender.send(result);
     });
 

@@ -1226,18 +1226,20 @@ pub fn index_missing_streams(
 }
 
 /// Devuelve las pistas de un archivo, extrayéndolas con `ffprobe` si aún no
-/// están en la base de datos. Pensado para abrir el selector de pistas de
-/// archivos indexados antes de que existiera la extracción automática.
+/// están en la base de datos o si `force` es `true`. Pensado para abrir el
+/// selector de pistas de archivos indexados antes de que existiera la extracción
+/// automática.
 pub fn ensure_media_streams(
     db_path: &str,
     file_path: &str,
+    force: bool,
 ) -> Result<Vec<MediaStream>, Box<dyn std::error::Error>> {
     let mut conn = open_db(db_path)?;
     let existing = {
         let mut repo = MediaRepository::new(&mut conn);
         repo.list_streams_by_file(file_path)?
     };
-    if !existing.is_empty() {
+    if !force && !existing.is_empty() {
         close_db(conn);
         return Ok(existing);
     }
@@ -1940,12 +1942,12 @@ mod tests {
             .unwrap();
         }
 
-        let streams = ensure_media_streams(&db_path, &video_str).expect("detectar pistas");
+        let streams = ensure_media_streams(&db_path, &video_str, false).expect("detectar pistas");
         assert!(streams.iter().any(|s| s.stream_type == "audio"));
 
         // Una segunda llamada reutiliza las pistas guardadas sin invocar de
         // nuevo a ffprobe.
-        let again = ensure_media_streams(&db_path, &video_str).expect("reutilizar pistas");
+        let again = ensure_media_streams(&db_path, &video_str, false).expect("reutilizar pistas");
         assert_eq!(again.len(), streams.len());
     }
 }
