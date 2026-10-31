@@ -22,6 +22,8 @@ pub struct SyncMetadataResult {
     pub banner_path: Option<String>,
     pub release_date: Option<String>,
     pub vote_average: Option<f64>,
+    /// Géneros/categorías devueltos por la fuente de metadatos.
+    pub genres: Vec<String>,
     /// Identificador del show en TVmaze, usado para pedir sus imágenes anchas.
     pub show_id: Option<u64>,
 }
@@ -196,6 +198,31 @@ impl MetadataService {
                     banner_path.as_deref(),
                     fetched.synopsis.as_deref(),
                 )?;
+            }
+
+            // Persistir la puntuación obtenida de los metadatos.
+            if let Err(error) = media_repo.set_vote_average(media_id, fetched.vote_average) {
+                eprintln!(
+                    "No se pudo guardar la puntuación de '{}': {}",
+                    media.title, error
+                );
+            }
+
+            // Extraer, normalizar y asociar categorías (géneros) al medio,
+            // evitando duplicados. Un medio sin categorías es válido.
+            if !fetched.genres.is_empty() {
+                let mut category_ids = Vec::new();
+                for genre in &fetched.genres {
+                    if let Ok(category_id) = media_repo.get_or_create_category(genre) {
+                        category_ids.push(category_id);
+                    }
+                }
+                if let Err(error) = media_repo.set_media_categories(media_id, &category_ids) {
+                    eprintln!(
+                        "No se pudieron asociar las categorías de '{}': {}",
+                        media.title, error
+                    );
+                }
             }
             close_db(conn);
         }
@@ -463,6 +490,16 @@ fn parse_search_response(response: &Value) -> SyncMetadataResult {
         return SyncMetadataResult::default();
     };
 
+    let genres = show
+        .get("genres")
+        .and_then(|g| g.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|g| g.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
     SyncMetadataResult {
         title: show.get("name").and_then(Value::as_str).map(str::to_string),
         synopsis: show.get("summary").and_then(Value::as_str).map(clean_html),
@@ -479,6 +516,7 @@ fn parse_search_response(response: &Value) -> SyncMetadataResult {
             .get("rating")
             .and_then(|rating| rating.get("average"))
             .and_then(Value::as_f64),
+        genres,
         banner_path: None,
         show_id: show.get("id").and_then(Value::as_u64),
     }

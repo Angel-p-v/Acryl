@@ -21,6 +21,11 @@ pub struct Media {
     pub is_watched: bool,
     pub parent_id: Option<i64>,
     pub rating: i32,
+    /// Puntuación obtenida de los metadatos (vote_average de TVmaze, 0-10).
+    pub vote_average: Option<f64>,
+    /// Categorías asociadas al medio (cargadas por separado con `load_categories`).
+    #[serde(skip)]
+    pub categories: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -229,7 +234,7 @@ impl<'a> MediaRepository<'a> {
         let mut sql = String::from(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
-                    metadata_fetched_at, parent_id, rating
+                    metadata_fetched_at, parent_id, rating, vote_average
              FROM media",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -287,7 +292,7 @@ impl<'a> MediaRepository<'a> {
                 "SELECT m.id, m.type, m.title, m.sort_title, m.year, m.folder_path,
                         m.created_at, m.updated_at,
                         m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
-                        m.metadata_fetched_at, m.parent_id, m.rating
+                        m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average
                  FROM media m
                  JOIN media_fts f ON f.rowid = m.id
                  WHERE media_fts MATCH ?1 AND m.parent_id IS NULL",
@@ -318,7 +323,7 @@ impl<'a> MediaRepository<'a> {
                 "SELECT m.id, m.type, m.title, m.sort_title, m.year, m.folder_path,
                         m.created_at, m.updated_at,
                         m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
-                        m.metadata_fetched_at, m.parent_id
+                        m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average
                  FROM media m
                  WHERE m.sort_title LIKE ?1 ESCAPE '\\' AND m.parent_id IS NULL",
             );
@@ -376,12 +381,145 @@ impl<'a> MediaRepository<'a> {
         let sql = String::from(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
-                    metadata_fetched_at, parent_id, rating
+                    metadata_fetched_at, parent_id, rating, vote_average
              FROM media WHERE parent_id = ?1 ORDER BY sort_title ASC",
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let rows: Vec<Media> = stmt
             .query_map(params![parent_id], map_media_row)?
+            .filter_map(Result::ok)
+            .collect();
+
+        Ok(rows)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Categoría de medio (género/etiqueta) para filtrado de la biblioteca.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Category {
+    pub id: i64,
+    pub name: String,
+    pub slug: String,
+}
+
+impl<'a> MediaRepository<'a> {
+    /// Lista todas las categorías disponibles ordenadas por nombre.
+    pub fn list_categories(&mut self) -> RusqliteResult<Vec<Category>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, slug FROM categories ORDER BY name ASC")?;
+        let rows: Vec<Category> = stmt
+            .query_map([], |row| {
+                Ok(Category {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    slug: row.get(2)?,
+                })
+            })?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
+    }
+
+    /// Crea (si no existe) y devuelve el identificador de una categoría,
+    /// normalizando el nombre y generando un slug único.
+    pub fn get_or_create_category(&mut self, name: &str) -> RusqliteResult<i64> {
+        let slug = slugify(name);
+        // Intenta insertar; si el slug ya existe, devuelve su id.
+        let insert = self.conn.execute(
+            "INSERT INTO categories (name, slug) VALUES (?1, ?2)",
+            params![name, slug],
+        );
+        match insert {
+            Ok(_) => Ok(self.conn.last_insert_rowid()),
+            Err(rusqlite::Error::SqliteFailure(_, _)) => {
+                let mut stmt = self
+                    .conn
+                    .prepare("SELECT id FROM categories WHERE slug = ?1")?;
+                stmt.query_row(params![slug], |row| row.get(0))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Asocia un medio con un conjunto de categorías, reemplazando las
+    /// asociaciones previas (idempotente).
+    pub fn set_media_categories(
+        &mut self,
+        media_id: i64,
+        category_ids: &[i64],
+    ) -> RusqliteResult<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "DELETE FROM media_categories WHERE media_id = ?1",
+            params![media_id],
+        )?;
+        for &category_id in category_ids {
+            tx.execute(
+                "INSERT INTO media_categories (media_id, category_id) VALUES (?1, ?2)",
+                params![media_id, category_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Devuelve los nombres de las categorías asociadas a un medio.
+    pub fn load_categories_for_media(&mut self, media_id: i64) -> RusqliteResult<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.name FROM categories c
+             JOIN media_categories mc ON mc.category_id = c.id
+             WHERE mc.media_id = ?1 ORDER BY c.name ASC",
+        )?;
+        let rows: Vec<String> = stmt
+            .query_map(params![media_id], |row| row.get(0))?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
+    }
+
+    /// Lista los medios padre asociados a una categoría.
+    pub fn list_by_category(
+        &mut self,
+        category_id: i64,
+        options: ListMediaOptions,
+    ) -> RusqliteResult<Vec<Media>> {
+        let mut sql = String::from(
+            "SELECT m.id, m.type, m.title, m.sort_title, m.year, m.folder_path,
+                        m.created_at, m.updated_at,
+                        m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
+                        m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average
+             FROM media m
+             JOIN media_categories mc ON mc.media_id = m.id
+             WHERE mc.category_id = ?1 AND m.parent_id IS NULL",
+        );
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(category_id)];
+
+        if let Some(ref t) = options.r#type {
+            sql.push_str(" AND m.type = ?");
+            params.push(Box::new(t.clone()));
+        }
+
+        let order_clause = match options.order_by.as_deref().unwrap_or("title") {
+            "added" => "ORDER BY m.created_at DESC",
+            "recent" => "ORDER BY m.updated_at DESC",
+            _ => "ORDER BY m.sort_title ASC",
+        };
+        sql.push(' ');
+        sql.push_str(order_clause);
+        sql.push_str(" LIMIT ?");
+        params.push(Box::new(options.limit.unwrap_or(500)));
+        sql.push_str(" OFFSET ?");
+        params.push(Box::new(options.offset.unwrap_or(0)));
+
+        let params_slice: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows: Vec<Media> = stmt
+            .query_map(params_slice.as_slice(), map_media_row)?
             .filter_map(Result::ok)
             .collect();
 
@@ -421,6 +559,15 @@ impl<'a> MediaRepository<'a> {
              metadata_fetched_at = datetime('now'), updated_at = datetime('now')
              WHERE id = ?5",
             params![year, poster_path, banner_path, synopsis, media_id],
+        )?;
+        Ok(())
+    }
+
+    /// Guarda la puntuación obtenida de los metadatos (vote_average, 0-10).
+    pub fn set_vote_average(&mut self, media_id: i64, vote_average: Option<f64>) -> RusqliteResult<()> {
+        self.conn.execute(
+            "UPDATE media SET vote_average = ?1, updated_at = datetime('now') WHERE id = ?2",
+            params![vote_average, media_id],
         )?;
         Ok(())
     }
@@ -614,7 +761,27 @@ fn map_media_row(row: &rusqlite::Row<'_>) -> RusqliteResult<Media> {
         metadata_fetched_at: row.get(13)?,
         parent_id: row.get(14)?,
         rating: row.get::<_, i32>(15).unwrap_or(0),
+        vote_average: row.get::<_, Option<f64>>(16).ok().flatten(),
+        categories: Vec::new(),
     })
+}
+
+/// Normaliza un nombre de categoría en un slug seguro para consultas y URLs.
+fn slugify(name: &str) -> String {
+    let mut slug = String::new();
+    for c in name.to_lowercase().chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+        } else if c.is_whitespace() || c == '-' || c == '_' {
+            if !slug.ends_with('-') && !slug.is_empty() {
+                slug.push('-');
+            }
+        }
+    }
+    if slug.is_empty() {
+        slug = "categoria".to_string();
+    }
+    slug
 }
 
 fn to_fts_query(query: &str) -> String {
@@ -668,7 +835,8 @@ mod tests {
                 year        INTEGER,
                 folder_path TEXT    NOT NULL UNIQUE,
                 created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-                updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+                updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+                vote_average REAL
             );
              CREATE TABLE IF NOT EXISTS media_files (
                 id          INTEGER PRIMARY KEY,
