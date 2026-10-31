@@ -135,6 +135,71 @@ pub fn install_poster_css() {
                  letter-spacing: 1px; \
                  color: #ff6b35; \
                  font-weight: 700; \
+             } \
+             /* Grid de episodios al estilo Crunchyroll */ \
+             .episode-grid { \
+                 margin-top: 8px; \
+             } \
+             .episode-card { \
+                 background-color: #2a2a2a; \
+                 border: 1px solid #3a3a3a; \
+                 border-radius: 8px; \
+                 padding: 8px; \
+                 margin: 6px; \
+                 min-width: 170px; \
+                 max-width: 190px; \
+                 transition: all 150ms ease; \
+             } \
+             .episode-card:hover { \
+                 background-color: #333333; \
+                 border-color: #ff6b35; \
+                 transform: scale(1.03); \
+             } \
+             .episode-card:selected { \
+                 background-color: #3a3a3a; \
+                 border-color: #ff6b35; \
+             } \
+             .episode-poster { \
+                 border-radius: 6px; \
+                 margin-bottom: 8px; \
+             } \
+             .episode-title { \
+                 font-weight: 600; \
+                 font-size: 0.82em; \
+                 color: #e0e0e0; \
+                 text-align: center; \
+                 max-width-chars: 20; \
+                 wrap: true; \
+                 ellipsize: end; \
+             } \
+             .episode-number { \
+                 font-size: 0.75em; \
+                 color: #a0a0a0; \
+                 text-align: center; \
+                 margin-bottom: 4px; \
+             } \
+             .episode-play-btn { \
+                 background-color: #ff6b35; \
+                 color: #ffffff; \
+                 border-radius: 4px; \
+                 font-weight: 600; \
+                 font-size: 0.8em; \
+                 min-width: 80px; \
+                 min-height: 30px; \
+                 margin-top: 6px; \
+             } \
+             .episode-play-btn:hover { \
+                 background-color: #e85a2c; \
+             } \
+             .season-grid-section { \
+                 margin-top: 28px; \
+             } \
+             .season-grid-title { \
+                 font-weight: 700; \
+                 font-size: 1.1em; \
+                 color: #ffffff; \
+                 margin-bottom: 12px; \
+                 margin-left: 6px; \
              }",
         );
 
