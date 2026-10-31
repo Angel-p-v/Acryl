@@ -65,6 +65,8 @@ src-tauri/                ← Rust
 
 ## 4. Hitos del plan
 
+> **Nota histórica:** estos hitos describen la etapa Tauri, ya sustituida por la migración a GTK4 / Libadwaita (sección 10). Se conservan como referencia. El estado vigente de la aplicación está en las secciones 15, 16 y 18.
+
 ### Hito 1 — Prototipo mínimo (Semanas 1–2)
 - Ventana Tauri en Linux con WebView.
 - Lista de medios leída desde SQLite existente.
@@ -95,7 +97,7 @@ src-tauri/                ← Rust
 ### Hito 5 — Empaquetado Linux (Semanas 14–15)
 - Instalador nativo Linux (`.deb`, AppImage o `.rpm`).
 - Icono de aplicación, entrada de menú, archivo `.desktop`.
-- **Criterio de aceptación:** se instala y ejecuta en Linux sin dependencias manuales de Rust/Node. ✅ cumplido
+- **Criterio de aceptación:** se instala y ejecuta en Linux sin dependencias manuales de Rust/Node. Sustituido por el Hito E.4: instalador nativo sin paquetes `.deb`/`.rpm`/AppImage.
 
 ### Hito 6 — Configuración YAML en el backend (Semanas 16–17)
 - Carga de configuración desde archivo YAML en Rust usando `serde` + `serde_yaml`.
@@ -155,21 +157,11 @@ src-tauri/                ← Rust
 
 ## 8. Estado de hitos
 
-| Hito | Contenido | Estado |
-|------|-----------|--------|
-| Hito 1 | Prototipo mínimo: ventana Tauri, lista desde SQLite, póster, búsqueda | ✅ completado |
-| Hito 2 | Capa de dominio en Rust (db, library, metadata) | ✅ completado |
-| Hito 3 | Reproductor con `mpv` (proceso externo) | ✅ completado |
-| Hito 4 | UI completa (detalles, favoritos, visto, navegación) | ✅ completado |
-| Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ✅ completado |
-| Hito 6 | Configuración YAML en el backend | ✅ completado |
-| Hito 7 | Internacionalización (i18n) de la UI | ✅ completado |
-| Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ✅ completado |
-| Hito 9 | Publicación automática en GitHub Releases | ✅ completado |
+Los hitos 1–9 de la etapa Tauri se conservan como histórico en la sección 4. El estado vigente de la aplicación GTK4 / Libadwaita se mantiene en las secciones 15, 16 y 18.
 
 ## 9. Próximo paso inmediato
 
-Todos los hitos del plan están completados.
+Ver la sección 17 para el orden de trabajo vigente.
 
 ---
 
@@ -370,7 +362,7 @@ LICENSE                   ← Se mantiene
 | Toolkit GTK | GTK3 vs GTK4 | GTK4 (implementado) |
 | Librería de UI | Libadwaita vs GTK puro | Libadwaita (implementado) |
 | Definición UI | Código Rust vs GtkBuilder XML | Código Rust (implementado) |
-| Empaquetado | `cargo-deb` / `cargo-rpm` vs `cargo-appimage` | Pendiente (Hito E.4) |
+| Empaquetado | `cargo-deb` / `cargo-rpm` vs `cargo-appimage` | Instalador nativo con scripts; sin paquetes `.deb`/`.rpm`/AppImage (Hito E.4) |
 
 ---
 
@@ -382,11 +374,11 @@ LICENSE                   ← Se mantiene
 | Hito 2 | Capa de dominio en Rust (db, library, metadata) | ✅ completado |
 | Hito 3 | Reproductor con `mpv` (proceso externo) | ✅ completado |
 | Hito 4 | UI completa (detalles, favoritos, visto, navegación) | ✅ completado |
-| Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ✅ completado |
+| Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ⚠️ sustituido por E.4 (instalador nativo sin paquetes) |
 | Hito 6 | Configuración YAML en el backend | ✅ completado |
-| Hito 7 | Internacionalización (i18n) de la UI | ✅ completado |
-| Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ✅ completado |
-| Hito 9 | Publicación automática en GitHub Releases | ✅ completado |
+| Hito 7 | Internacionalización (i18n) de la UI | ⚠️ parcial: selector de idioma persistido; faltan traducciones reales |
+| Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ⚠️ parcial: metadatos con TVmaze/AniList/Kitsu y registro en BD; falta la vista de historial |
+| Hito 9 | Publicación automática en GitHub Releases | ❌ cancelado: no hay releases automáticos |
 | **Hito E.1** | Prototipo mínimo GTK4 (ventana, lista, póster, búsqueda) | ✅ completado |
 | **Hito E.2** | UI completa GTK4 (detalles, favoritos, visto, navegación) | ✅ completado |
 | **Hito E.3** | Reproductor con `mpv` (proceso externo) en GTK4 | ✅ completado |
@@ -418,7 +410,7 @@ Objetivo: interfaz visual bonita con Libadwaita + CSS, renderizado de pósters d
 | Hito | Contenido | Estado |
 |------|-----------|--------|
 | **Hito G.1** | Infraestructura de datos masivos: tabla `media_streams`, índices, extracción con `ffprobe`, consultas paginadas | ✅ completado |
-| **Hito G.2** | Galería de pósters con caché local y descarga asíncrona desde TVmaze | ✅ completado |
+| **Hito G.2** | Galería de pósters con caché local y descarga asíncrona desde TVmaze | ⚠️ parcial: caché y descarga asíncrona sí; la galería usa `FlowBox` con límite de 500 y no está virtualizada |
 | **Hito G.3** | UI moderna con Libadwaita y CSS de GTK4 (`AdwStatusPage`, `AdwToast`, `AdwClamp`) | Pendiente |
 | **Hito G.4** | Selección de pistas audio / subtítulos y reproducción con `mpv` aplicando `--aid` / `--sid` | Pendiente |
 | **Hito G.5** | Pruebas de estrés con colección grande y ajuste de rendimiento | Pendiente |
@@ -427,7 +419,15 @@ Objetivo: interfaz visual bonita con Libadwaita + CSS, renderizado de pósters d
 
 ## 17. Próximo paso inmediato
 
-Crear la rama `feat/plan-ui-visual-pistas-escala-masiva` e iniciar el **Hito G.1** (infraestructura de datos masivos).
+Orden de trabajo vigente:
+
+1. ✅ Resolver **18.2** (hueco entre póster/banner y sinopsis en series con temporadas).
+2. ✅ Resolver **18.3** (póster principal y de temporada; evitar placeholders innecesarios).
+3. Completar **Hito G.3** (UI moderna con Libadwaita y CSS).
+4. Completar **Hito G.4** (selección de audio/subtítulos y `--aid`/`--sid` en `mpv`).
+5. Completar **Hito G.5** (pruebas de estrés y rendimiento).
+6. Revisar si la galería necesita virtualización real (`GtkListView`) según el criterio del Hito G.2.
+7. Completar la i18n real y la vista de historial de reproducción (Hitos 7 y 8).
 
 ---
 
@@ -484,6 +484,10 @@ Crear la rama `feat/plan-ui-visual-pistas-escala-masiva` e iniciar el **Hito G.1
 - Acortar o dar diseño diferente al área de sinopsis cuando la serie tiene temporadas anidadas
 - Opcional: Detectar automáticamente esta estructura y aplicar un layout compacto
 
+**Estado: implementado.** La vista de detalles se ancla en la parte superior (`valign = start`), de modo que el contenedor ya no se estira a todo el alto disponible ni reparte el espacio sobrante entre el banner y la sinopsis. Verificado con una serie de prueba con dos temporadas.
+
+**Criterio de aceptación:** al abrir una serie con temporadas, el banner mantiene una altura estable y la sinopsis y la lista de temporadas aparecen juntas, sin un hueco vertical desproporcionado.
+
 ### 18.3. Mostrado de pósters (principal y de temporada)
 
 **Problema detectado:**
@@ -497,11 +501,15 @@ Crear la rama `feat/plan-ui-visual-pistas-escala-masiva` e iniciar el **Hito G.1
 - **Póster de temporada:** Lo mismo para cada temporada individual - si tiene póster propio, mostrarlo; si no, no mostrar ninguno en lugar del placeholder por defecto.
 - Implementar validación en la consulta SQL o en el renderizado GTK4 para verificar `poster_path IS NOT NULL` antes de mostrar imagen placeholder.
 
+**Estado: implementado.** El póster del medio se muestra en la cabecera, junto a la sinopsis, solo si ya está en caché. Las temporadas muestran su póster cuando existe y no recurren a un placeholder si falta. La galería principal sigue mostrando el póster del medio padre.
+
+**Criterio de aceptación:** una serie con póster lo conserva al mostrar sus temporadas, y una temporada sin póster propio no muestra un placeholder engañoso.
+
 **Prioridad:** Alta - afecta la experiencia visual del usuario y la consistencia del UI.
 
 ---
 
-*Nota: Este apartado es urgente porque afecta la funcionalidad básica de agregar/quitar contenido y la apariencia visual. Se solicita priorizar en la siguiente iteración de sprints.*
+*Nota: este apartado era urgente porque afectaba a la funcionalidad básica de agregar/quitar contenido y a la apariencia visual. 18.1, 18.2 y 18.3 están implementados; el siguiente trabajo planificado es la Fase G (UI moderna, pistas y rendimiento).*
 
 ---
 

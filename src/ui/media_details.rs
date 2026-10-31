@@ -1,11 +1,21 @@
 //! Vista de detalles de un medio (con temporadas y episodios para series).
 
+use crate::core::poster_service::cached_path;
 use crate::db::media_repo::Media;
 use crate::db::{MediaRepository, close_db, open_db};
-use crate::ui::poster::Banner;
+use crate::ui::poster::{Banner, poster_picture};
+use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, Orientation};
 use std::rc::Rc;
+
+/// Tamaño del póster en la cabecera de la vista de detalles (proporción 2:3).
+const DETAIL_POSTER_WIDTH: i32 = 160;
+const DETAIL_POSTER_HEIGHT: i32 = 240;
+
+/// Tamaño del póster de una temporada en la lista de temporadas.
+const SEASON_POSTER_WIDTH: i32 = 56;
+const SEASON_POSTER_HEIGHT: i32 = 84;
 
 /// Destino del botón «Volver» desde la vista de detalles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +43,7 @@ pub struct MediaDetails {
     media_id: i64,
     parent_id: Option<i64>,
     banner: Banner,
+    poster_box: Box,
     synopsis_label: Label,
     favorite_button: Button,
     watched_button: Button,
@@ -55,13 +66,33 @@ impl MediaDetails {
         box_.set_margin_bottom(10);
         box_.set_margin_start(10);
         box_.set_margin_end(10);
+        // La vista vive dentro de un ScrolledWindow. Sin este anclaje, el
+        // GtkBox se estira a todo el alto disponible y el espacio sobrante
+        // aparece como un hueco enorme entre el banner y la sinopsis.
+        box_.set_valign(gtk4::Align::Start);
 
         let banner = Banner::new();
 
+        let poster_box = Box::new(Orientation::Vertical, 0);
+        poster_box.set_valign(gtk4::Align::Start);
+        poster_box.set_halign(gtk4::Align::Start);
+        poster_box.set_visible(false);
+
         let synopsis_label = Label::new(None);
         synopsis_label.set_halign(gtk4::Align::Start);
+        synopsis_label.set_valign(gtk4::Align::Start);
+        synopsis_label.set_xalign(0.0);
         synopsis_label.set_hexpand(true);
         synopsis_label.set_wrap(true);
+
+        // Cabecera: póster a la izquierda (solo si está en caché) y sinopsis
+        // a la derecha. Así el póster del medio sigue visible aunque se
+        // muestren temporadas.
+        let header_box = Box::new(Orientation::Horizontal, 16);
+        header_box.set_hexpand(true);
+        header_box.set_valign(gtk4::Align::Start);
+        header_box.append(&poster_box);
+        header_box.append(&synopsis_label);
 
         let favorite_button = Button::with_label("★ Favorito");
         favorite_button.set_halign(gtk4::Align::Start);
@@ -82,7 +113,7 @@ impl MediaDetails {
 
         box_.append(&back_button);
         box_.append(banner.widget());
-        box_.append(&synopsis_label);
+        box_.append(&header_box);
         box_.append(&content_container);
         box_.append(&favorite_button);
         box_.append(&watched_button);
@@ -94,6 +125,7 @@ impl MediaDetails {
             media_id,
             parent_id: None,
             banner,
+            poster_box,
             synopsis_label,
             favorite_button,
             watched_button,
@@ -159,6 +191,7 @@ impl MediaDetails {
         self.banner.set_info(&media.title, &info_label);
         self.banner
             .set_images(media.banner_path.as_deref(), media.poster_path.as_deref());
+        self.update_poster(media.poster_path.as_deref());
 
         let fav_label = if media.is_favorite {
             "★ Favorito (activo)"
@@ -186,6 +219,26 @@ impl MediaDetails {
             // Es una temporada, mostrar archivos directamente
             self.load_episodes(media.id);
         }
+    }
+
+    /// Muestra el póster del medio en la cabecera solo si ya está en caché.
+    /// Si falta, no se usa un placeholder: la sinopsis ocupa su lugar.
+    fn update_poster(&self, poster_url: Option<&str>) {
+        while let Some(child) = self.poster_box.first_child() {
+            self.poster_box.remove(&child);
+        }
+        self.poster_box.set_visible(false);
+
+        let Some(pixbuf) = poster_url.and_then(cached_path).and_then(|path| {
+            GtkPixbuf::from_file_at_scale(&path, DETAIL_POSTER_WIDTH, DETAIL_POSTER_HEIGHT, true)
+                .ok()
+        }) else {
+            return;
+        };
+
+        let picture = poster_picture(&pixbuf, DETAIL_POSTER_WIDTH, DETAIL_POSTER_HEIGHT);
+        self.poster_box.append(&picture);
+        self.poster_box.set_visible(true);
     }
 
     /// Carga y muestra las temporadas y episodios directos de una serie.
@@ -228,6 +281,29 @@ impl MediaDetails {
             for season in seasons.iter() {
                 let row = Box::new(Orientation::Horizontal, 10);
                 row.set_hexpand(true);
+
+                // Póster de temporada: solo si existe y ya está en caché.
+                // Si falta, no se muestra un placeholder engañoso.
+                if let Some(pixbuf) = season
+                    .poster_path
+                    .as_deref()
+                    .and_then(cached_path)
+                    .and_then(|path| {
+                        GtkPixbuf::from_file_at_scale(
+                            &path,
+                            SEASON_POSTER_WIDTH,
+                            SEASON_POSTER_HEIGHT,
+                            true,
+                        )
+                        .ok()
+                    })
+                {
+                    row.append(&poster_picture(
+                        &pixbuf,
+                        SEASON_POSTER_WIDTH,
+                        SEASON_POSTER_HEIGHT,
+                    ));
+                }
 
                 let season_label = Label::new(Some(&season.title));
                 season_label.set_halign(gtk4::Align::Start);
