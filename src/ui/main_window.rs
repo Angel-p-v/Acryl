@@ -295,10 +295,13 @@ impl MainWindow {
         this.borrow_mut()
             .clear_category_button
             .connect_clicked(move |_| {
-                let w = this_clear.borrow();
-                w.current_category.replace(None);
-                w.current_category_name.replace(None);
+                {
+                    let w = this_clear.borrow();
+                    w.current_category.replace(None);
+                    w.current_category_name.replace(None);
+                }
                 Self::load_media_by_category(&this_clear, None);
+                let w = this_clear.borrow();
                 w.stack.set_visible_child_name("list");
                 w.media_list.refresh();
             });
@@ -639,10 +642,13 @@ impl MainWindow {
         }
         let this_all = this.clone();
         all_button.connect_clicked(move |_| {
-            let w = this_all.borrow();
-            w.current_category.replace(None);
-            w.current_category_name.replace(None);
+            {
+                let w = this_all.borrow();
+                w.current_category.replace(None);
+                w.current_category_name.replace(None);
+            }
             Self::load_media_by_category(&this_all, None);
+            let w = this_all.borrow();
             w.stack.set_visible_child_name("list");
             w.media_list.refresh();
         });
@@ -660,10 +666,15 @@ impl MainWindow {
             let cat_id = category.id;
             let cat_name = category.name.clone();
             btn.connect_clicked(move |_| {
-                let w = this_cat.borrow();
-                w.current_category.replace(Some(cat_id));
-                w.current_category_name.replace(Some(cat_name.clone()));
+                // Primero actualizamos el estado y soltamos el borrow antes de
+                // llamar a load_media_by_category (que usa borrow_mut).
+                {
+                    let w = this_cat.borrow();
+                    w.current_category.replace(Some(cat_id));
+                    w.current_category_name.replace(Some(cat_name.clone()));
+                }
                 Self::load_media_by_category(&this_cat, Some(cat_id));
+                let w = this_cat.borrow();
                 w.stack.set_visible_child_name("list");
                 w.media_list.refresh();
             });

@@ -491,6 +491,12 @@ impl MediaDetails {
 
         let (season, files) = files;
 
+        // Limpiar el contenedor de contenido antes de mostrar los episodios de
+        // la nueva temporada, para evitar duplicados al cambiar de temporada.
+        while let Some(child) = self.content_container.first_child() {
+            self.content_container.remove(&child);
+        }
+
         if let Some(season) = season {
             let season_title = Label::new(Some(&season.title));
             season_title.set_halign(gtk4::Align::Start);
