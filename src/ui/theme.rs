@@ -276,11 +276,11 @@ pub fn install_theme_css() {
         ));
         css.push_str("@keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }\n");
         css.push_str(&format!(
-            ".skeleton-text {{ height: 1em; border-radius: {}; }}\n",
+            ".skeleton-text {{ min-height: 1em; border-radius: {}; }}\n",
             radius::SMALL,
         ));
         css.push_str(&format!(
-            ".skeleton-image {{ height: 100%; border-radius: {}; }}\n",
+            ".skeleton-image {{ border-radius: {}; }}\n",
             radius::MEDIUM,
         ));
 
