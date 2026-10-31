@@ -8,7 +8,7 @@ use crate::ui::media_list::MediaList;
 use crate::ui::search_bar::SearchBar;
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
-use gtk4::{Box, Button, Orientation, ScrolledWindow, Stack, glib};
+use gtk4::{Box, Button, Label, Orientation, ScrolledWindow, Stack, gio, glib};
 use libadwaita::ApplicationWindow as AdwApplicationWindow;
 use libadwaita::prelude::*;
 use std::cell::{Cell, RefCell};
@@ -24,6 +24,9 @@ pub struct MainWindow {
     media_list: MediaList,
     media_details: Rc<RefCell<MediaDetails>>,
     settings_view: SettingsView,
+    library_status: Label,
+    config: Rc<RefCell<crate::config::AppConfig>>,
+    media_count: usize,
     db_path: String,
     metadata_sync_running: Rc<Cell<bool>>,
 }
@@ -54,6 +57,12 @@ impl MainWindow {
         let search_bar = SearchBar::new(&db_path);
         top_bar.append(search_bar.widget());
 
+        // Indicador de carpetas indexadas y número de medios cargados.
+        let library_status = Label::new(None);
+        library_status.add_css_class("dim-label");
+        library_status.set_halign(gtk4::Align::End);
+        top_bar.append(&library_status);
+
         let settings_button = Button::with_label("⚙ Ajustes");
         settings_button.set_halign(gtk4::Align::End);
         settings_button.set_hexpand(false);
@@ -82,12 +91,13 @@ impl MainWindow {
         details_scrolled.set_child(Some(media_details.borrow().widget()));
         stack.add_titled(&details_scrolled, Some("details"), "Detalles");
 
-        let settings_view = SettingsView::new(config.inner(), &db_path);
+        let config_rc = Rc::new(RefCell::new(config.inner().clone()));
+
+        let settings_view =
+            SettingsView::new(config.inner(), &db_path, config_path.as_path(), &window);
         stack.add_titled(settings_view.widget(), Some("settings"), "Ajustes");
 
         stack.set_visible_child_name("list");
-
-        let config_rc = Rc::new(RefCell::new(config.inner().clone()));
 
         let this = Rc::new(RefCell::new(Self {
             window,
@@ -97,11 +107,14 @@ impl MainWindow {
             media_list,
             media_details,
             settings_view,
+            library_status,
+            config: config_rc.clone(),
+            media_count: 0,
             db_path: db_path.clone(),
             metadata_sync_running: Rc::new(Cell::new(false)),
         }));
 
-        this.borrow().window.show();
+        this.borrow().window.present();
 
         // Cargar medios iniciales (SQLite local, rápido).
         Self::load_media(&this, &db_path);
@@ -145,6 +158,23 @@ impl MainWindow {
             let _ = crate::core::library::cleanup_media_not_in_folders(&db_path_save, &folders);
         });
 
+        // Callback: cambios inmediatos de carpetas (ya persistidos por la vista).
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .settings_view
+            .on_config_changed(move |new_config| {
+                let w = this_clone.borrow();
+                *w.config.borrow_mut() = new_config;
+                Self::update_library_status(&w);
+            });
+
+        // Callback: la indexación terminó -> recargar la galería.
+        let this_clone = this.clone();
+        this.borrow_mut().settings_view.on_library_changed(move || {
+            let db_path = this_clone.borrow().db_path.clone();
+            Self::load_media(&this_clone, &db_path);
+        });
+
         // Conectar botón Volver de ajustes -> vuelve a la lista.
         let this_clone = this.clone();
         this.borrow_mut()
@@ -184,7 +214,13 @@ impl MainWindow {
             .media_details
             .borrow_mut()
             .on_back(move || {
+                let parent_id = this_clone.borrow().media_details.borrow().parent_id();
                 let w = this_clone.borrow();
+                if let Some(parent_id) = parent_id
+                    && w.show_details(parent_id)
+                {
+                    return;
+                }
                 w.show_list();
             });
 
@@ -265,16 +301,41 @@ impl MainWindow {
 
         println!("Medios cargados desde la BD: {}", media.len());
 
+        let media_count = media.len();
         let mut w = this.borrow_mut();
+        w.media_count = media_count;
         w.media_list.set_media(media);
+        Self::update_library_status(&w);
     }
 
-    fn show_details(&self, media_id: i64) {
+    /// Actualiza el indicador de carpetas y medios de la barra superior.
+    fn update_library_status(w: &MainWindow) {
+        let config = w.config.borrow();
+        let folder_count = config.media_folders.len();
+
+        let text = match folder_count {
+            0 => "Sin carpetas indexadas".to_string(),
+            1 => format!("{} medios · 1 carpeta", w.media_count),
+            total => format!("{} medios · {} carpetas", w.media_count, total),
+        };
+        w.library_status.set_label(&text);
+
+        let tooltip = if config.media_folders.is_empty() {
+            None
+        } else {
+            Some(config.media_folders.join("\n"))
+        };
+        w.library_status.set_tooltip_text(tooltip.as_deref());
+    }
+
+    /// Muestra los detalles de un medio. Devuelve `false` si el medio no
+    /// existe, para que la navegación pueda volver a la lista.
+    fn show_details(&self, media_id: i64) -> bool {
         let mut conn = match open_db(&self.db_path) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Error abriendo BD: {}", e);
-                return;
+                return false;
             }
         };
         let mut repo = MediaRepository::new(&mut conn);
@@ -284,6 +345,9 @@ impl MainWindow {
         if let Some(media) = media {
             self.media_details.borrow_mut().set_media(&media);
             self.stack.set_visible_child_name("details");
+            true
+        } else {
+            false
         }
     }
 
@@ -417,25 +481,24 @@ impl MainWindow {
             return;
         }
 
-        let dialog = gtk4::MessageDialog::builder()
-            .transient_for(&this.borrow().window)
+        let dialog = gtk4::AlertDialog::builder()
             .modal(true)
-            .message_type(gtk4::MessageType::Question)
-            .buttons(gtk4::ButtonsType::YesNo)
-            .text("¿Actualizar todos los metadatos?")
-            .secondary_text(
+            .message("¿Actualizar todos los metadatos?")
+            .detail(
                 "Se consultará TVmaze (y AniList para anime) y se sobrescribirán el título, el año, la sinopsis, el póster y el banner de todos los medios indexados. Esta acción no se puede deshacer.",
             )
+            .buttons(["Cancelar", "Actualizar"])
+            .cancel_button(0)
+            .default_button(0)
             .build();
 
         let this = this.clone();
-        dialog.connect_response(move |dialog, response| {
-            dialog.close();
-            if response == gtk4::ResponseType::Yes {
+        let window = this.borrow().window.clone();
+        dialog.choose(Some(&window), None::<&gio::Cancellable>, move |response| {
+            if matches!(response, Ok(1)) {
                 Self::start_metadata_refresh(&this);
             }
         });
-        dialog.present();
     }
 
     /// Fuerza la actualización de metadatos en segundo plano y muestra el
@@ -524,14 +587,12 @@ impl MainWindow {
     }
 
     fn show_error(&self, message: &str, detail: &str) {
-        let dialog = gtk4::MessageDialog::builder()
-            .transient_for(&self.window)
+        gtk4::AlertDialog::builder()
             .modal(true)
-            .message_type(gtk4::MessageType::Error)
-            .text(message)
-            .secondary_text(detail)
-            .build();
-        dialog.present();
+            .message(message)
+            .detail(detail)
+            .build()
+            .show(Some(&self.window));
     }
 
     pub fn widget(&self) -> &AdwApplicationWindow {

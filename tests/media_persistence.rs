@@ -538,6 +538,73 @@ fn update_metadata_actualiza_anio_poster_y_sinopsis() {
 }
 
 #[test]
+fn reindexar_conserva_metadatos_sincronizados() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let media_id = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "series".to_string(),
+            title: "nombre de carpeta".to_string(),
+            sort_title: "nombre de carpeta".to_string(),
+            year: None,
+            folder_path: "/media/serie".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert inicial")
+        .id
+    };
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.overwrite_metadata(
+            media_id,
+            &MediaMetadataInput {
+                title: "Título Sincronizado",
+                sort_title: "titulo sincronizado",
+                year: Some(2024),
+                poster_path: Some("https://example.com/poster.jpg"),
+                banner_path: Some("https://example.com/banner.jpg"),
+                synopsis: Some("Sinopsis sincronizada"),
+            },
+        )
+        .expect("sincronizar metadatos");
+    }
+
+    // Reindexar vuelve a llamar a `upsert` con los datos derivados de la carpeta.
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "series".to_string(),
+            title: "nombre de carpeta".to_string(),
+            sort_title: "nombre de carpeta".to_string(),
+            year: None,
+            folder_path: "/media/serie".to_string(),
+            parent_id: None,
+        })
+        .expect("reindexar");
+    }
+
+    let media = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.find_by_id(media_id)
+            .expect("buscar media")
+            .expect("media existente")
+    };
+
+    assert_eq!(media.title, "Título Sincronizado");
+    assert_eq!(media.sort_title, "titulo sincronizado");
+    assert_eq!(media.year, Some(2024));
+    assert_eq!(media.synopsis.as_deref(), Some("Sinopsis sincronizada"));
+    assert_eq!(
+        media.poster_path.as_deref(),
+        Some("https://example.com/poster.jpg")
+    );
+    assert!(media.metadata_fetched_at.is_some());
+}
+
+#[test]
 fn update_metadata_conserva_el_banner_si_no_se_recibe_uno_nuevo() {
     let (db_path, _dir) = temp_db();
     let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");

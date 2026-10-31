@@ -1,41 +1,392 @@
 //! Vista de ajustes integrada en el Stack de la aplicación principal.
 
 use crate::config::AppConfig;
-use crate::core::library::LibraryService;
+use crate::core::library::{IndexResult, LibraryService};
 use gtk4::prelude::*;
-use gtk4::{Box, Button, ComboBoxText, Entry, Label, Orientation, ScrolledWindow, Spinner};
-use std::cell::RefCell;
-use std::path::PathBuf;
-use std::process::Command;
+use gtk4::{Box, Button, DropDown, Entry, Label, Orientation, ScrolledWindow, Spinner, gio, glib};
+use std::cell::{Cell, RefCell};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::mpsc::{self, TryRecvError};
+use std::time::Duration;
 
-/// Normaliza una ruta de carpeta asegurando que termine con "/"
-fn normalize_folder_path(path: &str) -> String {
-    let mut s = path.trim().to_string();
-    if !s.ends_with('/') && PathBuf::from(&s).is_dir() {
-        s.push('/');
+/// Normaliza una ruta de carpeta: la convierte en absoluta, resuelve enlaces
+/// simbólicos y elimina el separador final. Devuelve `None` si no es un
+/// directorio accesible.
+fn normalize_folder_path(path: &str) -> Option<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return None;
     }
-    s
+
+    let path = PathBuf::from(trimmed);
+    let absolute = if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+
+    let canonical = std::fs::canonicalize(absolute).ok()?;
+    if !canonical.is_dir() {
+        return None;
+    }
+
+    let mut normalized = canonical.to_string_lossy().to_string();
+    if normalized.len() > 1 {
+        normalized = normalized.trim_end_matches('/').to_string();
+    }
+    Some(normalized)
+}
+
+/// Resumen de una operación de indexado en segundo plano.
+struct IndexSummary {
+    total_folders: usize,
+    indexed_folders: usize,
+    media_added: i64,
+    files_added: i64,
+    errors: Vec<String>,
+}
+
+/// Callback invocado cuando cambia la configuración de carpetas.
+type ConfigCallback = Rc<dyn Fn(AppConfig)>;
+
+/// Callback invocado cuando la biblioteca indexada cambia.
+type LibraryCallback = Rc<dyn Fn()>;
+
+/// Gestión de carpetas compartida por los controles de la vista de ajustes.
+///
+/// Se clona para pasarla a los callbacks de GTK; todos sus campos son clones
+/// baratos de widgets o `Rc`.
+#[derive(Clone)]
+struct FolderManager {
+    config: Rc<RefCell<AppConfig>>,
+    config_path: PathBuf,
+    db_path: String,
+    window: gtk4::Window,
+    folders_list: Box,
+    indexing: Rc<Cell<bool>>,
+    add_button: Button,
+    browse_button: Button,
+    reindex_button: Button,
+    index_spinner: Spinner,
+    index_status: Label,
+    on_config_changed: Rc<RefCell<Option<ConfigCallback>>>,
+    on_library_changed: Rc<RefCell<Option<LibraryCallback>>>,
+}
+
+impl FolderManager {
+    fn append_folder_row(&self, folder: &str) {
+        let row = Box::new(Orientation::Horizontal, 5);
+        row.set_hexpand(true);
+
+        let label = Label::new(Some(folder));
+        label.set_hexpand(true);
+        label.set_halign(gtk4::Align::Start);
+        row.append(&label);
+
+        let remove_button = Button::with_label("Eliminar");
+        row.append(&remove_button);
+
+        let manager = self.clone();
+        let folder = folder.to_string();
+        let row_clone = row.clone();
+        remove_button.connect_clicked(move |_| {
+            manager.remove_folder(&folder, &row_clone);
+        });
+
+        self.folders_list.append(&row);
+    }
+
+    /// Añade una carpeta a la configuración, la guarda y lanza el indexado.
+    /// Devuelve `true` si la carpeta se añadió correctamente.
+    fn add_folder(&self, input: &str) -> bool {
+        if self.indexing.get() {
+            self.set_status("Espera a que termine la indexación en curso.");
+            return false;
+        }
+
+        let Some(path) = normalize_folder_path(input) else {
+            self.show_error(
+                "Ruta no válida",
+                "Selecciona una carpeta existente y accesible.",
+            );
+            self.set_status("La ruta indicada no es una carpeta válida.");
+            return false;
+        };
+
+        let path_buf = PathBuf::from(&path);
+        {
+            let mut config = self.config.borrow_mut();
+            if config
+                .media_folders
+                .iter()
+                .any(|folder| Path::new(folder) == path_buf)
+            {
+                drop(config);
+                self.set_status("Esa carpeta ya está en la lista.");
+                return false;
+            }
+            config.media_folders.push(path.clone());
+        }
+
+        if let Err(error) = self.persist_config() {
+            self.config
+                .borrow_mut()
+                .media_folders
+                .retain(|folder| folder != &path);
+            self.show_error("No se pudo guardar la configuración", &error.to_string());
+            return false;
+        }
+
+        self.append_folder_row(&path);
+        self.notify_config_changed();
+        self.start_indexing(vec![path], "Indexando la carpeta añadida...");
+        true
+    }
+
+    /// Pide confirmación y elimina la carpeta de la configuración y de la BD.
+    fn remove_folder(&self, folder: &str, row: &Box) {
+        if self.indexing.get() {
+            self.set_status("Espera a que termine la indexación antes de eliminar carpetas.");
+            return;
+        }
+
+        let dialog = gtk4::AlertDialog::builder()
+            .modal(true)
+            .message(format!("¿Eliminar la carpeta «{}»?", folder))
+            .detail(
+                "Se eliminarán de la biblioteca todos los medios indexados de esta carpeta. \
+                 Los archivos de vídeo de tu disco no se borrarán.",
+            )
+            .buttons(["Cancelar", "Eliminar"])
+            .cancel_button(0)
+            .default_button(0)
+            .build();
+
+        let manager = self.clone();
+        let folder = folder.to_string();
+        let row = row.clone();
+        dialog.choose(
+            Some(&self.window),
+            None::<&gio::Cancellable>,
+            move |response| {
+                if matches!(response, Ok(1)) {
+                    manager.apply_remove_folder(&folder, &row);
+                }
+            },
+        );
+    }
+
+    fn apply_remove_folder(&self, folder: &str, row: &Box) {
+        let deleted = match crate::core::library::remove_folder(&self.db_path, folder) {
+            Ok(deleted) => deleted,
+            Err(error) => {
+                self.show_error(
+                    "No se pudo eliminar la carpeta",
+                    &format!("{}: {}", folder, error),
+                );
+                return;
+            }
+        };
+
+        {
+            let mut config = self.config.borrow_mut();
+            config.media_folders.retain(|item| item != folder);
+        }
+
+        if let Err(error) = self.persist_config() {
+            self.config
+                .borrow_mut()
+                .media_folders
+                .push(folder.to_string());
+            self.show_error("No se pudo guardar la configuración", &error.to_string());
+            return;
+        }
+
+        self.folders_list.remove(row);
+        self.set_status(&format!(
+            "Carpeta eliminada: {} medios retirados de la biblioteca.",
+            deleted
+        ));
+        self.notify_config_changed();
+        self.notify_library_changed();
+    }
+
+    fn reindex_all(&self) {
+        if self.indexing.get() {
+            self.set_status("Ya hay una indexación en curso.");
+            return;
+        }
+
+        let folders = self.config.borrow().media_folders.clone();
+        if folders.is_empty() {
+            self.set_status("Añade al menos una carpeta para poder reindexar.");
+            return;
+        }
+
+        self.start_indexing(folders, "Reindexando todas las carpetas...");
+    }
+
+    fn start_indexing(&self, folders: Vec<String>, message: &str) {
+        if self.indexing.get() {
+            self.set_status("Ya hay una indexación en curso.");
+            return;
+        }
+
+        self.indexing.set(true);
+        self.set_buttons_sensitive(false);
+        self.index_spinner.set_spinning(true);
+        self.index_spinner.set_visible(true);
+        self.set_status(message);
+
+        let total_folders = folders.len();
+        let db_path = self.db_path.clone();
+        let (sender, receiver) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            let mut summary = IndexSummary {
+                total_folders,
+                indexed_folders: 0,
+                media_added: 0,
+                files_added: 0,
+                errors: Vec::new(),
+            };
+
+            for folder in &folders {
+                match LibraryService::index_folder(&db_path, folder) {
+                    Ok(IndexResult {
+                        media_added,
+                        files_added,
+                        ..
+                    }) => {
+                        summary.indexed_folders += 1;
+                        summary.media_added += media_added;
+                        summary.files_added += files_added;
+                    }
+                    Err(error) => summary.errors.push(format!("{}: {}", folder, error)),
+                }
+            }
+
+            let _ = sender.send(summary);
+        });
+
+        let manager = self.clone();
+        glib::timeout_add_local(Duration::from_millis(200), move || {
+            match receiver.try_recv() {
+                Ok(summary) => {
+                    manager.finish_indexing(summary);
+                    glib::ControlFlow::Break
+                }
+                Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(TryRecvError::Disconnected) => {
+                    manager.finish_indexing_error();
+                    glib::ControlFlow::Break
+                }
+            }
+        });
+    }
+
+    fn finish_indexing(&self, summary: IndexSummary) {
+        self.indexing.set(false);
+        self.index_spinner.set_spinning(false);
+        self.index_spinner.set_visible(false);
+        self.set_buttons_sensitive(true);
+
+        let mut message = format!(
+            "Indexación completada: {} medios y {} archivos en {} de {} carpetas.",
+            summary.media_added,
+            summary.files_added,
+            summary.indexed_folders,
+            summary.total_folders
+        );
+        if !summary.errors.is_empty() {
+            message.push_str(&format!(" {} carpetas fallaron.", summary.errors.len()));
+        }
+        self.set_status(&message);
+
+        if !summary.errors.is_empty() {
+            self.show_error(
+                "Algunas carpetas no se pudieron indexar",
+                &summary.errors.join("\n"),
+            );
+        }
+
+        self.notify_library_changed();
+    }
+
+    fn finish_indexing_error(&self) {
+        self.indexing.set(false);
+        self.index_spinner.set_spinning(false);
+        self.index_spinner.set_visible(false);
+        self.set_buttons_sensitive(true);
+        self.set_status("La indexación se interrumpió inesperadamente.");
+    }
+
+    fn set_buttons_sensitive(&self, sensitive: bool) {
+        self.add_button.set_sensitive(sensitive);
+        self.browse_button.set_sensitive(sensitive);
+        self.reindex_button.set_sensitive(sensitive);
+    }
+
+    fn set_status(&self, message: &str) {
+        self.index_status.set_label(message);
+        self.index_status.set_visible(!message.is_empty());
+    }
+
+    fn persist_config(&self) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
+        crate::config::Config {
+            path: self.config_path.clone(),
+            inner: self.config.borrow().clone(),
+        }
+        .save()
+    }
+
+    fn notify_config_changed(&self) {
+        let config = self.config.borrow().clone();
+        if let Some(callback) = self.on_config_changed.borrow().as_ref() {
+            callback(config);
+        }
+    }
+
+    fn notify_library_changed(&self) {
+        if let Some(callback) = self.on_library_changed.borrow().as_ref() {
+            callback();
+        }
+    }
+
+    fn show_error(&self, message: &str, detail: &str) {
+        gtk4::AlertDialog::builder()
+            .modal(true)
+            .message(message)
+            .detail(detail)
+            .build()
+            .show(Some(&self.window));
+    }
 }
 
 /// Vista de ajustes integrada (se muestra dentro del Stack de MainWindow).
 pub struct SettingsView {
     content: Box,
-    folders_list: Box,
-    language_combo: ComboBoxText,
+    language_combo: DropDown,
     save_button: Button,
     cancel_button: Button,
     metadata_button: Button,
     metadata_spinner: Spinner,
     metadata_status: Label,
     config: Rc<RefCell<AppConfig>>,
+    folder_manager: FolderManager,
     on_save: Option<Rc<dyn Fn(AppConfig)>>,
     on_refresh_metadata: Option<Rc<dyn Fn()>>,
 }
 
 impl SettingsView {
     /// Crea una nueva vista de ajustes.
-    pub fn new(config: &AppConfig, db_path: &str) -> Self {
+    pub fn new<P: IsA<gtk4::Window>>(
+        config: &AppConfig,
+        db_path: &str,
+        config_path: &Path,
+        parent: &P,
+    ) -> Self {
         let content = Box::new(Orientation::Vertical, 10);
         content.set_margin_top(20);
         content.set_margin_bottom(20);
@@ -59,7 +410,8 @@ impl SettingsView {
         folders_section.append(&folders_title);
 
         let folders_label = Label::new(Some(
-            "Carpetas donde se indexan los archivos multimedia:\nEscribe o pega la ruta y pulsa Agregar o Enter.",
+            "Carpetas donde se indexan los archivos multimedia:\n\
+             Elige una carpeta y pulsa Agregar o Enter. Se indexará en segundo plano.",
         ));
         folders_label.set_halign(gtk4::Align::Start);
         folders_label.set_wrap(true);
@@ -92,6 +444,26 @@ impl SettingsView {
         add_box.append(&add_button);
         folders_section.append(&add_box);
 
+        let reindex_box = Box::new(Orientation::Horizontal, 10);
+        reindex_box.set_hexpand(true);
+
+        let reindex_button = Button::with_label("Reindexar todas las carpetas");
+        reindex_button.set_halign(gtk4::Align::Start);
+        reindex_box.append(&reindex_button);
+
+        let index_spinner = Spinner::new();
+        index_spinner.set_visible(false);
+        index_spinner.set_valign(gtk4::Align::Center);
+        reindex_box.append(&index_spinner);
+        folders_section.append(&reindex_box);
+
+        let index_status = Label::new(None);
+        index_status.set_halign(gtk4::Align::Start);
+        index_status.set_wrap(true);
+        index_status.set_visible(false);
+        index_status.add_css_class("dim-label");
+        folders_section.append(&index_status);
+
         // --- Sección: Idioma ---
         let language_section = Box::new(Orientation::Vertical, 10);
         language_section.set_hexpand(true);
@@ -101,14 +473,8 @@ impl SettingsView {
         language_title.add_css_class("subheading");
         language_section.append(&language_title);
 
-        let language_combo = ComboBoxText::new();
-        language_combo.append_text("Español");
-        language_combo.append_text("Inglés");
-        language_combo.set_active(if config.language == "es" {
-            Some(0)
-        } else {
-            Some(1)
-        });
+        let language_combo = DropDown::from_strings(&["Español", "Inglés"]);
+        language_combo.set_selected(if config.language == "es" { 0 } else { 1 });
         language_section.append(&language_combo);
 
         // --- Sección: Metadatos ---
@@ -121,7 +487,8 @@ impl SettingsView {
         metadata_section.append(&metadata_title);
 
         let metadata_label = Label::new(Some(
-            "Vuelve a consultar TVmaze (y AniList para anime) y sobrescribe el título, el año, la sinopsis, el póster y el banner de todos los medios indexados.",
+            "Vuelve a consultar TVmaze (y AniList para anime) y sobrescribe el título, el año, \
+             la sinopsis, el póster y el banner de todos los medios indexados.",
         ));
         metadata_label.set_halign(gtk4::Align::Start);
         metadata_label.set_wrap(true);
@@ -166,146 +533,92 @@ impl SettingsView {
 
         content.append(&button_box);
 
+        let config_rc = Rc::new(RefCell::new(config.clone()));
+        let window = parent.upcast_ref::<gtk4::Window>().clone();
+
+        let folder_manager = FolderManager {
+            config: config_rc.clone(),
+            config_path: config_path.to_path_buf(),
+            db_path: db_path.to_string(),
+            window,
+            folders_list,
+            indexing: Rc::new(Cell::new(false)),
+            add_button: add_button.clone(),
+            browse_button: browse_button.clone(),
+            reindex_button: reindex_button.clone(),
+            index_spinner: index_spinner.clone(),
+            index_status: index_status.clone(),
+            on_config_changed: Rc::new(RefCell::new(None)),
+            on_library_changed: Rc::new(RefCell::new(None)),
+        };
+
         // Cargar carpetas existentes.
-        let config_clone = Rc::new(RefCell::new(config.clone()));
         for folder in &config.media_folders {
-            Self::add_folder_row(&folders_list, folder, &config_clone);
+            folder_manager.append_folder_row(folder);
         }
 
-        let db_path_owned = db_path.to_string();
-
         // Agregar carpeta al hacer clic en el botón.
-        let config_add_click = config_clone.clone();
-        let folders_list_add_click = folders_list.clone();
-        let db_path_add_click = db_path_owned.clone();
-        let folder_entry_click = folder_entry.clone();
+        let manager_click = folder_manager.clone();
+        let entry_click = folder_entry.clone();
         add_button.connect_clicked(move |_| {
-            let path = folder_entry_click.text().to_string();
-            if path.is_empty() {
-                return;
-            }
-            let path_str = normalize_folder_path(&path);
-            if !std::path::Path::new(&path_str).exists() {
-                eprintln!("La carpeta no existe: {}", path_str);
-                return;
-            }
-            let mut cfg = config_add_click.borrow_mut();
-            if !cfg.media_folders.contains(&path_str) {
-                cfg.media_folders.push(path_str.clone());
-            }
-            drop(cfg);
-            Self::add_folder_row(&folders_list_add_click, &path_str, &config_add_click);
-            let _ = LibraryService::index_folder(&db_path_add_click, &path_str);
-            folder_entry_click.set_text("");
-        });
-
-        // Botón Examinar: abre el explorador de archivos para seleccionar carpeta.
-        let folder_entry_browse = folder_entry.clone();
-        browse_button.connect_clicked(move |_| {
-            let folder_entry_browse_inner = folder_entry_browse.clone();
-
-            // Intentar con zenity (GNOME)
-            let output = Command::new("zenity")
-                .args([
-                    "--file-selection",
-                    "--directory",
-                    "--title=Seleccionar carpeta de medios",
-                ])
-                .output();
-
-            if let Ok(output) = output
-                && output.status.success()
-            {
-                let path_str =
-                    normalize_folder_path(String::from_utf8_lossy(&output.stdout).trim());
-                if !path_str.is_empty() {
-                    folder_entry_browse_inner.set_text(&path_str);
-                    return;
-                }
-            }
-
-            // Intentar con kdialog (KDE)
-            let output = Command::new("kdialog")
-                .args(["--getdirectory", "/home", "Seleccionar carpeta de medios"])
-                .output();
-
-            if let Ok(output) = output
-                && output.status.success()
-            {
-                let path_str =
-                    normalize_folder_path(String::from_utf8_lossy(&output.stdout).trim());
-                if !path_str.is_empty() {
-                    folder_entry_browse_inner.set_text(&path_str);
-                }
+            if manager_click.add_folder(&entry_click.text()) {
+                entry_click.set_text("");
             }
         });
 
         // Agregar carpeta al pulsar Enter.
-        let config_add_enter = config_clone.clone();
-        let folders_list_add_enter = folders_list.clone();
-        let db_path_add_enter = db_path_owned.clone();
-        let folder_entry_enter_signal = folder_entry.clone();
-        let folder_entry_enter_closure = folder_entry.clone();
-        folder_entry_enter_signal.connect_activate(move |_| {
-            let entry = folder_entry_enter_closure.clone();
-            let path = entry.text().to_string();
-            if path.is_empty() {
-                return;
+        let manager_enter = folder_manager.clone();
+        let entry_enter = folder_entry.clone();
+        folder_entry.connect_activate(move |_| {
+            if manager_enter.add_folder(&entry_enter.text()) {
+                entry_enter.set_text("");
             }
-            let path_str = normalize_folder_path(&path);
-            if !std::path::Path::new(&path_str).exists() {
-                eprintln!("La carpeta no existe: {}", path_str);
-                return;
-            }
-            let mut cfg = config_add_enter.borrow_mut();
-            if !cfg.media_folders.contains(&path_str) {
-                cfg.media_folders.push(path_str.clone());
-            }
-            drop(cfg);
-            Self::add_folder_row(&folders_list_add_enter, &path_str, &config_add_enter);
-            let _ = LibraryService::index_folder(&db_path_add_enter, &path_str);
-            entry.set_text("");
+        });
+
+        // Botón Examinar: selector nativo de carpetas de GTK4.
+        let entry_browse = folder_entry.clone();
+        let window_browse = parent.upcast_ref::<gtk4::Window>().clone();
+        browse_button.connect_clicked(move |_| {
+            let dialog = gtk4::FileDialog::new();
+            dialog.set_title("Seleccionar carpeta de medios");
+            let entry = entry_browse.clone();
+            dialog.select_folder(
+                Some(&window_browse),
+                None::<&gio::Cancellable>,
+                move |result| match result {
+                    Ok(file) => {
+                        if let Some(path) = file.path() {
+                            entry.set_text(&path.to_string_lossy());
+                        }
+                    }
+                    Err(error) => {
+                        if !error.matches(gio::IOErrorEnum::Cancelled) {
+                            eprintln!("No se pudo seleccionar la carpeta: {}", error);
+                        }
+                    }
+                },
+            );
+        });
+
+        // Reindexar todas las carpetas configuradas.
+        let manager_reindex = folder_manager.clone();
+        reindex_button.connect_clicked(move |_| {
+            manager_reindex.reindex_all();
         });
 
         Self {
             content,
-            folders_list,
             language_combo,
             save_button,
             cancel_button,
             metadata_button,
             metadata_spinner,
             metadata_status,
-            config: config_clone,
+            config: config_rc,
+            folder_manager,
             on_save: None,
             on_refresh_metadata: None,
         }
-    }
-
-    /// Añade una fila para una carpeta de medios en la lista.
-    fn add_folder_row(folders_list: &Box, folder: &str, config: &Rc<RefCell<AppConfig>>) {
-        let row = Box::new(Orientation::Horizontal, 5);
-        row.set_hexpand(true);
-
-        let label = Label::new(Some(folder));
-        label.set_hexpand(true);
-        row.append(&label);
-
-        let remove_button = Button::with_label("Eliminar");
-        row.append(&remove_button);
-
-        let config_clone = config.clone();
-        let folder_clone = folder.to_string();
-        let row_clone = row.clone();
-        let folders_list_clone = folders_list.clone();
-        remove_button.connect_clicked(move |_| {
-            let mut cfg = config_clone.borrow_mut();
-            cfg.media_folders.retain(|f| f != &folder_clone);
-            drop(cfg);
-            folders_list_clone.remove(&row_clone);
-        });
-
-        folders_list.append(&row);
     }
 
     /// Devuelve el widget Gtk.
@@ -321,45 +634,39 @@ impl SettingsView {
         self.on_save = Some(Rc::new(f));
 
         let config = self.config.clone();
-        let folders_list = self.folders_list.clone();
         let language_combo = self.language_combo.clone();
         let on_save = self.on_save.clone();
 
         self.save_button.connect_clicked(move |_| {
-            let mut cfg = config.borrow_mut();
-
-            // Recopilar carpetas de la lista visual.
-            let mut new_folders = Vec::new();
-            if let Some(child) = folders_list.first_child() {
-                let mut current = child.clone();
-                loop {
-                    if let Some(child_widget) = current.first_child()
-                        && let Ok(label) = child_widget.downcast::<Label>()
-                    {
-                        let text = label.text();
-                        new_folders.push(text.to_string());
-                    }
-                    match current.next_sibling() {
-                        Some(sibling) => current = sibling,
-                        None => break,
-                    }
-                }
+            {
+                let mut config = config.borrow_mut();
+                config.language = if language_combo.selected() == 0 {
+                    "es".to_string()
+                } else {
+                    "en".to_string()
+                };
             }
-            cfg.media_folders = new_folders;
 
-            // Idioma.
-            cfg.language = if language_combo.active() == Some(0) {
-                "es".to_string()
-            } else {
-                "en".to_string()
-            };
-
-            drop(cfg);
-
-            if let Some(cb) = &on_save {
-                cb(config.borrow().clone());
+            if let Some(callback) = &on_save {
+                callback(config.borrow().clone());
             }
         });
+    }
+
+    /// Notifica cambios inmediatos en las carpetas (ya persistidos).
+    pub fn on_config_changed<F>(&mut self, f: F)
+    where
+        F: Fn(AppConfig) + 'static,
+    {
+        *self.folder_manager.on_config_changed.borrow_mut() = Some(Rc::new(f));
+    }
+
+    /// Notifica que la biblioteca ha cambiado y la lista debe recargarse.
+    pub fn on_library_changed<F>(&mut self, f: F)
+    where
+        F: Fn() + 'static,
+    {
+        *self.folder_manager.on_library_changed.borrow_mut() = Some(Rc::new(f));
     }
 
     /// Establece el callback del botón de actualización de metadatos.
@@ -401,6 +708,6 @@ impl SettingsView {
 
 impl Default for SettingsView {
     fn default() -> Self {
-        unimplemented!("SettingsView requires config and db_path")
+        unimplemented!("SettingsView requires config, db_path, config_path and parent")
     }
 }
