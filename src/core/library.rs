@@ -204,8 +204,7 @@ impl LibraryService {
             // hijos directos de la serie, extrayendo el número de temporada
             // del nombre de la carpeta cuando sea posible.
             let season_number = extract_season_number_from_folder(
-                &dir
-                    .file_name()
+                &dir.file_name()
                     .map(|name| name.to_string_lossy().to_string())
                     .unwrap_or_default(),
             );
@@ -859,10 +858,7 @@ fn extract_season_number_from_folder(name: &str) -> Option<i32> {
         }
         let after = &lowered[index + 1..];
         let after = after.trim_start_matches(is_season_separator);
-        let digits = after
-            .chars()
-            .take_while(|c| c.is_ascii_digit())
-            .count();
+        let digits = after.chars().take_while(|c| c.is_ascii_digit()).count();
         if digits == 0 || digits > 3 {
             continue;
         }
@@ -879,17 +875,12 @@ fn extract_season_number_from_folder(name: &str) -> Option<i32> {
     // Buscar patrón "season 1", "temporada 2", "temp 3".
     for keyword in ["season", "temporada", "temp"] {
         if let Some(pos) = lowered.find(keyword) {
-            if pos > 0
-                && !is_season_separator(lowered[..pos].chars().next_back().unwrap_or(' '))
-            {
+            if pos > 0 && !is_season_separator(lowered[..pos].chars().next_back().unwrap_or(' ')) {
                 continue;
             }
             let after = &lowered[pos + keyword.len()..];
             let after = after.trim_start_matches(is_season_separator);
-            let digits = after
-                .chars()
-                .take_while(|c| c.is_ascii_digit())
-                .count();
+            let digits = after.chars().take_while(|c| c.is_ascii_digit()).count();
             if digits == 0 || digits > 3 {
                 continue;
             }
@@ -2198,10 +2189,7 @@ mod tests {
             super::extract_series_title_from_season_folder("Serie Nombre Temporada 2"),
             Some("serie nombre".to_string())
         );
-        assert_eq!(
-            super::extract_series_title_from_season_folder("S01"),
-            None
-        );
+        assert_eq!(super::extract_series_title_from_season_folder("S01"), None);
     }
 
     #[test]
@@ -2244,5 +2232,4 @@ mod tests {
         assert_eq!(episodes[0].season, Some(1));
         assert_eq!(episodes[1].season, Some(1));
     }
-
 }
