@@ -1,316 +1,704 @@
 //! Capa de dominio: servicios de negocio.
+//!
+//! El indexador recorre la carpeta raíz configurada y aplica estas reglas:
+//! - Los vídeos sueltos de la raíz se indexan como películas.
+//! - Las subcarpetas se indexan como series (o anime si la ruta contiene un
+//!   componente `Anime`/`Animes`).
+//! - Una carpeta con un único vídeo cuyo nombre no parece un episodio se
+//!   indexa como película.
+//! - Las carpetas que solo contienen otras carpetas (por ejemplo `Peliculas/`
+//!   o `Series/`) actúan como contenedores y se recorren sin crear un medio.
+//! - Las subcarpetas con nombre de temporada (`Season 1`, `Temporada 2`,
+//!   `S01`, ...) se indexan como temporadas de la serie contenedora.
 
+use crate::db::file_repo::{FileRepository, MediaFileInput};
 use crate::db::media_repo::{MediaInput, NewMediaStream};
 use crate::db::{MediaRepository, close_db, open_db};
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// Extensiones de vídeo que se indexan.
+const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mkv", "avi", "webm", "mov", "flv", "wmv"];
+
+/// Profundidad máxima al recorrer carpetas contenedoras. Evita recorrer
+/// árboles sin fin o enlazados y cubre `raíz/categoría/título/temporada`.
+const MAX_SCAN_DEPTH: usize = 4;
+
+/// Nombres de archivo genéricos que no sirven como título de una película.
+const GENERIC_MOVIE_STEMS: &[&str] = &["movie", "film", "video", "index", "main", "feature"];
 
 pub struct LibraryService;
 
 impl LibraryService {
+    /// Indexa una carpeta raíz completa.
     pub fn index_folder(
         db_path: &str,
         folder_path: &str,
     ) -> Result<IndexResult, Box<dyn std::error::Error>> {
+        let root = Path::new(folder_path);
+        if !root.is_dir() {
+            return Err(format!(
+                "la carpeta no existe o no es un directorio: {}",
+                folder_path
+            )
+            .into());
+        }
+
         let mut conn = open_db(db_path)?;
+        let mut counters = IndexCounters::default();
 
-        let mut media_added = 0i64;
-        let mut files_added = 0i64;
-        let mut folders_processed = 0i64;
-
-        // Indexar la carpeta raíz: sus subcarpetas directas con videos se tratan como series
-        Self::index_root_folder(
-            &mut conn,
-            folder_path,
-            &mut media_added,
-            &mut files_added,
-            &mut folders_processed,
-        )?;
+        Self::scan_root(&mut conn, root, &mut counters)?;
 
         close_db(conn);
-
-        Ok(IndexResult {
-            media_added,
-            files_added,
-            folders_processed,
-        })
+        Ok(counters.into_result())
     }
 
-    /// Indexa una carpeta raíz. Sus subcarpetas directas que contienen videos se tratan
-    /// como series independientes (parent_id = None). Cada subcarpeta puede contener
-    /// temporadas (sub-subcarpetas con videos) o archivos de video directamente.
-    fn index_root_folder(
+    /// Recorre la raíz: los vídeos sueltos son películas y cada subcarpeta se
+    /// clasifica como serie, película o contenedor.
+    fn scan_root(
         conn: &mut rusqlite::Connection,
-        folder_path: &str,
-        media_added: &mut i64,
-        files_added: &mut i64,
-        folders_processed: &mut i64,
+        root: &Path,
+        counters: &mut IndexCounters,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let entries: Vec<_> = std::fs::read_dir(folder_path)?
-            .filter_map(|e| e.ok())
-            .collect();
+        let entries = read_entries(root)?;
 
-        for entry in entries {
-            let path = entry.path();
+        for path in entries
+            .iter()
+            .filter(|path| path.is_file() && is_video(path))
+        {
+            Self::index_movie(conn, path, counters)?;
+        }
 
-            if path.is_dir() {
-                *folders_processed += 1;
-
-                // Esta subcarpeta es una serie candidata
-                Self::index_series_folder(
-                    conn,
-                    path.to_str().unwrap(),
-                    media_added,
-                    files_added,
-                    folders_processed,
-                )?;
-            }
+        for path in entries.iter().filter(|path| path.is_dir()) {
+            Self::scan_directory(conn, path, 1, counters)?;
         }
 
         Ok(())
     }
 
-    /// Indexa una carpeta como serie. Si tiene subcarpetas con videos, esas son temporadas.
-    /// Si tiene videos directamente, esos son los episodios de la serie.
-    fn index_series_folder(
+    /// Analiza una carpeta que puede ser una serie, una película o un
+    /// contenedor de otros medios.
+    fn scan_directory(
         conn: &mut rusqlite::Connection,
-        folder_path: &str,
-        media_added: &mut i64,
-        files_added: &mut i64,
-        folders_processed: &mut i64,
+        dir: &Path,
+        depth: usize,
+        counters: &mut IndexCounters,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let entries: Vec<_> = std::fs::read_dir(folder_path)?
-            .filter_map(|e| e.ok())
-            .collect();
-
-        // Separar subcarpetas y archivos de video directos
-        let mut subdirs: Vec<std::path::PathBuf> = Vec::new();
-        let mut direct_video_files: Vec<String> = Vec::new();
-
-        for entry in &entries {
-            let path = entry.path();
-            if path.is_dir() {
-                subdirs.push(path);
-            } else if path.is_file()
-                && let Some(ext) = path.extension().and_then(|e| e.to_str())
-                && VIDEO_EXTENSIONS.contains(&ext.to_lowercase().as_str())
-                && let Some(path_str) = path.to_str()
-            {
-                direct_video_files.push(path_str.to_string());
-            }
-        }
-
-        // Crear el registro de la serie (padre, parent_id = None)
-        let folder_name = std::path::Path::new(folder_path)
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-        let sort_title = folder_name.to_lowercase();
-
-        let series_id = {
-            let mut media_repo = MediaRepository::new(conn);
-            let media = media_repo.upsert(&MediaInput {
-                r#type: "series".to_string(),
-                title: folder_name.clone(),
-                sort_title,
-                year: None,
-                folder_path: folder_path.to_string(),
-                parent_id: None,
-            })?;
-            *media_added += 1;
-            media.id
-        };
-
-        // Indexar videos directos de esta carpeta como episodios de la serie
-        // (siempre, aunque también haya subcarpetas/temporadas)
-        if !direct_video_files.is_empty() {
-            direct_video_files.sort();
-            for file_path_str in direct_video_files.iter() {
-                let file_name = std::path::Path::new(file_path_str)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-
-                let file_size = std::fs::metadata(file_path_str)
-                    .ok()
-                    .and_then(|m| m.len().try_into().ok())
-                    .or(None);
-
-                let mut file_repo = crate::db::file_repo::FileRepository::new(conn);
-                file_repo.upsert_many(&[crate::db::file_repo::MediaFileInput {
-                    media_id: series_id,
-                    season: None,
-                    episode: None,
-                    title: Some(file_name),
-                    file_path: file_path_str.clone(),
-                    size_bytes: file_size,
-                    mtime_ms: None,
-                }])?;
-
-                *files_added += 1;
-            }
-        }
-
-        // Si hay subcarpetas, cada una es una temporada (hijo de la serie)
-        for subdir in subdirs {
-            if let Some(subdir_str) = subdir.to_str() {
-                Self::index_season_folder(
-                    conn,
-                    subdir_str,
-                    Some(series_id),
-                    media_added,
-                    files_added,
-                    folders_processed,
-                )?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Indexa una carpeta como temporada (hijo de una serie).
-    /// Los videos dentro de esta carpeta son los episodios de la temporada.
-    fn index_season_folder(
-        conn: &mut rusqlite::Connection,
-        folder_path: &str,
-        parent_series_id: Option<i64>,
-        media_added: &mut i64,
-        files_added: &mut i64,
-        folders_processed: &mut i64,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let entries: Vec<_> = std::fs::read_dir(folder_path)?
-            .filter_map(|e| e.ok())
-            .collect();
-
-        let mut video_files: Vec<String> = Vec::new();
-
-        for entry in &entries {
-            let path = entry.path();
-            if path.is_file()
-                && let Some(ext) = path.extension().and_then(|e| e.to_str())
-                && VIDEO_EXTENSIONS.contains(&ext.to_lowercase().as_str())
-                && let Some(path_str) = path.to_str()
-            {
-                video_files.push(path_str.to_string());
-            }
-        }
-
-        if video_files.is_empty() {
+        if depth > MAX_SCAN_DEPTH {
+            eprintln!(
+                "Se omite '{}': se superó la profundidad máxima de {} niveles",
+                dir.display(),
+                MAX_SCAN_DEPTH
+            );
             return Ok(());
         }
 
-        *folders_processed += 1;
-        video_files.sort();
-
-        let folder_name = std::path::Path::new(folder_path)
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-        let sort_title = folder_name.to_lowercase();
-
-        let season_id = {
-            let mut media_repo = MediaRepository::new(conn);
-            let media = media_repo.upsert(&MediaInput {
-                r#type: "series".to_string(),
-                title: folder_name.clone(),
-                sort_title,
-                year: None,
-                folder_path: folder_path.to_string(),
-                parent_id: parent_series_id,
-            })?;
-            *media_added += 1;
-            media.id
+        let entries = match read_entries(dir) {
+            Ok(entries) => entries,
+            Err(error) => {
+                eprintln!("No se pudo leer '{}': {}", dir.display(), error);
+                return Ok(());
+            }
         };
 
-        for (idx, file_path_str) in video_files.iter().enumerate() {
-            let file_name = std::path::Path::new(file_path_str)
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
+        let videos: Vec<PathBuf> = entries
+            .iter()
+            .filter(|path| path.is_file() && is_video(path))
+            .cloned()
+            .collect();
+        let dirs: Vec<PathBuf> = entries
+            .iter()
+            .filter(|path| path.is_dir())
+            .cloned()
+            .collect();
 
-            let file_size = std::fs::metadata(file_path_str)
-                .ok()
-                .and_then(|m| m.len().try_into().ok())
-                .or(None);
+        let season_dirs: Vec<PathBuf> = dirs
+            .iter()
+            .filter(|path| is_season_dir(path) && has_direct_videos(path))
+            .cloned()
+            .collect();
+        let other_dirs: Vec<PathBuf> = dirs
+            .iter()
+            .filter(|path| !season_dirs.contains(path))
+            .cloned()
+            .collect();
 
-            let mut file_repo = crate::db::file_repo::FileRepository::new(conn);
-            file_repo.upsert_many(&[crate::db::file_repo::MediaFileInput {
-                media_id: season_id,
-                season: None,
-                episode: Some(idx as i32 + 1),
-                title: Some(file_name),
-                file_path: file_path_str.clone(),
-                size_bytes: file_size,
-                mtime_ms: None,
-            }])?;
+        // Sin vídeos directos: o es una serie con temporadas o es un contenedor.
+        if videos.is_empty() {
+            if !season_dirs.is_empty() {
+                let series_type = detect_media_type(dir);
+                let series_id = Self::upsert_named_media(
+                    conn,
+                    dir,
+                    folder_title(dir),
+                    series_type,
+                    None,
+                    counters,
+                )?;
+                counters.folders_processed += 1;
 
-            *files_added += 1;
+                for season in &season_dirs {
+                    Self::index_season(conn, season, series_id, series_type, counters)?;
+                }
+
+                // Las carpetas que no son temporadas (extras, material adicional)
+                // se recorren por si contienen medios independientes.
+                for other in &other_dirs {
+                    Self::scan_directory(conn, other, depth + 1, counters)?;
+                }
+                return Ok(());
+            }
+
+            for subdir in &other_dirs {
+                Self::scan_directory(conn, subdir, depth + 1, counters)?;
+            }
+            return Ok(());
         }
 
+        // ¿Película(s) o serie con episodios directos?
+        if is_movie_collection(&videos, &dirs) {
+            for video in &videos {
+                Self::index_movie(conn, video, counters)?;
+            }
+
+            // Puede haber subcarpetas con más medios dentro de la misma carpeta.
+            for subdir in &other_dirs {
+                Self::scan_directory(conn, subdir, depth + 1, counters)?;
+            }
+            return Ok(());
+        }
+
+        let series_type = detect_media_type(dir);
+        let series_id =
+            Self::upsert_named_media(conn, dir, folder_title(dir), series_type, None, counters)?;
+        counters.folders_processed += 1;
+
+        let mut videos = videos;
+        videos.sort();
+        let files: Vec<MediaFileInput> = videos
+            .iter()
+            .enumerate()
+            .map(|(index, video)| MediaFileInput {
+                media_id: series_id,
+                season: None,
+                episode: Some(index as i32 + 1),
+                title: Some(file_name(video)),
+                file_path: path_string(video),
+                size_bytes: file_size(video),
+                mtime_ms: None,
+            })
+            .collect();
+
+        Self::save_files(conn, &files, counters)?;
+
+        for season in &season_dirs {
+            Self::index_season(conn, season, series_id, series_type, counters)?;
+        }
+
+        // Otras subcarpetas dentro de una serie se ignoran deliberadamente:
+        // su contenido suele ser material extra y no temporadas.
+        for other in &other_dirs {
+            eprintln!(
+                "Se ignora '{}': está dentro de la serie '{}' y no parece una temporada",
+                other.display(),
+                dir.display()
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Indexa una carpeta de temporada y sus episodios directos.
+    fn index_season(
+        conn: &mut rusqlite::Connection,
+        season_dir: &Path,
+        series_id: i64,
+        series_type: &str,
+        counters: &mut IndexCounters,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut videos: Vec<PathBuf> = read_entries(season_dir)?
+            .into_iter()
+            .filter(|path| path.is_file() && is_video(path))
+            .collect();
+        if videos.is_empty() {
+            return Ok(());
+        }
+        videos.sort();
+
+        let season_id = Self::upsert_named_media(
+            conn,
+            season_dir,
+            folder_title(season_dir),
+            series_type,
+            Some(series_id),
+            counters,
+        )?;
+        counters.folders_processed += 1;
+
+        let files: Vec<MediaFileInput> = videos
+            .iter()
+            .enumerate()
+            .map(|(index, video)| MediaFileInput {
+                media_id: season_id,
+                season: None,
+                episode: Some(index as i32 + 1),
+                title: Some(file_name(video)),
+                file_path: path_string(video),
+                size_bytes: file_size(video),
+                mtime_ms: None,
+            })
+            .collect();
+
+        Self::save_files(conn, &files, counters)
+    }
+
+    /// Indexa un archivo suelto como película.
+    fn index_movie(
+        conn: &mut rusqlite::Connection,
+        video: &Path,
+        counters: &mut IndexCounters,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let title = movie_title(video);
+        let media_id = Self::upsert_named_media(conn, video, title, "movie", None, counters)?;
+
+        Self::save_files(
+            conn,
+            &[MediaFileInput {
+                media_id,
+                season: None,
+                episode: None,
+                title: Some(file_name(video)),
+                file_path: path_string(video),
+                size_bytes: file_size(video),
+                mtime_ms: None,
+            }],
+            counters,
+        )
+    }
+
+    /// Crea o actualiza un medio identificado por su ruta.
+    fn upsert_named_media(
+        conn: &mut rusqlite::Connection,
+        folder_path: &Path,
+        title: String,
+        media_type: &str,
+        parent_id: Option<i64>,
+        counters: &mut IndexCounters,
+    ) -> Result<i64, Box<dyn std::error::Error>> {
+        let sort_title = title.to_lowercase();
+        let media = {
+            let mut repo = MediaRepository::new(conn);
+            repo.upsert(&MediaInput {
+                r#type: media_type.to_string(),
+                title,
+                sort_title,
+                year: None,
+                folder_path: path_string(folder_path),
+                parent_id,
+            })?
+        };
+        counters.media_added += 1;
+        Ok(media.id)
+    }
+
+    /// Guarda los archivos de vídeo de un medio.
+    fn save_files(
+        conn: &mut rusqlite::Connection,
+        files: &[MediaFileInput],
+        counters: &mut IndexCounters,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut repo = FileRepository::new(conn);
+        repo.upsert_many(files)?;
+        counters.files_added += files.len() as i64;
         Ok(())
     }
 }
 
+/// Elimina de la biblioteca todos los medios que están dentro de una carpeta.
+///
+/// No toca los archivos del disco. Devuelve cuántos medios se han eliminado.
+pub fn remove_folder(
+    db_path: &str,
+    folder_path: &str,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    let folder = Path::new(folder_path);
+    let mut conn = open_db(db_path)?;
+
+    let rows = load_media_rows(&conn)?;
+    let seed: HashSet<i64> = rows
+        .iter()
+        .filter(|row| Path::new(&row.folder_path).starts_with(folder))
+        .map(|row| row.id)
+        .collect();
+
+    if seed.is_empty() {
+        close_db(conn);
+        return Ok(0);
+    }
+
+    let deleted = delete_media_subtree(&mut conn, seed)?;
+    close_db(conn);
+    Ok(deleted)
+}
+
+/// Elimina medios que ya no pertenecen a ninguna carpeta configurada.
+///
+/// Se conserva como red de seguridad para configuraciones editadas a mano o
+/// carpetas eliminadas desde versiones anteriores.
 pub fn cleanup_media_not_in_folders(
     db_path: &str,
     folders: &[String],
 ) -> Result<usize, Box<dyn std::error::Error>> {
-    let conn = open_db(db_path)?;
-
-    // Obtener IDs de medios que no están en ninguna de las carpetas actuales.
-    let to_delete: Vec<i64> = {
-        let mut stmt = conn.prepare("SELECT id, folder_path FROM media")?;
-        let mut ids = Vec::new();
-        for row in stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-            })?
-            .flatten()
-        {
-            let (media_id, folder_path) = row;
-            let in_any_folder = folders.iter().any(|f| folder_path.starts_with(f));
-            if !in_any_folder {
-                ids.push(media_id);
-            }
-        }
-        ids
-    }; // stmt se suelta aquí
-
-    // Eliminar archivos, historial y medios huérfanos
-    for media_id in &to_delete {
-        conn.execute("DELETE FROM media_files WHERE media_id = ?1", [media_id])?;
-        conn.execute(
-            "DELETE FROM playback_history WHERE media_id = ?1",
-            [media_id],
-        )?;
-        conn.execute("DELETE FROM media WHERE id = ?1", [media_id])?;
+    if folders.is_empty() {
+        return Ok(0);
     }
 
-    // También eliminar medios cuya carpeta sea EXACTAMENTE una carpeta configurada
-    // (esto ocurre si la carpeta raíz fue tratada erróneamente como serie en versiones anteriores)
-    for folder in folders {
-        conn.execute("DELETE FROM media_files WHERE media_id IN (SELECT id FROM media WHERE folder_path = ?1)", [folder])?;
-        conn.execute(
-            "DELETE FROM playback_history WHERE media_id IN (SELECT id FROM media WHERE folder_path = ?1)",
-            [folder],
-        )?;
-        conn.execute("DELETE FROM media WHERE folder_path = ?1", [folder])?;
+    let configured: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
+    let mut conn = open_db(db_path)?;
+    let rows = load_media_rows(&conn)?;
+
+    let seed: HashSet<i64> = rows
+        .iter()
+        .filter(|row| {
+            let path = Path::new(&row.folder_path);
+            !configured.iter().any(|folder| path.starts_with(folder))
+        })
+        .map(|row| row.id)
+        .collect();
+
+    if seed.is_empty() {
+        close_db(conn);
+        return Ok(0);
     }
 
+    let deleted = delete_media_subtree(&mut conn, seed)?;
     close_db(conn);
-
-    Ok(to_delete.len())
+    Ok(deleted)
 }
 
-#[derive(Debug, Clone)]
+struct MediaRow {
+    id: i64,
+    parent_id: Option<i64>,
+    folder_path: String,
+}
+
+fn load_media_rows(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<MediaRow>, Box<dyn std::error::Error>> {
+    let mut stmt = conn.prepare("SELECT id, parent_id, folder_path FROM media")?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(MediaRow {
+                id: row.get(0)?,
+                parent_id: row.get(1)?,
+                folder_path: row.get(2)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// Borra un conjunto de medios y todos sus descendientes, hijos primero para
+/// respetar la clave foránea `media.parent_id`.
+fn delete_media_subtree(
+    conn: &mut rusqlite::Connection,
+    seed: HashSet<i64>,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    let rows = load_media_rows(conn)?;
+    let by_id: HashMap<i64, Option<i64>> = rows.iter().map(|row| (row.id, row.parent_id)).collect();
+
+    let mut children: HashMap<i64, Vec<i64>> = HashMap::new();
+    for row in &rows {
+        if let Some(parent_id) = row.parent_id {
+            children.entry(parent_id).or_default().push(row.id);
+        }
+    }
+
+    // Incluye los descendientes de los medios seleccionados.
+    let mut doomed = seed.clone();
+    let mut pending: Vec<i64> = seed.into_iter().collect();
+    while let Some(id) = pending.pop() {
+        if let Some(kids) = children.get(&id) {
+            for kid in kids {
+                if doomed.insert(*kid) {
+                    pending.push(*kid);
+                }
+            }
+        }
+    }
+
+    // Cuenta los hijos que también se van a borrar para eliminar hojas primero.
+    let mut pending_children: HashMap<i64, usize> = HashMap::new();
+    for id in &doomed {
+        if let Some(Some(parent_id)) = by_id.get(id)
+            && doomed.contains(parent_id)
+        {
+            *pending_children.entry(*parent_id).or_insert(0) += 1;
+        }
+    }
+
+    let mut leaves: Vec<i64> = doomed
+        .iter()
+        .copied()
+        .filter(|id| pending_children.get(id).copied().unwrap_or(0) == 0)
+        .collect();
+
+    let tx = conn.transaction()?;
+    let mut deleted = 0usize;
+    while let Some(id) = leaves.pop() {
+        tx.execute("DELETE FROM media WHERE id = ?1", [id])?;
+        deleted += 1;
+
+        if let Some(Some(parent_id)) = by_id.get(&id)
+            && doomed.contains(parent_id)
+        {
+            let count = pending_children.entry(*parent_id).or_insert(0);
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                leaves.push(*parent_id);
+            }
+        }
+    }
+    tx.commit()?;
+
+    Ok(deleted)
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct IndexResult {
     pub media_added: i64,
     pub files_added: i64,
     pub folders_processed: i64,
+}
+
+#[derive(Default)]
+struct IndexCounters {
+    media_added: i64,
+    files_added: i64,
+    folders_processed: i64,
+}
+
+impl IndexCounters {
+    fn into_result(self) -> IndexResult {
+        IndexResult {
+            media_added: self.media_added,
+            files_added: self.files_added,
+            folders_processed: self.folders_processed,
+        }
+    }
+}
+
+/// Lee una carpeta omitiendo enlaces simbólicos y entradas ocultas.
+fn read_entries(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let mut entries = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        entries.push(entry.path());
+    }
+    entries.sort();
+    Ok(entries)
+}
+
+fn is_video(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| VIDEO_EXTENSIONS.contains(&extension.to_lowercase().as_str()))
+}
+
+fn has_direct_videos(dir: &Path) -> bool {
+    match read_entries(dir) {
+        Ok(entries) => entries.iter().any(|path| path.is_file() && is_video(path)),
+        Err(error) => {
+            eprintln!("No se pudo leer '{}': {}", dir.display(), error);
+            false
+        }
+    }
+}
+
+/// Decide si una carpeta con vídeos directos contiene películas o episodios.
+fn is_movie_collection(videos: &[PathBuf], dirs: &[PathBuf]) -> bool {
+    if dirs.iter().any(|dir| is_season_dir(dir)) {
+        return false;
+    }
+
+    if videos
+        .iter()
+        .any(|video| looks_like_episode(&file_stem(video)))
+    {
+        return false;
+    }
+
+    // Varios archivos con nombres puramente numéricos (01.mkv, 02.mkv) son
+    // episodios, no una colección de películas.
+    if videos.len() > 1 && videos.iter().all(|video| is_short_numeric_stem(video)) {
+        return false;
+    }
+
+    true
+}
+
+/// Detecta nombres de archivo habituales de episodios: `S01E02`, `1x02`,
+/// `Episodio 3`, `Episode 3`, `Capítulo 3`.
+fn looks_like_episode(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    if lower.contains("episodio")
+        || lower.contains("episode")
+        || lower.contains("capitulo")
+        || lower.contains("capítulo")
+    {
+        return true;
+    }
+
+    let bytes = lower.as_bytes();
+
+    // S01E02 / S1E2
+    for index in 0..bytes.len() {
+        if bytes[index] != b's' {
+            continue;
+        }
+        let mut cursor = index + 1;
+        let digits_start = cursor;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+            cursor += 1;
+        }
+        if cursor == digits_start || cursor >= bytes.len() || bytes[cursor] != b'e' {
+            continue;
+        }
+        cursor += 1;
+        let episode_start = cursor;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+            cursor += 1;
+        }
+        if cursor > episode_start {
+            return true;
+        }
+    }
+
+    // 1x02
+    for index in 0..bytes.len() {
+        if !bytes[index].is_ascii_digit() {
+            continue;
+        }
+        let mut cursor = index;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() || bytes[cursor] != b'x' {
+            continue;
+        }
+        cursor += 1;
+        let episode_start = cursor;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+            cursor += 1;
+        }
+        if cursor > episode_start {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn is_short_numeric_stem(path: &Path) -> bool {
+    let stem = file_stem(path);
+    !stem.is_empty() && stem.len() <= 3 && stem.chars().all(|character| character.is_ascii_digit())
+}
+
+/// Detecta carpetas de temporada (`Season 1`, `Temporada 2`, `S01`, `2`).
+fn is_season_dir(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
+
+    for prefix in ["season", "temporada"] {
+        if let Some(rest) = name.strip_prefix(prefix) {
+            let rest = rest.trim();
+            if !rest.is_empty() && rest.chars().all(|character| character.is_ascii_digit()) {
+                return true;
+            }
+        }
+    }
+
+    // S01, S1, T02
+    for prefix in ['s', 't'] {
+        if let Some(rest) = name.strip_prefix(prefix)
+            && !rest.is_empty()
+            && rest.len() <= 3
+            && rest.chars().all(|character| character.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+
+    // "1", "01", "12"
+    !name.is_empty() && name.len() <= 2 && name.chars().all(|character| character.is_ascii_digit())
+}
+
+/// Las rutas que contienen un componente `Anime`/`Animes` se clasifican como
+/// anime; el resto de series se clasifican como `series`.
+fn detect_media_type(path: &Path) -> &'static str {
+    let is_anime = path.components().any(|component| {
+        component.as_os_str().to_str().is_some_and(|name| {
+            name.eq_ignore_ascii_case("anime") || name.eq_ignore_ascii_case("animes")
+        })
+    });
+
+    if is_anime { "anime" } else { "series" }
+}
+
+fn folder_title(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
+}
+
+fn file_stem(path: &Path) -> String {
+    path.file_stem()
+        .map(|stem| stem.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_name(path))
+}
+
+fn movie_title(video: &Path) -> String {
+    let stem = file_stem(video);
+    if GENERIC_MOVIE_STEMS.contains(&stem.to_lowercase().as_str())
+        && let Some(parent) = video.parent()
+        && let Some(parent_name) = parent.file_name()
+    {
+        let parent_name = parent_name.to_string_lossy().to_string();
+        if !parent_name.is_empty() {
+            return parent_name;
+        }
+    }
+    stem
+}
+
+fn path_string(path: &Path) -> String {
+    path.to_string_lossy().to_string()
+}
+
+fn file_size(path: &Path) -> Option<i64> {
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|metadata| metadata.len().try_into().ok())
 }
 
 /// Extrae las pistas de audio y subtítulos de un archivo de vídeo mediante ffprobe.
@@ -422,8 +810,6 @@ pub fn index_media_streams_for_file(
     Ok(())
 }
 
-const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mkv", "avi", "webm", "mov", "flv", "wmv"];
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,6 +829,274 @@ mod tests {
         let dir = TempDir::new().expect("crear directorio temporal");
         let path = dir.path().join("test.db");
         (path.to_str().unwrap().to_string(), dir)
+    }
+
+    /// Crea un archivo vacío (el indexador solo comprueba la extensión).
+    fn touch(path: &Path) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("crear directorio");
+        }
+        std::fs::write(path, b"").expect("crear archivo");
+    }
+
+    fn list_titles(conn: &mut rusqlite::Connection) -> Vec<(String, String, Option<i64>)> {
+        let mut repo = MediaRepository::new(conn);
+        repo.list(crate::db::media_repo::ListMediaOptions {
+            r#type: None,
+            limit: Some(500),
+            offset: Some(0),
+            order_by: None,
+        })
+        .expect("listar medios")
+        .into_iter()
+        .map(|media| (media.title, media.r#type, media.parent_id))
+        .collect()
+    }
+
+    #[test]
+    fn indexa_peliculas_sueltas_series_y_anime() {
+        let (db_path, _db_dir) = temp_db();
+        let library = TempDir::new().expect("biblioteca temporal");
+        let root = library.path();
+
+        touch(&root.join("Inception (2010).mkv"));
+        touch(
+            &root
+                .join("Peliculas")
+                .join("Matrix (1999)")
+                .join("Matrix.mkv"),
+        );
+        touch(
+            &root
+                .join("Series")
+                .join("Breaking Bad")
+                .join("Season 1")
+                .join("Breaking.Bad.S01E01.mkv"),
+        );
+        touch(
+            &root
+                .join("Series")
+                .join("Breaking Bad")
+                .join("Season 1")
+                .join("Breaking.Bad.S01E02.mkv"),
+        );
+        touch(
+            &root
+                .join("Series")
+                .join("Breaking Bad")
+                .join("Season 2")
+                .join("Breaking.Bad.S02E01.mkv"),
+        );
+        touch(&root.join("Anime").join("Frieren").join("01.mkv"));
+        touch(&root.join("Anime").join("Frieren").join("02.mkv"));
+
+        let result = LibraryService::index_folder(&db_path, root.to_str().unwrap())
+            .expect("indexar biblioteca");
+        assert_eq!(result.files_added, 7);
+
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let titles = list_titles(&mut conn);
+
+        assert!(titles.contains(&("Inception (2010)".to_string(), "movie".to_string(), None)));
+        assert!(titles.contains(&("Matrix".to_string(), "movie".to_string(), None)));
+        assert!(titles.contains(&("Breaking Bad".to_string(), "series".to_string(), None)));
+        assert!(titles.contains(&("Frieren".to_string(), "anime".to_string(), None)));
+
+        // La serie tiene dos temporadas y tres episodios.
+        let series_id: i64 = conn
+            .query_row(
+                "SELECT id FROM media WHERE title = 'Breaking Bad' AND parent_id IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("id de serie");
+        let mut repo = MediaRepository::new(&mut conn);
+        let seasons = repo.list_children(series_id).expect("temporadas");
+        assert_eq!(seasons.len(), 2);
+        let mut total_episodes = 0;
+        for season in seasons {
+            total_episodes += repo
+                .list_files_by_media(season.id)
+                .expect("episodios")
+                .len();
+        }
+        assert_eq!(total_episodes, 3);
+
+        // Reindexar es idempotente: no duplica medios ni archivos.
+        LibraryService::index_folder(&db_path, root.to_str().unwrap())
+            .expect("reindexar biblioteca");
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let parents = list_titles(&mut conn);
+        assert_eq!(parents.len(), 4);
+        let media_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM media", [], |row| row.get(0))
+            .expect("contar medios");
+        assert_eq!(media_count, 6); // 4 padres + 2 temporadas
+    }
+
+    #[test]
+    fn indexa_pelicula_con_un_unico_video_en_subcarpeta() {
+        let (db_path, _db_dir) = temp_db();
+        let library = TempDir::new().expect("biblioteca temporal");
+        let root = library.path();
+        touch(&root.join("Peliculas").join("El viaje").join("movie.mkv"));
+
+        LibraryService::index_folder(&db_path, root.to_str().unwrap()).expect("indexar");
+
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let titles = list_titles(&mut conn);
+        assert_eq!(
+            titles,
+            vec![("El viaje".to_string(), "movie".to_string(), None)]
+        );
+    }
+
+    #[test]
+    fn indexa_episodios_numerados_como_serie() {
+        let (db_path, _db_dir) = temp_db();
+        let library = TempDir::new().expect("biblioteca temporal");
+        let root = library.path();
+        touch(&root.join("Anime").join("Frieren").join("01.mkv"));
+        touch(&root.join("Anime").join("Frieren").join("02.mkv"));
+
+        LibraryService::index_folder(&db_path, root.to_str().unwrap()).expect("indexar");
+
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let titles = list_titles(&mut conn);
+        assert_eq!(
+            titles,
+            vec![("Frieren".to_string(), "anime".to_string(), None)]
+        );
+    }
+
+    #[test]
+    fn detecta_nombres_de_episodio_y_temporada() {
+        assert!(looks_like_episode("Breaking.Bad.S01E02"));
+        assert!(looks_like_episode("Show 1x02"));
+        assert!(looks_like_episode("Episodio 3"));
+        assert!(looks_like_episode("Capítulo 4"));
+        assert!(!looks_like_episode("Inception (2010)"));
+        assert!(!looks_like_episode("1917"));
+
+        assert!(is_season_dir(Path::new("/serie/Season 1")));
+        assert!(is_season_dir(Path::new("/serie/Temporada 2")));
+        assert!(is_season_dir(Path::new("/serie/S01")));
+        assert!(is_season_dir(Path::new("/serie/2")));
+        assert!(!is_season_dir(Path::new("/serie/Breaking Bad")));
+    }
+
+    #[test]
+    fn remove_folder_elimina_medios_archivos_historial_y_streams() {
+        let (db_path, _db_dir) = temp_db();
+        let library = TempDir::new().expect("biblioteca temporal");
+        let root = library.path();
+        touch(&root.join("A").join("Serie A").join("S01E01.mkv"));
+        touch(&root.join("B").join("Serie B").join("S01E01.mkv"));
+
+        LibraryService::index_folder(&db_path, root.to_str().unwrap()).expect("indexar");
+
+        let conn = open_db(&db_path).expect("abrir BD");
+        let series_a: i64 = conn
+            .query_row("SELECT id FROM media WHERE title = 'Serie A'", [], |row| {
+                row.get(0)
+            })
+            .expect("id serie A");
+        let file_a: String = conn
+            .query_row(
+                "SELECT file_path FROM media_files WHERE media_id = ?1",
+                [series_a],
+                |row| row.get(0),
+            )
+            .expect("archivo serie A");
+
+        conn.execute(
+            "INSERT INTO playback_history (media_id) VALUES (?1)",
+            [series_a],
+        )
+        .expect("historial");
+        conn.execute(
+            "INSERT INTO media_streams
+                (media_id, file_path, stream_type, stream_index)
+             VALUES (?1, ?2, 'audio', 0)",
+            rusqlite::params![series_a, file_a],
+        )
+        .expect("stream");
+        drop(conn);
+
+        let deleted =
+            remove_folder(&db_path, root.join("A").to_str().unwrap()).expect("eliminar carpeta A");
+        assert_eq!(deleted, 1);
+
+        let conn = open_db(&db_path).expect("abrir BD");
+        let remaining: Vec<String> = conn
+            .prepare("SELECT title FROM media ORDER BY title")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        assert_eq!(remaining, vec!["Serie B".to_string()]);
+        let files: i64 = conn
+            .query_row("SELECT COUNT(*) FROM media_files", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(files, 1);
+        let history: i64 = conn
+            .query_row("SELECT COUNT(*) FROM playback_history", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(history, 0);
+        let streams: i64 = conn
+            .query_row("SELECT COUNT(*) FROM media_streams", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(streams, 0);
+    }
+
+    #[test]
+    fn remove_folder_no_confunde_carpetas_con_prefijos_comunes() {
+        let (db_path, _db_dir) = temp_db();
+        let library = TempDir::new().expect("biblioteca temporal");
+        let root = library.path();
+        touch(&root.join("A").join("Serie A").join("S01E01.mkv"));
+        touch(&root.join("AB").join("Serie AB").join("S01E01.mkv"));
+
+        LibraryService::index_folder(&db_path, root.to_str().unwrap()).expect("indexar");
+        remove_folder(&db_path, root.join("A").to_str().unwrap()).expect("eliminar A");
+
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let titles = list_titles(&mut conn);
+        assert_eq!(
+            titles,
+            vec![("Serie AB".to_string(), "series".to_string(), None)]
+        );
+    }
+
+    #[test]
+    fn cleanup_conserva_medios_de_carpetas_configuradas() {
+        let (db_path, _db_dir) = temp_db();
+        let library = TempDir::new().expect("biblioteca temporal");
+        let root = library.path();
+        touch(&root.join("A").join("Serie A").join("S01E01.mkv"));
+        touch(&root.join("B").join("Serie B").join("S01E01.mkv"));
+
+        LibraryService::index_folder(&db_path, root.to_str().unwrap()).expect("indexar");
+        let folders = vec![root.join("B").to_str().unwrap().to_string()];
+        let deleted = cleanup_media_not_in_folders(&db_path, &folders).expect("limpiar");
+
+        assert_eq!(deleted, 1);
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let titles = list_titles(&mut conn);
+        assert_eq!(
+            titles,
+            vec![("Serie B".to_string(), "series".to_string(), None)]
+        );
+    }
+
+    #[test]
+    fn index_folder_falla_si_la_carpeta_no_existe() {
+        let (db_path, _db_dir) = temp_db();
+        let result = LibraryService::index_folder(&db_path, "/ruta/que/no/existe/acryl");
+        assert!(result.is_err());
     }
 
     /// Genera un video de prueba con una pista de audio usando ffmpeg.
@@ -504,37 +1158,6 @@ mod tests {
 
         let (db_path, _dir) = temp_db();
         let conn = open_db(&db_path).expect("abrir BD");
-
-        // Crear medio y archivo en BD
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS media (
-                id          INTEGER PRIMARY KEY,
-                type        TEXT    NOT NULL,
-                title       TEXT    NOT NULL,
-                sort_title  TEXT    NOT NULL,
-                year        INTEGER,
-                folder_path TEXT    NOT NULL UNIQUE,
-                created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-                updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
-            );
-             CREATE TABLE IF NOT EXISTS media_files (
-                id          INTEGER PRIMARY KEY,
-                media_id    INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
-                file_path   TEXT    NOT NULL UNIQUE
-            );
-             CREATE TABLE IF NOT EXISTS media_streams (
-                id          INTEGER PRIMARY KEY,
-                media_id    INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
-                file_path   TEXT    NOT NULL,
-                stream_type TEXT    NOT NULL CHECK (stream_type IN ('audio', 'subtitle')),
-                stream_index INTEGER NOT NULL,
-                language    TEXT,
-                codec       TEXT,
-                title       TEXT,
-                indexed_at  TEXT    NOT NULL DEFAULT (datetime('now'))
-             )",
-        )
-        .unwrap();
 
         conn.execute(
             "INSERT INTO media (type, title, sort_title, folder_path) VALUES (?1, ?2, ?3, ?4)",

@@ -83,9 +83,16 @@ impl<'a> MediaRepository<'a> {
         let id: i64 = match insert_result {
             Ok(_) => self.conn.last_insert_rowid(),
             Err(rusqlite::Error::SqliteFailure(_, _)) => {
+                // Reindexar no debe destruir metadatos ya sincronizados: se
+                // conservan título, año y orden si `metadata_fetched_at` existe.
                 self.conn.execute(
-                    "UPDATE media SET type = ?1, title = ?2, sort_title = ?3,
-                     year = ?4, updated_at = datetime('now'), parent_id = ?6
+                    "UPDATE media SET
+                       type = ?1,
+                       title = CASE WHEN metadata_fetched_at IS NOT NULL THEN title ELSE ?2 END,
+                       sort_title = CASE WHEN metadata_fetched_at IS NOT NULL THEN sort_title ELSE ?3 END,
+                       year = COALESCE(?4, year),
+                       updated_at = datetime('now'),
+                       parent_id = ?6
                      WHERE folder_path = ?5",
                     params![
                         input.r#type,
