@@ -38,14 +38,16 @@ type MainWindowRef = Rc<RefCell<MainWindow>>;
 
 impl MainWindow {
     pub fn new(app: &gtk4::Application, config: crate::Config) -> MainWindowRef {
+        crate::ui::theme::install_theme_css();
+
         let db_path = config.inner().db_path.clone();
         let config_path = config.path().to_path_buf();
 
         let window = AdwApplicationWindow::builder()
             .application(app)
             .title("Acryl")
-            .default_width(1000)
-            .default_height(700)
+            .default_width(1200)
+            .default_height(800)
             .build();
 
         // AdwToastOverlay permite mostrar notificaciones temporales (AdwToast)
@@ -53,28 +55,92 @@ impl MainWindow {
         let toast_overlay = ToastOverlay::new();
 
         let content = Box::new(Orientation::Vertical, 0);
+        content.set_hexpand(true);
         content.set_vexpand(true);
         toast_overlay.set_child(Some(&content));
         window.set_content(Some(&toast_overlay));
 
-        // Barra superior: búsqueda + botón de ajustes
-        let top_bar = Box::new(Orientation::Horizontal, 10);
+        // Barra superior al estilo Crunchyroll: logo a la izquierda,
+        // navegación en el centro, acciones y búsqueda a la derecha.
+        let top_bar = Box::new(Orientation::Horizontal, 0);
         top_bar.set_hexpand(true);
+        top_bar.set_vexpand(false);
         top_bar.set_halign(gtk4::Align::Fill);
+        top_bar.set_valign(gtk4::Align::Center);
+        top_bar.add_css_class("top-bar");
 
+        // Sección izquierda: logo / nombre de la app.
+        let left_section = Box::new(Orientation::Horizontal, 0);
+        left_section.set_halign(gtk4::Align::Start);
+        left_section.set_valign(gtk4::Align::Center);
+        left_section.set_hexpand(false);
+
+        let logo_label = Label::new(Some("Acryl"));
+        logo_label.set_halign(gtk4::Align::Start);
+        logo_label.set_valign(gtk4::Align::Center);
+        logo_label.set_margin_start(16);
+        logo_label.set_margin_end(24);
+        logo_label.set_xalign(0.0);
+        logo_label.set_hexpand(false);
+        logo_label.set_markup("<b><span size='x-large' foreground='#f75c03'>A</span>cryl</b>");
+        left_section.append(&logo_label);
+
+        top_bar.append(&left_section);
+
+        // Sección centro: navegación horizontal (se expande para centrar).
+        let nav_box = Box::new(Orientation::Horizontal, 8);
+        nav_box.set_halign(gtk4::Align::Center);
+        nav_box.set_valign(gtk4::Align::Center);
+        nav_box.set_hexpand(true);
+        nav_box.add_css_class("nav-box");
+
+        let nav_items = [
+            ("Novedades", "new"),
+            ("Popular", "popular"),
+            ("Simulcasts", "simulcast"),
+            ("Categorías", "categories"),
+        ];
+        for (label_text, _route) in nav_items.iter() {
+            let nav_btn = Button::with_label(label_text);
+            nav_btn.add_css_class("nav-button");
+            nav_btn.set_valign(gtk4::Align::Center);
+            nav_box.append(&nav_btn);
+        }
+
+        top_bar.append(&nav_box);
+
+        // Sección derecha: búsqueda y acciones.
+        let right_section = Box::new(Orientation::Horizontal, 0);
+        right_section.set_halign(gtk4::Align::End);
+        right_section.set_valign(gtk4::Align::Center);
+        right_section.set_hexpand(false);
+        right_section.set_margin_end(16);
+
+        // Barra de búsqueda.
         let search_bar = SearchBar::new(&db_path);
-        top_bar.append(search_bar.widget());
+        search_bar.widget().set_hexpand(false);
+        search_bar.widget().set_width_request(300);
+        search_bar.widget().set_halign(gtk4::Align::Center);
+        search_bar.widget().set_valign(gtk4::Align::Center);
+        right_section.append(search_bar.widget());
 
-        // Indicador de carpetas indexadas y número de medios cargados.
+        // Indicador de biblioteca.
         let library_status = Label::new(None);
         library_status.add_css_class("dim-label");
-        library_status.set_halign(gtk4::Align::End);
-        top_bar.append(&library_status);
+        library_status.set_valign(gtk4::Align::Center);
+        library_status.set_margin_start(16);
+        library_status.set_margin_end(16);
+        right_section.append(&library_status);
 
+        // Botón de ajustes.
         let settings_button = Button::with_label("⚙ Ajustes");
         settings_button.set_halign(gtk4::Align::End);
         settings_button.set_hexpand(false);
-        top_bar.append(&settings_button);
+        settings_button.set_valign(gtk4::Align::Center);
+        settings_button.add_css_class("flat-button");
+        right_section.append(&settings_button);
+
+        top_bar.append(&right_section);
 
         content.append(&top_bar);
 
@@ -88,12 +154,17 @@ impl MainWindow {
         // AdwClamp limita el ancho del contenido en pantallas anchas para que
         // las listas y pósters no se estiren desproporcionadamente.
         let list_clamp = Clamp::new();
-        list_clamp.set_maximum_size(900);
-        list_clamp.set_tightening_threshold(700);
+        list_clamp.set_maximum_size(1600);
+        list_clamp.set_tightening_threshold(1200);
         list_clamp.set_child(Some(media_list.widget()));
 
         // Página principal: lista de medios (envuelta en Clamp).
         stack.add_titled(&list_clamp, Some("list"), "Lista");
+
+        // Configurar columnas responsivas para la galería según el ancho
+        // inicial de la ventana. Se calcula restando los márgenes del
+        // FlowBox y del Clamp.
+        media_list.set_responsive_columns(1160);
 
         // Página vacía: AdwStatusPage cuando no hay medios indexados.
         let empty_page = StatusPage::new();
@@ -281,12 +352,29 @@ impl MainWindow {
         this.borrow_mut()
             .media_details
             .borrow_mut()
-            .on_play(move || {
-                let w = this_clone.borrow();
-                w.play_file();
+            .on_rate(move |rating| {
+                let this = this_clone.clone();
+                let w = this.borrow();
+                let media_id = w.media_details.borrow().media_id();
+                let db_path = w.db_path.clone();
+                let mut conn = match open_db(&db_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Error abriendo BD: {}", e);
+                        return;
+                    }
+                };
+                let mut repo = MediaRepository::new(&mut conn);
+                if let Err(e) = repo.set_rating(media_id, rating) {
+                    eprintln!("Error calificando medio: {}", e);
+                }
+                close_db(conn);
+                // Refrescar para mostrar la nueva calificación.
+                w.media_details.borrow_mut().load_media(media_id);
+                w.show_toast(&format!("Calificación: {}★", rating));
             });
 
-        // Callback: reproducir un episodio concreto con mpv (proceso externo).
+        // Callback: reproducir el archivo principal (episodio por ver o primero).
         let this_clone = this.clone();
         this.borrow_mut()
             .media_details
@@ -299,17 +387,7 @@ impl MainWindow {
                 }
             });
 
-        // Callback: al hacer clic en "Abrir" de una temporada, navegar a los detalles de esa temporada.
-        let this_clone = this.clone();
-        this.borrow_mut()
-            .media_details
-            .borrow_mut()
-            .on_open_season(move |season_id| {
-                let w = this_clone.borrow();
-                w.show_details(season_id);
-            });
-
-        // Callback: abrir el selector de audio y subtítulos de un archivo.
+        // Callback: abrir el selector de audio y subtítulos del archivo principal.
         let this_clone = this.clone();
         this.borrow_mut()
             .media_details
@@ -329,6 +407,23 @@ impl MainWindow {
                         }
                     }),
                 );
+            });
+
+        // Callback: cambiar de temporada (navegar a los detalles de esa temporada).
+        // Se difiere con timeout_add_local para evitar reentrancy de RefCell
+        // (el notify del dropdown se dispara dentro de set_media, que ya tiene
+        // borrow_mut de media_details).
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_change_season(move |season_id| {
+                let this = this_clone.clone();
+                glib::timeout_add_local(std::time::Duration::from_millis(0), move || {
+                    let w = this.borrow();
+                    w.show_details(season_id);
+                    glib::ControlFlow::Break
+                });
             });
 
         // Completar metadatos y pósters que falten sin bloquear la UI.
@@ -465,35 +560,6 @@ impl MainWindow {
             self.media_details.borrow_mut().set_media(&m);
         } else {
             close_db(conn);
-        }
-    }
-
-    fn play_file(&self) {
-        let media_id = self.media_details.borrow().media_id();
-        let mut conn = match open_db(&self.db_path) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Error abriendo BD: {}", e);
-                return;
-            }
-        };
-        let mut repo = MediaRepository::new(&mut conn);
-        let files = repo.list_files_by_media(media_id).unwrap_or_default();
-        close_db(conn);
-
-        if let Some(f) = files.first() {
-            if let Err(error) =
-                crate::core::player::play_external(&self.db_path, Some(media_id), &f.file_path)
-            {
-                eprintln!("No se pudo reproducir '{}': {}", f.file_path, error);
-                self.show_error("No se pudo reproducir", &error.to_string());
-            }
-        } else {
-            eprintln!("No hay archivos para el medio {}", media_id);
-            self.show_error(
-                "No hay archivos para reproducir",
-                "El medio seleccionado no tiene ningún archivo indexado.",
-            );
         }
     }
 

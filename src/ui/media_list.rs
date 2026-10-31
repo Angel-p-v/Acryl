@@ -1,6 +1,13 @@
-//! Componente que muestra una galería de medios con pósters.
-//! Usa FlowBox con renderizado de pósters desde caché local.
-//! Diseñado para ser eficiente con colecciones grandes mediante carga paginada.
+//! Galería de medios con tarjetas al estilo Crunchyroll.
+//!
+//! Cada tarjeta muestra:
+//! - Póster (relación 2:3) con badge de tipo en la esquina superior izquierda.
+//! - Título y año debajo.
+//! - Efecto hover con elevación.
+//! - Todo el área es clickeable para abrir los detalles.
+//!
+//! La galería es responsive: el número de columnas por línea se ajusta
+//! dinámicamente al ancho de la ventana.
 
 use crate::core::poster_service::cached_path;
 use crate::db::media_repo::Media;
@@ -11,28 +18,36 @@ use gtk4::{Box, FlowBox, GestureClick, Label, Orientation, ScrolledWindow};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// Tamaño del póster en la galería (proporción 2:3).
-const CARD_POSTER_WIDTH: i32 = 200;
-const CARD_POSTER_HEIGHT: i32 = 300;
+/// Tamaño del póster en la galería (relación 2:3).
+const CARD_POSTER_WIDTH: i32 = 220;
+const CARD_POSTER_HEIGHT: i32 = 330;
 
-/// Tarjeta individual de un medio (póster + título + año).
+/// Tarjeta individual de un medio (póster + título + etiqueta de tipo).
+/// Diseño al estilo Crunchyroll: póster grande con título y etiqueta debajo.
 struct MediaCard {
     widget: Box,
 }
 
 impl MediaCard {
     fn new(media: &Media, on_select: Rc<dyn Fn(i64)>) -> Self {
-        let card = Box::new(Orientation::Vertical, 6);
-        card.add_css_class("poster-card");
+        let card = Box::new(Orientation::Vertical, 8);
+        card.add_css_class("media-card");
         card.set_halign(gtk4::Align::Center);
         card.set_valign(gtk4::Align::Start);
-        card.set_size_request(220, 390);
-        card.set_margin_top(4);
-        card.set_margin_bottom(4);
-        card.set_margin_start(4);
-        card.set_margin_end(4);
+        card.set_margin_top(12);
+        card.set_margin_bottom(12);
+        card.set_margin_start(10);
+        card.set_margin_end(10);
 
-        // Cargar póster desde caché si está disponible.
+        // Póster (ocupa la mayor parte de la tarjeta).
+        let poster_stack = Box::new(Orientation::Vertical, 0);
+        poster_stack.set_hexpand(false);
+        poster_stack.set_vexpand(false);
+        poster_stack.set_halign(gtk4::Align::Center);
+        poster_stack.set_valign(gtk4::Align::Start);
+        poster_stack.set_size_request(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
+
+        // Póster.
         let pixbuf = media
             .poster_path
             .as_deref()
@@ -50,24 +65,43 @@ impl MediaCard {
         match pixbuf {
             Some(pixbuf) => {
                 let picture = poster_picture(&pixbuf, CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
-                card.append(&picture);
+                picture.add_css_class("media-poster");
+                poster_stack.append(&picture);
             }
             None => {
                 let placeholder = placeholder_widget(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
-                card.append(&placeholder);
+                placeholder.add_css_class("media-poster");
+                poster_stack.append(&placeholder);
             }
         }
 
-        // Título
+        card.append(&poster_stack);
+
+        // Etiqueta de tipo (Anime / Serie / Película) debajo del póster.
+        let type_label_text = match media.r#type.as_str() {
+            "anime" => "Anime",
+            "series" => "Serie",
+            "movie" => "Película",
+            other => other,
+        };
+        let type_label = Label::new(Some(type_label_text));
+        type_label.set_halign(gtk4::Align::Center);
+        type_label.set_valign(gtk4::Align::Start);
+        type_label.add_css_class("card-type-label");
+        card.append(&type_label);
+
+        // Título.
         let title_label = Label::new(Some(&media.title));
         title_label.set_wrap(true);
-        title_label.set_max_width_chars(24);
+        title_label.set_max_width_chars(22);
         title_label.set_justify(gtk4::Justification::Center);
         title_label.set_halign(gtk4::Align::Center);
+        title_label.set_valign(gtk4::Align::Start);
+        title_label.set_lines(2);
         title_label.add_css_class("poster-title");
         card.append(&title_label);
 
-        // Año si está disponible
+        // Año.
         if let Some(year) = media.year {
             let year_label = Label::new(Some(&format!("{}", year)));
             year_label.add_css_class("poster-year");
@@ -75,11 +109,12 @@ impl MediaCard {
             card.append(&year_label);
         }
 
-        // Todo el tarjetón es clickeable
+        // Todo el tarjetón es clickeable.
         let click = GestureClick::new();
         let media_id = media.id;
+        let on_select_clone = on_select.clone();
         click.connect_pressed(move |_, _, _, _| {
-            on_select(media_id);
+            on_select_clone(media_id);
         });
         card.add_controller(click);
 
@@ -108,16 +143,16 @@ impl MediaList {
         flowbox.set_vexpand(true);
         flowbox.set_valign(gtk4::Align::Start);
         flowbox.set_halign(gtk4::Align::Fill);
-        flowbox.set_max_children_per_line(8);
+        flowbox.set_max_children_per_line(5);
         flowbox.set_min_children_per_line(1);
-        flowbox.set_row_spacing(20);
-        flowbox.set_column_spacing(20);
+        flowbox.set_row_spacing(28);
+        flowbox.set_column_spacing(24);
         flowbox.set_homogeneous(true);
         flowbox.set_selection_mode(gtk4::SelectionMode::None);
-        flowbox.set_margin_top(10);
-        flowbox.set_margin_bottom(10);
-        flowbox.set_margin_start(10);
-        flowbox.set_margin_end(10);
+        flowbox.set_margin_top(20);
+        flowbox.set_margin_bottom(20);
+        flowbox.set_margin_start(20);
+        flowbox.set_margin_end(20);
 
         let scrolled = ScrolledWindow::new();
         scrolled.set_hexpand(true);
@@ -140,13 +175,29 @@ impl MediaList {
         &self.content
     }
 
+    /// Ajusta el número máximo de columnas por línea según el ancho
+    /// disponible de la galería, para que sea responsive en distintas
+    /// resoluciones de pantalla.
+    pub fn set_responsive_columns(&self, available_width: i32) {
+        // Cada tarjeta ocupa ~284px (poster 220 + márgenes y padding).
+        // Calculamos cuántas caben con un mínimo de 2 y un máximo de 8.
+        let card_width = CARD_POSTER_WIDTH + 56; // 220 + 32 de márgenes laterales
+        let columns = if available_width < 600 {
+            2
+        } else {
+            (available_width / card_width).clamp(2, 8)
+        };
+        self.flowbox
+            .set_max_children_per_line(columns.try_into().unwrap_or(2));
+        self.flowbox.set_min_children_per_line(1);
+    }
+
     pub fn set_media(&mut self, media: Vec<Media>) {
         *self.media.borrow_mut() = media;
         self.refresh();
     }
 
     pub fn refresh(&self) {
-        // Remover todos los hijos existentes del FlowBox
         while let Some(child) = self.flowbox.first_child() {
             self.flowbox.remove(&child);
         }

@@ -20,6 +20,7 @@ pub struct Media {
     pub is_favorite: bool,
     pub is_watched: bool,
     pub parent_id: Option<i64>,
+    pub rating: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -120,7 +121,7 @@ impl<'a> MediaRepository<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
-                    metadata_fetched_at, parent_id
+                    metadata_fetched_at, parent_id, rating
              FROM media WHERE id = ?1",
         )?;
         let row = stmt.query_row(params![id], map_media_row);
@@ -131,11 +132,104 @@ impl<'a> MediaRepository<'a> {
         }
     }
 
+    /// Obtiene el póster de un medio por su ID.
+    pub fn get_poster_by_id(&mut self, id: i64) -> RusqliteResult<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT poster_path FROM media WHERE id = ?1")?;
+        let row = stmt.query_row(params![id], |row| row.get::<_, Option<String>>(0));
+        match row {
+            Ok(poster) => Ok(poster),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Obtiene la ruta del primer archivo de un medio o de sus episodios
+    /// (para usarse como objetivo predeterminado al seleccionar pistas).
+    pub fn first_file_path_for_media(&mut self, media_id: i64) -> RusqliteResult<Option<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT mf.file_path FROM media_files mf
+             WHERE mf.media_id = ?1 OR mf.media_id IN (
+                 SELECT id FROM media WHERE parent_id = ?1
+             )
+             ORDER BY mf.id LIMIT 1",
+        )?;
+        let row = stmt.query_row(params![media_id], |row| row.get(0));
+        match row {
+            Ok(path) => Ok(Some(path)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Obtiene el siguiente episodio no visto de una serie/anime.
+    /// Busca el primer archivo (ordenado por temporada, episodio) que no tenga
+    /// registro en playback_history.
+    pub fn get_next_episode_to_watch(
+        &mut self,
+        media_id: i64,
+    ) -> RusqliteResult<Option<(i64, String, String)>> {
+        // (id, file_path, episode_label)
+        let mut stmt = self.conn.prepare(
+            "SELECT mf.id, mf.file_path,
+                    mf.season, mf.episode, mf.title
+             FROM media_files mf
+             WHERE mf.media_id = ?1 OR mf.media_id IN (
+                 SELECT id FROM media WHERE parent_id = ?1
+             )
+             AND mf.id NOT IN (
+                 SELECT DISTINCT ph.media_id FROM playback_history ph WHERE ph.media_id = mf.id
+             )
+             ORDER BY mf.season NULLS LAST, mf.episode NULLS LAST, mf.id ASC
+             LIMIT 1",
+        )?;
+        let row = stmt.query_row(params![media_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                format!(
+                    "S{}E{} - {}",
+                    row.get::<_, Option<i32>>(2)?.unwrap_or(0),
+                    row.get::<_, Option<i32>>(3)?.unwrap_or(0),
+                    row.get::<_, Option<String>>(4)?.unwrap_or_default()
+                ),
+            ))
+        });
+        match row {
+            Ok(data) => Ok(Some(data)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Califica un medio (1-5 estrellas).
+    pub fn set_rating(&mut self, media_id: i64, rating: i32) -> RusqliteResult<()> {
+        self.conn.execute(
+            "UPDATE media SET rating = ?1, updated_at = datetime('now') WHERE id = ?2",
+            params![rating, media_id],
+        )?;
+        Ok(())
+    }
+
+    /// Obtiene la calificación de un medio (0 si no tiene).
+    pub fn get_rating(&mut self, media_id: i64) -> RusqliteResult<i32> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT rating FROM media WHERE id = ?1")?;
+        let row = stmt.query_row(params![media_id], |row| row.get::<_, i32>(0));
+        match row {
+            Ok(rating) => Ok(rating),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
+            Err(e) => Err(e),
+        }
+    }
+
     pub fn list(&mut self, options: ListMediaOptions) -> RusqliteResult<Vec<Media>> {
         let mut sql = String::from(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
-                    metadata_fetched_at, parent_id
+                    metadata_fetched_at, parent_id, rating
              FROM media",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -193,7 +287,7 @@ impl<'a> MediaRepository<'a> {
                 "SELECT m.id, m.type, m.title, m.sort_title, m.year, m.folder_path,
                         m.created_at, m.updated_at,
                         m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
-                        m.metadata_fetched_at, m.parent_id
+                        m.metadata_fetched_at, m.parent_id, m.rating
                  FROM media m
                  JOIN media_fts f ON f.rowid = m.id
                  WHERE media_fts MATCH ?1 AND m.parent_id IS NULL",
@@ -282,7 +376,7 @@ impl<'a> MediaRepository<'a> {
         let sql = String::from(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
-                    metadata_fetched_at, parent_id
+                    metadata_fetched_at, parent_id, rating
              FROM media WHERE parent_id = ?1 ORDER BY sort_title ASC",
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -519,6 +613,7 @@ fn map_media_row(row: &rusqlite::Row<'_>) -> RusqliteResult<Media> {
         synopsis: row.get(12)?,
         metadata_fetched_at: row.get(13)?,
         parent_id: row.get(14)?,
+        rating: row.get::<_, i32>(15).unwrap_or(0),
     })
 }
 
