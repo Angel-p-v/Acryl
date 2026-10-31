@@ -30,8 +30,9 @@ const CARD_WIDTH: u32 = 200;
 /// Espaciado mínimo entre tarjetas (horizontal y vertical).
 const CARD_SPACING: i32 = 16;
 
-/// Margen exterior de la galería respecto al área de contenido (primer tarjeta desde el borde).
-const GALLERY_MARGIN: i32 = 4;
+/// Margen exterior de la galería respecto al área de contenido (igual al
+/// espacio entre tarjetas, para consistencia visual en ambos extremos).
+const GALLERY_MARGIN: i32 = 16;
 
 /// Número mínimo y máximo de columnas por línea.
 const MIN_COLUMNS: u32 = 2;
