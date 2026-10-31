@@ -28,7 +28,7 @@ const CARD_POSTER_HEIGHT: i32 = 300;
 const CARD_WIDTH: u32 = 200;
 
 /// Espaciado mínimo entre tarjetas (horizontal y vertical).
-const CARD_SPACING: i32 = 4;
+const CARD_SPACING: i32 = 2;
 
 /// Margen exterior de la galería respecto al área de contenido (primer tarjeta desde el borde).
 const GALLERY_MARGIN: i32 = 12;
@@ -53,6 +53,7 @@ impl MediaCard {
         // la izquierda, sin ocupar el espacio sobrante de forma individual.
         card.set_halign(gtk4::Align::Start);
         card.set_valign(gtk4::Align::Start);
+        card.set_hexpand(false);
         card.set_margin_top(CARD_SPACING);
         card.set_margin_bottom(CARD_SPACING);
         card.set_margin_start(0);
@@ -157,17 +158,19 @@ impl MediaList {
         content.set_hexpand(true);
 
         let flowbox = FlowBox::new();
-        flowbox.set_hexpand(true);
+        flowbox.set_hexpand(false);
         flowbox.set_vexpand(true);
         flowbox.set_valign(gtk4::Align::Start);
-        flowbox.set_halign(gtk4::Align::Fill);
+        flowbox.set_halign(gtk4::Align::Start);
         // Las tarjetas se distribuyen desde la izquierda sin centrar cada una
         // individualmente ni repartir el espacio sobrentante entre ellas.
+        // homogeneous=false para que cada tarjeta conserve su tamaño natural
+        // y no se expanda para llenar el ancho disponible.
         flowbox.set_max_children_per_line(MIN_COLUMNS);
         flowbox.set_min_children_per_line(1);
         flowbox.set_row_spacing(CARD_SPACING as u32);
         flowbox.set_column_spacing(CARD_SPACING as u32);
-        flowbox.set_homogeneous(true);
+        flowbox.set_homogeneous(false);
         flowbox.set_selection_mode(gtk4::SelectionMode::None);
         flowbox.set_margin_top(GALLERY_MARGIN);
         flowbox.set_margin_bottom(GALLERY_MARGIN);
