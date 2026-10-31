@@ -17,6 +17,8 @@ pub struct MediaFile {
     pub subtitle_stream_index: Option<i32>,
     pub subtitles_disabled: bool,
     pub streams_indexed_at: Option<String>,
+    /// Ruta de la imagen específica de este episodio (thumbnail), si existe.
+    pub episode_image_path: Option<String>,
 }
 
 /// Preferencia de pistas de audio y subtítulos de un archivo.
@@ -102,7 +104,7 @@ impl<'a> FileRepository<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT id, media_id, season, episode, title, file_path, size_bytes, mtime_ms,
                     indexed_at, audio_stream_index, subtitle_stream_index, subtitles_disabled,
-                    streams_indexed_at
+                    streams_indexed_at, episode_image_path
              FROM media_files WHERE media_id = ?1 ORDER BY season, episode, file_path",
         )?;
         let rows: Vec<MediaFile> = stmt
@@ -204,6 +206,7 @@ fn map_file_row(row: &rusqlite::Row<'_>) -> RusqliteResult<MediaFile> {
         subtitle_stream_index: row.get(10)?,
         subtitles_disabled: row.get::<_, i64>(11)? != 0,
         streams_indexed_at: row.get(12)?,
+        episode_image_path: row.get(13)?,
     })
 }
 

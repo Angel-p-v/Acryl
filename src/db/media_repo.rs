@@ -842,8 +842,9 @@ mod tests {
              CREATE TABLE IF NOT EXISTS media_files (
                 id          INTEGER PRIMARY KEY,
                 media_id    INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
-                file_path   TEXT    NOT NULL UNIQUE
-            );
+                file_path   TEXT    NOT NULL UNIQUE,
+                 episode_image_path TEXT
+             );
              CREATE TABLE IF NOT EXISTS media_streams (
                 id          INTEGER PRIMARY KEY,
                 media_id    INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,

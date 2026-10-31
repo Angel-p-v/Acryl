@@ -194,13 +194,12 @@ impl Default for BannerPalette {
 /// oscuro en la parte inferior. Si no hay banner, dibuja un degradado a partir
 /// de los colores del póster. El título y el subtítulo se superponen.
 ///
-/// Debajo del banner se puede solapar el póster vertical (Crunchyroll lo hace
-/// así en las páginas de serie/anime).
+/// En las vistas de detalle se muestra exclusivamente el banner como imagen
+/// principal; el póster vertical ya no se duplica junto al banner.
 pub struct Banner {
     overlay: Overlay,
     picture: Picture,
     drawing: DrawingArea,
-    poster_picture: Picture,
     text_box: Box,
     palette: Rc<RefCell<BannerPalette>>,
     title_label: Label,
@@ -230,20 +229,6 @@ impl Banner {
             draw_banner(cr, width, height, *palette_for_draw.borrow());
         });
 
-        // Póster vertical superpuesto sobre el banner (estilo Crunchyroll):
-        // se posiciona abajo-izquierda, sobresaliendo ligeramente del borde
-        // inferior del banner.
-        let poster_picture = Picture::new();
-        poster_picture.set_hexpand(false);
-        poster_picture.set_vexpand(false);
-        poster_picture.set_halign(gtk4::Align::Start);
-        poster_picture.set_valign(gtk4::Align::End);
-        poster_picture.set_margin_start(24);
-        poster_picture.set_margin_bottom(-40);
-        poster_picture.set_size_request(180, 270);
-        poster_picture.set_content_fit(gtk4::ContentFit::Cover);
-        poster_picture.set_visible(false);
-
         let overlay = Overlay::new();
         overlay.set_child(Some(&drawing));
         overlay.set_hexpand(true);
@@ -255,9 +240,6 @@ impl Banner {
 
         overlay.add_overlay(&picture);
         overlay.set_measure_overlay(&picture, true);
-
-        overlay.add_overlay(&poster_picture);
-        overlay.set_measure_overlay(&poster_picture, false);
 
         let title_label = Label::new(None);
         title_label.set_halign(gtk4::Align::Start);
@@ -287,7 +269,6 @@ impl Banner {
             overlay,
             picture,
             drawing,
-            poster_picture,
             text_box,
             palette,
             title_label,
@@ -334,27 +315,10 @@ impl Banner {
             }
         }
 
-        // Póster superpuesto: se muestra si hay póster disponible.
-        let poster = poster_url
-            .filter(|url| !url.is_empty())
-            .and_then(cached_path)
-            .and_then(|cache_path| GtkPixbuf::from_file_at_scale(&cache_path, 180, 270, true).ok());
-
-        match poster {
-            Some(pixbuf) => {
-                let texture = gtk4::gdk::Texture::for_pixbuf(&pixbuf);
-                self.poster_picture.set_paintable(Some(&texture));
-                self.poster_picture.set_visible(true);
-                // Ajustar margen izquierdo del texto para dejar espacio al póster superpuesto.
-                self.text_box.set_margin_start(220);
-            }
-            None => {
-                self.poster_picture.set_paintable(gtk4::gdk::Texture::NONE);
-                self.poster_picture.set_visible(false);
-                // Sin póster superpuesto, margen normal.
-                self.text_box.set_margin_start(28);
-            }
-        }
+        // El póster vertical ya no se superpone al banner en las vistas de
+        // detalle (solo el banner es la imagen principal). El margen del texto
+        // se mantiene siempre igual.
+        self.text_box.set_margin_start(28);
     }
 }
 

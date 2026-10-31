@@ -418,50 +418,6 @@ impl MainWindow {
                 w.show_list();
             });
 
-        let this_clone = this.clone();
-        this.borrow_mut()
-            .media_details
-            .borrow_mut()
-            .on_favorite(move || {
-                let w = this_clone.borrow();
-                w.toggle_favorite();
-            });
-
-        let this_clone = this.clone();
-        this.borrow_mut()
-            .media_details
-            .borrow_mut()
-            .on_watched(move || {
-                let w = this_clone.borrow();
-                w.toggle_watched();
-            });
-
-        let this_clone = this.clone();
-        this.borrow_mut()
-            .media_details
-            .borrow_mut()
-            .on_rate(move |rating| {
-                let this = this_clone.clone();
-                let w = this.borrow();
-                let media_id = w.media_details.borrow().media_id();
-                let db_path = w.db_path.clone();
-                let mut conn = match open_db(&db_path) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        eprintln!("Error abriendo BD: {}", e);
-                        return;
-                    }
-                };
-                let mut repo = MediaRepository::new(&mut conn);
-                if let Err(e) = repo.set_rating(media_id, rating) {
-                    eprintln!("Error calificando medio: {}", e);
-                }
-                close_db(conn);
-                // Refrescar para mostrar la nueva calificación.
-                w.media_details.borrow_mut().load_media(media_id);
-                w.show_toast(&format!("Calificación: {}★", rating));
-            });
-
         // Callback: reproducir el archivo principal (episodio por ver o primero).
         let this_clone = this.clone();
         this.borrow_mut()
@@ -497,10 +453,6 @@ impl MainWindow {
                 );
             });
 
-        // Callback: cambiar de temporada (navegar a los detalles de esa temporada).
-        // Se difiere con timeout_add_local para evitar reentrancy de RefCell
-        // (el notify del dropdown se dispara dentro de set_media, que ya tiene
-        // borrow_mut de media_details).
         let this_clone = this.clone();
         this.borrow_mut()
             .media_details
@@ -509,7 +461,11 @@ impl MainWindow {
                 let this = this_clone.clone();
                 glib::timeout_add_local(std::time::Duration::from_millis(0), move || {
                     let w = this.borrow();
-                    w.show_details(season_id);
+                    // Recargar únicamente los episodios de la temporada
+                    // seleccionada, sin mezclar temporadas distintas.
+                    w.media_details
+                        .borrow_mut()
+                        .load_episodes_for_season(season_id);
                     glib::ControlFlow::Break
                 });
             });
@@ -763,44 +719,6 @@ impl MainWindow {
         w.media_count = media_count;
         w.media_list.set_media(media);
         Self::update_library_status(&w);
-    }
-
-    fn toggle_favorite(&self) {
-        let media_id = self.media_details.borrow().media_id();
-        let mut conn = match open_db(&self.db_path) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Error abriendo BD: {}", e);
-                return;
-            }
-        };
-        let mut repo = MediaRepository::new(&mut conn);
-        let _ = repo.toggle_favorite(media_id);
-        if let Some(m) = repo.find_by_id(media_id).unwrap_or(None) {
-            close_db(conn);
-            self.media_details.borrow_mut().set_media(&m);
-        } else {
-            close_db(conn);
-        }
-    }
-
-    fn toggle_watched(&self) {
-        let media_id = self.media_details.borrow().media_id();
-        let mut conn = match open_db(&self.db_path) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Error abriendo BD: {}", e);
-                return;
-            }
-        };
-        let mut repo = MediaRepository::new(&mut conn);
-        let _ = repo.toggle_watched(media_id);
-        if let Some(m) = repo.find_by_id(media_id).unwrap_or(None) {
-            close_db(conn);
-            self.media_details.borrow_mut().set_media(&m);
-        } else {
-            close_db(conn);
-        }
     }
 
     fn play_episode(&self, file_path: &str) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
