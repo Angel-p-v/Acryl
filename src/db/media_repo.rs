@@ -214,7 +214,9 @@ impl<'a> MediaRepository<'a> {
 
     /// Obtiene la calificación de un medio (0 si no tiene).
     pub fn get_rating(&mut self, media_id: i64) -> RusqliteResult<i32> {
-        let mut stmt = self.conn.prepare("SELECT rating FROM media WHERE id = ?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT rating FROM media WHERE id = ?1")?;
         let row = stmt.query_row(params![media_id], |row| row.get::<_, i32>(0));
         match row {
             Ok(rating) => Ok(rating),

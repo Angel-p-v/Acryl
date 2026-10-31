@@ -1,8 +1,13 @@
-//! Componentes de imagen: pósters de la galería y banner de la vista de detalles.
-//! Los pósters y banners se cargan desde la caché local; si el medio no tiene
-//! banner, se dibuja un degradado con los colores dominantes del póster.
+//! Componentes de imagen: pósters y banner hero de la vista de detalles.
+//!
+//! El banner sigue el diseño de Crunchyroll:
+//! - Ancho completo, altura fija (450px).
+//! - Degradado oscuro en la parte inferior para que el texto sea legible.
+//! - Título y subtítulo superpuestos a la imagen.
+//! - Si no hay banner, se dibuja un degradado con los colores dominantes del póster.
 
 use crate::core::poster_service::cached_path;
+use crate::ui::theme;
 use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
 use gtk4::{Box, DrawingArea, Image, Label, Orientation, Overflow, Overlay, Picture};
@@ -11,191 +16,105 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use std::rc::Rc;
 use std::sync::Once;
 
-/// Altura del banner de la vista de detalles.
-const BANNER_HEIGHT: i32 = 450;
+/// Altura del banner hero de la vista de detalles (Crunchyroll usa banners altos).
+const BANNER_HEIGHT: i32 = 520;
 
-/// Tamaño máximo con el que se carga la imagen del banner (se recorta con
-/// `ContentFit::Cover` al espacio disponible).
+/// Tamaño máximo con el que se carga la imagen del banner.
 const BANNER_IMAGE_MAX_WIDTH: i32 = 1920;
 const BANNER_IMAGE_MAX_HEIGHT: i32 = 1080;
 
-/// Radio de las esquinas del banner, en píxeles.
-const BANNER_RADIUS: f64 = 16.0;
+/// Radio de las esquinas del banner.
+const BANNER_RADIUS: f64 = 0.0; // Crunchyroll usa esquinas cuadradas en el banner hero
 
-/// Resolución a la que se muestrea el póster para extraer su paleta.
+/// Resolución para muestrar la paleta del póster.
 const PALETTE_SAMPLE_SIZE: i32 = 24;
 
-/// Estilos compartidos por las tarjetas, los pósters y el banner.
 static INSTALL_POSTER_CSS: Once = Once::new();
 
-/// Instala una sola vez los estilos de las tarjetas, los pósters y el banner.
+/// Instala los estilos de los pósters y el banner hero.
 pub fn install_poster_css() {
     INSTALL_POSTER_CSS.call_once(|| {
         let provider = gtk4::CssProvider::new();
-        provider.load_from_data(
-            ".poster-card { \
-                 background-color: #2a2a2a; \
-                 border: 1px solid #3a3a3a; \
-                 border-radius: 10px; \
-                 padding: 8px; \
-                 transition: all 200ms ease; \
-             } \
-             .poster-card:hover { \
-                 background-color: #333333; \
-                 border-color: #ff6b35; \
-                 transform: scale(1.02); \
-             } \
-             .poster-card:selected { \
-                 background-color: #3a3a3a; \
-                 border-color: #ff6b35; \
-             } \
-             .poster-placeholder { \
-                 background-color: #333333; \
-                 border-radius: 8px; \
-             } \
-             .poster-title { \
-                 font-weight: 600; \
-                 font-size: 0.95em; \
-                 color: #ffffff; \
-             } \
-             .poster-year { \
-                 font-size: 0.85em; \
-                 color: #a0a0a0; \
-             } \
-             .banner { border-radius: 16px; } \
-             .banner-title { \
-                 font-size: 2.2em; \
-                 font-weight: 800; \
-                 color: #ffffff; \
-             } \
-             .banner-subtitle { \
-                 font-size: 1.1em; \
-                 color: #cccccc; \
-             } \
-             .episode-row { \
-                 background-color: #2a2a2a; \
-                 border: 1px solid #3a3a3a; \
-                 border-radius: 8px; \
-                 padding: 8px 12px; \
-                 margin: 4px 0; \
-                 transition: all 150ms ease; \
-             } \
-             .episode-row:hover { \
-                 background-color: #333333; \
-                 border-color: #ff6b35; \
-             } \
-             .episode-row:selected { \
-                 background-color: #3a3a3a; \
-                 border-color: #ff6b35; \
-             } \
-             .season-section { \
-                 margin-top: 24px; \
-             } \
-             .season-title { \
-                 font-weight: 700; \
-                 font-size: 1.1em; \
-                 color: #ffffff; \
-                 margin-bottom: 8px; \
-             } \
-             .play-button { \
-                 background-color: #ff6b35; \
-                 color: #ffffff; \
-                 border-radius: 4px; \
-                 font-weight: 600; \
-                 min-width: 100px; \
-                 min-height: 36px; \
-             } \
-             .play-button:hover { \
-                 background-color: #e85a2c; \
-             } \
-             .flat-button { \
-                 background-color: transparent; \
-                 border: none; \
-                 color: #cccccc; \
-                 font-size: 0.9em; \
-             } \
-             .flat-button:hover { \
-                 color: #ffffff; \
-                 background-color: #3a3a3a; \
-                 border-radius: 4px; \
-             } \
-             .details-header { \
-                 background-color: #1a1a1a; \
-                 border-radius: 16px; \
-                 padding: 20px; \
-                 margin-bottom: 16px; \
-             } \
-             .synopsis-text { \
-                 color: #e0e0e0; \
-                 line-height: 1.5; \
-             } \
-             .media-type { \
-                 font-size: 0.8em; \
-                 text-transform: uppercase; \
-                 letter-spacing: 1px; \
-                 color: #ff6b35; \
-                 font-weight: 700; \
-             } \
-             /* Grid de episodios al estilo Crunchyroll */ \
-             .episode-grid { \
-                 margin-top: 8px; \
-             } \
-             .episode-card { \
-                 background-color: #2a2a2a; \
-                 border: 1px solid #3a3a3a; \
-                 border-radius: 8px; \
-                 padding: 8px; \
-                 margin: 6px; \
-                 min-width: 170px; \
-                 transition: all 150ms ease; \
-             } \
-             .episode-card:hover { \
-                 background-color: #333333; \
-                 border-color: #ff6b35; \
-                 transform: scale(1.03); \
-             } \
-             .episode-card:selected { \
-                 background-color: #3a3a3a; \
-                 border-color: #ff6b35; \
-             } \
-             .episode-poster { \
-                 border-radius: 6px; \
-                 margin-bottom: 8px; \
-             } \
-             .episode-title { \
-                 font-weight: 600; \
-                 font-size: 0.82em; \
-                 color: #e0e0e0; \
-             } \
-             .episode-number { \
-                 font-size: 0.75em; \
-                 color: #a0a0a0; \
-                 margin-bottom: 4px; \
-             } \
-             .episode-play-btn { \
-                 background-color: #ff6b35; \
-                 color: #ffffff; \
-                 border-radius: 4px; \
-                 font-weight: 600; \
-                 font-size: 0.8em; \
-                 min-width: 80px; \
-                 min-height: 30px; \
-                 margin-top: 6px; \
-             } \
-             .episode-play-btn:hover { \
-                 background-color: #e85a2c; \
-             } \
-             .season-grid-section { \
-                 margin-top: 28px; \
-             } \
-             .season-grid-title { \
-                 font-weight: 700; \
-                 font-size: 1.1em; \
-                 color: #ffffff; \
-                 margin-bottom: 12px; \
-                 margin-left: 6px; \
-             }",
+        let css = format!(
+            ".poster-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; padding: 8px; transition: all {}; }}\n\
+             .poster-card:hover {{ background-color: {}; border-color: {}; transform: scale(1.02); }}\n\
+             .poster-card:selected {{ background-color: {}; border-color: {}; }}\n\
+             .poster-placeholder {{ background-color: {}; border-radius: {}; }}\n\
+             .poster-title {{ font-weight: 600; font-size: 0.95em; color: {}; }}\n\
+             .poster-year {{ font-size: 0.85em; color: {}; }}\n\
+             .banner {{ border-radius: {}; overflow: hidden; }}\n\
+             .banner-title {{ font-size: 2.5em; font-weight: 800; color: {}; letter-spacing: -0.5px; }}\n\
+             .banner-subtitle {{ font-size: 1.1em; color: {}; }}\n\
+             .episode-row {{ background-color: {}; border: 1px solid {}; border-radius: {}; padding: 8px 12px; margin: 4px 0; transition: all {}; }}\n\
+             .episode-row:hover {{ background-color: {}; border-color: {}; }}\n\
+             .episode-row:selected {{ background-color: {}; border-color: {}; }}\n\
+             .season-section {{ margin-top: 24px; }}\n\
+             .season-title {{ font-weight: 700; font-size: 1.2em; color: {}; margin-bottom: 12px; }}\n\
+             .play-button {{ background-color: {}; color: {}; border-radius: {}; font-weight: 700; min-width: 120px; min-height: 44px; }}\n\
+             .play-button:hover {{ background-color: {}; }}\n\
+             .flat-button {{ background-color: transparent; border: none; color: {}; font-size: 0.9em; padding: 6px 12px; }}\n\
+             .flat-button:hover {{ color: {}; background-color: {}; border-radius: {}; }}\n\
+             .details-header {{ background-color: {}; border-radius: {}; padding: 24px; margin-bottom: 24px; }}\n\
+             .synopsis-text {{ color: {}; line-height: 1.6; }}\n\
+             .media-type {{ font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: {}; font-weight: 700; }}\n\
+             .episode-grid {{ margin-top: 8px; }}\n\
+             .episode-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; padding: 8px; margin: 6px; min-width: 170px; transition: all {}; overflow: hidden; }}\n\
+             .episode-card:hover {{ background-color: {}; border-color: {}; transform: scale(1.02); }}\n\
+             .episode-card:selected {{ background-color: {}; border-color: {}; }}\n\
+             .episode-poster {{ border-radius: {}; margin-bottom: 8px; }}\n\
+             .episode-title {{ font-weight: 600; font-size: 0.82em; color: {}; }}\n\
+             .episode-number {{ font-size: 0.75em; color: {}; margin-bottom: 4px; }}\n\
+             .episode-play-btn {{ background-color: {}; color: {}; border: none; border-radius: {}; font-weight: 700; min-width: 72px; min-height: 30px; }}\n\
+             .episode-play-btn:hover {{ background-color: {}; }}\n\
+             .season-grid-section {{ margin-top: 28px; }}\n\
+             .season-grid-title {{ font-weight: 700; font-size: 1.2em; color: {}; margin-bottom: 12px; margin-left: 6px; }}\n\
+             .hero-actions {{ spacing: 10px; }}\n\
+             .hero-action-btn {{ min-height: 40px; padding: 0 16px; font-weight: 700; border-radius: {}; }}\n\
+             .hero-action-btn.primary {{ background-color: {}; color: {}; border: none; }}\n\
+             .hero-action-btn.primary:hover {{ background-color: {}; }}\n\
+             .hero-action-btn.secondary {{ background-color: {}; color: {}; border: 1px solid {}; }}\n\
+             .hero-action-btn.secondary:hover {{ border-color: {}; background-color: {}; }}\n\
+             .season-dropdown {{ min-width: 180px; }}\n\
+             .rating-stars {{ color: {}; }}\n\
+             .rating-stars .filled {{ color: {}; }}\n",
+            theme::colors::CARD, theme::colors::BORDER, theme::radius::LARGE, theme::transition::NORMAL,
+            theme::colors::SURFACE, theme::colors::BORDER_HOVER,
+            theme::colors::SURFACE, theme::colors::ACCENT,
+            theme::colors::CARD, theme::radius::MEDIUM,
+            theme::colors::TEXT_PRIMARY,
+            theme::colors::TEXT_SECONDARY,
+            theme::radius::LARGE,
+            theme::colors::TEXT_PRIMARY,
+            theme::colors::TEXT_SECONDARY,
+            theme::colors::CARD, theme::colors::BORDER, theme::radius::MEDIUM, theme::transition::FAST,
+            theme::colors::SURFACE, theme::colors::BORDER_HOVER,
+            theme::colors::SURFACE, theme::colors::ACCENT,
+            theme::colors::TEXT_PRIMARY,
+            theme::colors::ACCENT, theme::colors::BTN_PRIMARY_TEXT, theme::radius::SMALL,
+            theme::colors::ACCENT_HOVER,
+            theme::colors::TEXT_SECONDARY,
+            theme::colors::TEXT_PRIMARY, theme::colors::SURFACE, theme::radius::SMALL,
+            theme::colors::SURFACE, theme::radius::LARGE,
+            theme::colors::TEXT_SECONDARY,
+            theme::colors::ACCENT,
+            theme::colors::CARD, theme::colors::BORDER, theme::radius::MEDIUM, theme::transition::FAST,
+            theme::colors::SURFACE, theme::colors::BORDER_HOVER,
+            theme::colors::SURFACE, theme::colors::ACCENT,
+            theme::radius::SMALL,
+            theme::colors::TEXT_PRIMARY,
+            theme::colors::TEXT_SECONDARY,
+            theme::colors::ACCENT, theme::colors::BTN_PRIMARY_TEXT, theme::radius::SMALL,
+            theme::colors::ACCENT_HOVER,
+            theme::colors::TEXT_PRIMARY,
+            theme::radius::SMALL,
+            theme::colors::ACCENT, theme::colors::BTN_PRIMARY_TEXT,
+            theme::colors::ACCENT_HOVER,
+            theme::colors::SURFACE, theme::colors::TEXT_PRIMARY, theme::colors::BORDER,
+            theme::colors::BORDER_HOVER, theme::colors::CARD,
+            theme::colors::TEXT_MUTED,
+            theme::colors::ACCENT,
         );
+        provider.load_from_data(&css);
 
         if let Some(display) = gtk4::gdk::Display::default() {
             gtk4::style_context_add_provider_for_display(
@@ -208,9 +127,6 @@ pub fn install_poster_css() {
 }
 
 /// Crea un widget de póster que escala la imagen al espacio disponible.
-///
-/// `GtkImage` dibuja los pixbufs al tamaño de icono del tema, por lo que se usa
-/// `GtkPicture` para mostrar el póster completo a su tamaño real.
 pub fn poster_picture(pixbuf: &GtkPixbuf, width: i32, height: i32) -> Picture {
     let picture = Picture::new();
     picture.set_size_request(width, height);
@@ -225,7 +141,7 @@ pub fn poster_picture(pixbuf: &GtkPixbuf, width: i32, height: i32) -> Picture {
     picture
 }
 
-/// Crea el marcador visual que se muestra cuando un medio no tiene póster.
+/// Crea el marcador visual cuando un medio no tiene póster.
 pub fn placeholder_widget(width: i32, height: i32) -> Box {
     let placeholder = Box::new(Orientation::Vertical, 0);
     placeholder.set_size_request(width, height);
@@ -257,7 +173,7 @@ impl Rgb {
     }
 }
 
-/// Paleta de dos tonos usada para dibujar el fondo del banner.
+/// Paleta de dos tonos para el fondo del banner.
 #[derive(Debug, Clone, Copy)]
 struct BannerPalette {
     start: Rgb,
@@ -267,17 +183,20 @@ struct BannerPalette {
 impl Default for BannerPalette {
     fn default() -> Self {
         Self {
-            start: Rgb::new(0.27, 0.33, 0.52),
-            end: Rgb::new(0.07, 0.08, 0.14),
+            start: Rgb::new(0.20, 0.20, 0.25),
+            end: Rgb::new(0.08, 0.08, 0.12),
         }
     }
 }
 
-/// Banner ancho de la vista de detalles.
+/// Banner hero al estilo Crunchyroll.
 ///
-/// Muestra la imagen ancha del medio (`banner_path`) recortada a lo ancho. Si
-/// el medio no tiene banner, dibuja un degradado con los colores dominantes del
-/// póster. En ambos casos superpone el título y el subtítulo.
+/// Muestra la imagen ancha (`banner_path`) a todo el ancho con un degradado
+/// oscuro en la parte inferior. Si no hay banner, dibuja un degradado a partir
+/// de los colores del póster. El título y el subtítulo se superponen.
+///
+/// Debajo del banner se puede solapar el póster vertical (Crunchyroll lo hace
+/// así en las páginas de serie/anime).
 pub struct Banner {
     overlay: Overlay,
     picture: Picture,
@@ -288,7 +207,6 @@ pub struct Banner {
 }
 
 impl Banner {
-    /// Crea un banner vacío. El título y las imágenes se asignan después.
     pub fn new() -> Self {
         install_poster_css();
 
@@ -320,8 +238,6 @@ impl Banner {
         overlay.set_overflow(Overflow::Hidden);
         overlay.add_css_class("banner");
 
-        // La imagen se añade como overlay que se expande a todo el ancho del banner:
-        // así la altura queda fijada en BANNER_HEIGHT y se recorta a lo ancho.
         overlay.add_overlay(&picture);
         overlay.set_measure_overlay(&picture, true);
 
@@ -337,13 +253,13 @@ impl Banner {
         subtitle_label.set_xalign(0.0);
         subtitle_label.add_css_class("banner-subtitle");
 
-        let text_box = Box::new(Orientation::Vertical, 4);
+        let text_box = Box::new(Orientation::Vertical, 6);
         text_box.set_halign(gtk4::Align::Fill);
         text_box.set_valign(gtk4::Align::End);
-        text_box.set_margin_top(16);
-        text_box.set_margin_bottom(18);
-        text_box.set_margin_start(20);
-        text_box.set_margin_end(20);
+        text_box.set_margin_top(24);
+        text_box.set_margin_bottom(30);
+        text_box.set_margin_start(28);
+        text_box.set_margin_end(28);
         text_box.set_can_target(false);
         text_box.append(&title_label);
         text_box.append(&subtitle_label);
@@ -359,12 +275,10 @@ impl Banner {
         }
     }
 
-    /// Devuelve el widget Gtk.
     pub fn widget(&self) -> &Overlay {
         &self.overlay
     }
 
-    /// Establece el título y el subtítulo (tipo y año) del banner.
     pub fn set_info(&mut self, title: &str, subtitle: &str) {
         self.title_label
             .set_markup(&format!("<b>{}</b>", escape_markup(title)));
@@ -372,11 +286,6 @@ impl Banner {
         self.subtitle_label.set_visible(!subtitle.is_empty());
     }
 
-    /// Establece las imágenes del banner.
-    ///
-    /// Si `banner_url` está en caché se muestra recortada a lo ancho. Si no, se
-    /// dibuja un degradado a partir de los colores dominantes del póster (sin
-    /// mostrar el póster). Si tampoco hay póster, se usa la paleta por defecto.
     pub fn set_images(&mut self, banner_url: Option<&str>, poster_url: Option<&str>) {
         let banner = banner_url
             .filter(|url| !url.is_empty())
@@ -413,7 +322,7 @@ impl Default for Banner {
     }
 }
 
-/// Dibuja el fondo del banner: degradado, formas suaves y sombra inferior.
+/// Dibuja el fondo del banner: degradado oscuro y círculos translúcidos.
 fn draw_banner(cr: &gtk4::cairo::Context, width: i32, height: i32, palette: BannerPalette) {
     let width = f64::from(width);
     let height = f64::from(height);
@@ -421,7 +330,6 @@ fn draw_banner(cr: &gtk4::cairo::Context, width: i32, height: i32, palette: Bann
         return;
     }
 
-    // Recorta el dibujo a las esquinas redondeadas del banner.
     rounded_rectangle(cr, 0.0, 0.0, width, height, BANNER_RADIUS);
     cr.clip();
 
@@ -431,25 +339,18 @@ fn draw_banner(cr: &gtk4::cairo::Context, width: i32, height: i32, palette: Bann
     let _ = cr.set_source(&gradient);
     let _ = cr.paint();
 
-    // Círculos translúcidos que aportan profundidad al degradado.
-    cr.set_source_rgba(1.0, 1.0, 1.0, 0.07);
-    cr.arc(width * 0.82, height * 0.16, height * 0.8, 0.0, TAU);
+    cr.set_source_rgba(1.0, 1.0, 1.0, 0.05);
+    cr.arc(width * 0.85, height * 0.15, height * 0.9, 0.0, TAU);
     let _ = cr.fill();
 
-    cr.set_source_rgba(0.0, 0.0, 0.0, 0.12);
-    cr.arc(width * 0.08, height * 1.05, height * 0.95, 0.0, TAU);
-    let _ = cr.fill();
-
-    // Sombra inferior para que el título y el subtítulo sean legibles.
     let shade = gtk4::cairo::LinearGradient::new(0.0, height, 0.0, 0.0);
-    shade.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, 0.72);
-    shade.add_color_stop_rgba(0.55, 0.0, 0.0, 0.0, 0.10);
+    shade.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, 0.80);
+    shade.add_color_stop_rgba(0.50, 0.0, 0.0, 0.0, 0.15);
     shade.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 0.0);
     let _ = cr.set_source(&shade);
     let _ = cr.paint();
 }
 
-/// Traza un rectángulo con esquinas redondeadas.
 fn rounded_rectangle(
     cr: &gtk4::cairo::Context,
     x: f64,
@@ -473,7 +374,6 @@ fn rounded_rectangle(
     cr.close_path();
 }
 
-/// Calcula una paleta a partir del color dominante del póster en caché.
 fn poster_palette(poster_url: Option<&str>) -> BannerPalette {
     let Some(url) = poster_url.filter(|url| !url.is_empty()) else {
         return BannerPalette::default();
@@ -491,12 +391,11 @@ fn poster_palette(poster_url: Option<&str>) -> BannerPalette {
     };
 
     BannerPalette {
-        start: mix(base, Rgb::new(1.0, 1.0, 1.0), 0.20),
-        end: mix(base, Rgb::new(0.0, 0.0, 0.0), 0.72),
+        start: mix(base, Rgb::new(1.0, 1.0, 1.0), 0.15),
+        end: mix(base, Rgb::new(0.0, 0.0, 0.0), 0.78),
     }
 }
 
-/// Extrae el color dominante del póster priorizando la saturación y el brillo.
 fn dominant_color(pixbuf: &GtkPixbuf) -> Option<Rgb> {
     let width = pixbuf.width() as usize;
     let height = pixbuf.height() as usize;
@@ -542,7 +441,6 @@ fn dominant_color(pixbuf: &GtkPixbuf) -> Option<Rgb> {
     ))
 }
 
-/// Mezcla dos colores: `t = 0.0` devuelve `a` y `t = 1.0` devuelve `b`.
 fn mix(a: Rgb, b: Rgb, t: f64) -> Rgb {
     Rgb::new(
         a.r + (b.r - a.r) * t,

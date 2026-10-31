@@ -38,6 +38,8 @@ type MainWindowRef = Rc<RefCell<MainWindow>>;
 
 impl MainWindow {
     pub fn new(app: &gtk4::Application, config: crate::Config) -> MainWindowRef {
+        crate::ui::theme::install_theme_css();
+
         let db_path = config.inner().db_path.clone();
         let config_path = config.path().to_path_buf();
 
@@ -57,24 +59,51 @@ impl MainWindow {
         toast_overlay.set_child(Some(&content));
         window.set_content(Some(&toast_overlay));
 
-        // Barra superior: búsqueda + botón de ajustes
-        let top_bar = Box::new(Orientation::Horizontal, 10);
+        // Barra superior al estilo Crunchyroll: logo a la izquierda,
+        // búsqueda en el centro, ajustes a la derecha.
+        let top_bar = Box::new(Orientation::Horizontal, 0);
         top_bar.set_hexpand(true);
         top_bar.set_halign(gtk4::Align::Fill);
+        top_bar.add_css_class("top-bar");
 
+        // Logo / nombre de la app a la izquierda.
+        let logo_label = Label::new(Some("Acryl"));
+        logo_label.set_halign(gtk4::Align::Start);
+        logo_label.set_valign(gtk4::Align::Center);
+        logo_label.set_margin_start(16);
+        logo_label.set_margin_end(24);
+        logo_label.set_xalign(0.0);
+        logo_label.set_hexpand(false);
+        logo_label.set_markup("<b><span size='large' foreground='#f75c03'>A</span>cryl</b>");
+        top_bar.append(&logo_label);
+
+        // Barra de búsqueda central.
         let search_bar = SearchBar::new(&db_path);
+        search_bar.widget().set_hexpand(true);
+        search_bar.widget().set_margin_start(0);
+        search_bar.widget().set_margin_end(0);
         top_bar.append(search_bar.widget());
 
-        // Indicador de carpetas indexadas y número de medios cargados.
+        // Indicador de biblioteca y botón de ajustes a la derecha.
+        let right_box = Box::new(Orientation::Horizontal, 0);
+        right_box.set_halign(gtk4::Align::End);
+        right_box.set_valign(gtk4::Align::Center);
+        right_box.set_margin_end(16);
+
         let library_status = Label::new(None);
         library_status.add_css_class("dim-label");
-        library_status.set_halign(gtk4::Align::End);
-        top_bar.append(&library_status);
+        library_status.set_valign(gtk4::Align::Center);
+        library_status.set_margin_end(16);
+        right_box.append(&library_status);
 
         let settings_button = Button::with_label("⚙ Ajustes");
         settings_button.set_halign(gtk4::Align::End);
         settings_button.set_hexpand(false);
-        top_bar.append(&settings_button);
+        settings_button.set_valign(gtk4::Align::Center);
+        settings_button.add_css_class("flat-button");
+        right_box.append(&settings_button);
+
+        top_bar.append(&right_box);
 
         content.append(&top_bar);
 
