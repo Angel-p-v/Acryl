@@ -267,8 +267,10 @@ Acryl detecta automáticamente películas, series y anime a partir de la estruct
   se llama `Anime`/`Animes`).
 - Las carpetas con un único vídeo cuyo nombre no parece un episodio se indexan como
   película.
-- Las carpetas de temporada (`Season 1`, `Temporada 2`, `S01`, `2`,
-  `Solo Leveling S01`...) se indexan como temporadas de la serie contenedora.
+- Las carpetas de temporada se detectan con variantes como `S01`, `s01`,
+  `Season1`, `Season 1`, `Temporada 1`, `1ª Temporada`, `T2` o con el título
+  delante (`Solo Leveling S01`, `Solo Leveling Season 2`), incluso con metadatos
+  entre corchetes (`Solo Leveling S01 [1080p]`).
 - Las carpetas que solo contienen otras carpetas (`Peliculas/`, `Series/`) se
   recorren como contenedores y no crean un medio propio.
 - Se omiten los archivos ocultos y los enlaces simbólicos, y se limita la

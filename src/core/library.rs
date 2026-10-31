@@ -613,9 +613,9 @@ fn is_short_numeric_stem(path: &Path) -> bool {
     !stem.is_empty() && stem.len() <= 3 && stem.chars().all(|character| character.is_ascii_digit())
 }
 
-/// Detecta carpetas de temporada: `Season 1`, `Temporada 2`, `S01`, `2` y
-/// variantes con el título delante (`Solo Leveling S01`, `Solo Leveling - S02`,
-/// `Solo Leveling Season 2`).
+/// Detecta carpetas de temporada de forma flexible: `Season 1`, `season1`,
+/// `Temporada 2`, `S01`, `s 1`, `2`, `Solo Leveling S01`, `Show Season 2`,
+/// `1ª Temporada`, `Solo Leveling S01 [1080p]`, etc.
 fn is_season_dir(path: &Path) -> bool {
     let name = path
         .file_name()
@@ -633,64 +633,121 @@ fn is_season_dir(path: &Path) -> bool {
         return true;
     }
 
-    // "Season 1", "Temporada 2", "Solo Leveling Season 2".
-    ["season", "temporada"]
+    // "Season 1", "Temporada 2", "Solo Leveling Season 2", "TEMP 1".
+    if ["season", "temporada", "temp"]
         .iter()
-        .any(|keyword| ends_with_season_number(&name, keyword))
+        .any(|keyword| has_season_number_after(&name, keyword))
+    {
+        return true;
+    }
+
+    // "1ª Temporada", "1a temporada", "2º Temporada".
+    if ["season", "temporada", "temp"]
+        .iter()
+        .any(|keyword| has_season_number_before(&name, keyword))
+    {
+        return true;
+    }
 
     // "S01", "T2", "Solo Leveling S01", "Solo Leveling - S02".
-        || ['s', 't']
-            .iter()
-            .any(|keyword| ends_with_season_marker(&name, *keyword))
+    ['s', 't']
+        .iter()
+        .any(|marker| has_short_season_marker(&name, *marker))
 }
 
-/// Comprueba si el nombre termina con `<keyword> <número>` (por ejemplo
-/// `season 1` o `temporada 2`). La palabra clave debe estar al principio o
-/// precedida por un separador para no confundirla con parte del título.
-fn ends_with_season_number(name: &str, keyword: &str) -> bool {
-    let Some(position) = name.rfind(keyword) else {
-        return false;
-    };
+/// Busca `<keyword> <número>` en cualquier posición, aceptando separadores
+/// opcionales (`season1`, `season.2`, `season 3`, `season-4`).
+fn has_season_number_after(name: &str, keyword: &str) -> bool {
+    name.match_indices(keyword).any(|(position, _)| {
+        if !starts_word(name, position) {
+            return false;
+        }
 
-    if position > 0
-        && name[..position]
+        let rest = &name[position + keyword.len()..];
+        let rest = rest.trim_start_matches(is_season_separator);
+        has_season_number(rest)
+    })
+}
+
+/// Busca `<número> <keyword>` (`1ª temporada`, `1a temporada`) permitiendo el
+/// sufijo ordinal español.
+fn has_season_number_before(name: &str, keyword: &str) -> bool {
+    name.match_indices(keyword).any(|(position, _)| {
+        if !starts_word(name, position) {
+            return false;
+        }
+
+        let prefix = name[..position].trim_end_matches(is_season_separator);
+        let prefix = prefix.trim_end_matches(['ª', 'º', '°', 'a', 'o']);
+        let prefix = prefix.trim_end_matches(is_season_separator);
+
+        let digits = prefix
             .chars()
-            .next_back()
-            .is_some_and(|previous| previous.is_alphanumeric())
-    {
+            .rev()
+            .take_while(|character| character.is_ascii_digit())
+            .count();
+        if digits == 0 || digits > 3 {
+            return false;
+        }
+
+        let digits_start = prefix.len() - digits;
+        digits_start == 0
+            || !prefix[..digits_start]
+                .chars()
+                .next_back()
+                .is_some_and(|character| character.is_alphanumeric())
+    })
+}
+
+/// Busca una marca corta (`s` o `t`) seguida de un número de temporada.
+///
+/// Exige inicio de palabra para no confundir `friends` o `star wars` con una
+/// temporada, y que después del número no haya más letras para descartar
+/// nombres de episodio como `S01E01`.
+fn has_short_season_marker(name: &str, marker: char) -> bool {
+    name.char_indices().any(|(position, character)| {
+        if character != marker || !starts_word(name, position) {
+            return false;
+        }
+
+        let rest = &name[position + marker.len_utf8()..];
+        let rest = rest.trim_start_matches(is_season_separator);
+        has_season_number(rest)
+    })
+}
+
+/// `true` si `rest` empieza por 1-3 dígitos y después no sigue una letra.
+fn has_season_number(rest: &str) -> bool {
+    let digits = rest
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .count();
+    if digits == 0 || digits > 3 {
         return false;
     }
 
-    let rest = &name[position + keyword.len()..];
-    let rest = rest.trim_matches(is_season_separator);
-    !rest.is_empty() && rest.len() <= 3 && rest.chars().all(|character| character.is_ascii_digit())
+    rest[digits..]
+        .chars()
+        .next()
+        .is_none_or(|character| !character.is_alphanumeric())
 }
 
-/// Comprueba si el nombre termina con una marca corta de temporada (`s01`,
-/// `t2`), opcionalmente precedida por el título (`solo leveling s01`).
-fn ends_with_season_marker(name: &str, marker: char) -> bool {
-    let Some(position) = name.rfind(marker) else {
-        return false;
-    };
-
-    // Al principio vale "S01"; en medio, exigimos un separador antes para no
-    // confundir palabras como "friends" con una temporada.
-    if position > 0
-        && !name[..position]
+/// Indica si la posición dada empieza una palabra: inicio del nombre o justo
+/// después de un separador.
+fn starts_word(name: &str, position: usize) -> bool {
+    position == 0
+        || name[..position]
             .chars()
             .next_back()
             .is_some_and(is_season_separator)
-    {
-        return false;
-    }
-
-    let rest = &name[position + marker.len_utf8()..];
-    let rest = rest.trim_matches(is_season_separator);
-    !rest.is_empty() && rest.len() <= 3 && rest.chars().all(|character| character.is_ascii_digit())
 }
 
 fn is_season_separator(character: char) -> bool {
-    character.is_whitespace() || matches!(character, '-' | '_' | '.' | '(' | ')' | '[' | ']')
+    character.is_whitespace()
+        || matches!(
+            character,
+            '-' | '_' | '.' | ':' | ',' | '#' | '(' | ')' | '[' | ']' | '·'
+        )
 }
 
 /// Las rutas que contienen un componente `Anime`/`Animes` se clasifican como
@@ -1076,18 +1133,64 @@ mod tests {
         assert!(!looks_like_episode("Inception (2010)"));
         assert!(!looks_like_episode("1917"));
 
-        assert!(is_season_dir(Path::new("/serie/Season 1")));
-        assert!(is_season_dir(Path::new("/serie/Temporada 2")));
-        assert!(is_season_dir(Path::new("/serie/S01")));
-        assert!(is_season_dir(Path::new("/serie/2")));
-        assert!(is_season_dir(Path::new("/serie/Solo Leveling S01")));
-        assert!(is_season_dir(Path::new("/serie/Solo Leveling S02")));
-        assert!(is_season_dir(Path::new("/serie/Solo Leveling - S02")));
-        assert!(is_season_dir(Path::new("/serie/Solo Leveling Season 2")));
-        assert!(is_season_dir(Path::new("/serie/Solo Leveling Temporada 2")));
-        assert!(!is_season_dir(Path::new("/serie/Breaking Bad")));
-        assert!(!is_season_dir(Path::new("/serie/Friends")));
-        assert!(!is_season_dir(Path::new("/serie/1917")));
+        let season_folders = [
+            "Season 1",
+            "season1",
+            "SEASON 01",
+            "Season.2",
+            "Season-3",
+            "Season_4",
+            "Temporada 1",
+            "temporada2",
+            "TEMP 1",
+            "S01",
+            "s01",
+            "S1",
+            "s 1",
+            "S-01",
+            "S_01",
+            "Solo Leveling S01",
+            "Solo Leveling S02",
+            "Solo Leveling - S02",
+            "Solo Leveling Season 2",
+            "Solo Leveling Temporada 2",
+            "Solo Leveling S01 [1080p]",
+            "Solo Leveling (S02)",
+            "Solo Leveling [S02]",
+            "1ª Temporada",
+            "1a temporada",
+            "T2",
+            "t 2",
+            "1",
+            "01",
+            "12",
+        ];
+        for name in season_folders {
+            assert!(
+                is_season_dir(Path::new(name)),
+                "debería detectarse como temporada: {name}"
+            );
+        }
+
+        let not_season_folders = [
+            "Breaking Bad",
+            "Friends",
+            "1917",
+            "S.W.A.T.",
+            "Se7en",
+            "A Season in Hell",
+            "Season of the Witch",
+            "Star Wars",
+            "S01E01",
+            "Show 1x02",
+            "Specials",
+        ];
+        for name in not_season_folders {
+            assert!(
+                !is_season_dir(Path::new(name)),
+                "no debería detectarse como temporada: {name}"
+            );
+        }
     }
 
     #[test]
