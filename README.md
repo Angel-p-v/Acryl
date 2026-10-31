@@ -231,6 +231,29 @@ sudo ./scripts/uninstall.sh --system --purge
 
 ---
 
+## 🔄 Actualización
+
+Para actualizar Acryl a la última versión sin tener que hacer `git pull` y luego ejecutar el instalador manualmente, usa el script de actualización:
+
+```bash
+./scripts/update.sh
+```
+
+El script hace lo siguiente:
+
+1. Ejecuta `git pull` para traer los últimos cambios del repositorio.
+2. Ejecuta `scripts/install.sh` para recompilar e instalar la aplicación.
+
+Si instalaste con `--system`, actualiza también con `--system`:
+
+```bash
+sudo ./scripts/update.sh --system
+```
+
+> **Nota:** si tienes cambios sin confirmar en el working tree, el script te pedirá confirmación antes de hacer `git pull` para evitar conflictos.
+
+---
+
 ## 💻 Uso
 
 Una vez iniciada la aplicación:
@@ -293,9 +316,10 @@ app-media-manager/
 │       ├── search_bar.rs     Barra de búsqueda
 │       ├── settings_window.rs Vista de ajustes
 │       └── poster.rs         Renderizado de pósters con gdk-pixbuf
-├── scripts/                  Scripts de instalación y desinstalación
+├── scripts/                  Scripts de instalación, desinstalación y actualización
 │   ├── install.sh            Instalador (sin Node.js, sin privilegios de root por defecto)
-│   └── uninstall.sh          Desinstalador (con opción --purge para borrar todo)
+│   ├── uninstall.sh          Desinstalador (con opción --purge para borrar todo)
+│   └── update.sh             Actualizador (git pull + install en un solo paso)
 ├── diagnostic/               Scripts de diagnóstico Wayland/Hyprland
 ├── tests/                    Pruebas de integración (SQLite temporal, mpv)
 ├── docs/                     Documentación y ADRs
