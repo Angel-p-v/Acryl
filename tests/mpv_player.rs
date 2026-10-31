@@ -4,6 +4,7 @@
 //! gráfica (Wayland o X11). Se saltea automáticamente si faltan.
 
 use acryl::core::player::MpvPlayer;
+use acryl::db::TrackSelection;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
@@ -53,6 +54,71 @@ fn generar_video_prueba(dir: &std::path::Path) -> std::path::PathBuf {
 
 fn sesion_grafica_disponible() -> bool {
     std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok()
+}
+
+/// Genera un vídeo con dos pistas de audio y dos de subtítulos para comprobar
+/// que mpv aplica `--aid` / `--sid`.
+fn generar_video_multipista(dir: &std::path::Path) -> std::path::PathBuf {
+    let sub1 = dir.join("sub1.srt");
+    let sub2 = dir.join("sub2.srt");
+    std::fs::write(&sub1, "1\n00:00:00,000 --> 00:00:02,000\nSubtítulo uno\n")
+        .expect("escribir subtítulo 1");
+    std::fs::write(&sub2, "1\n00:00:00,000 --> 00:00:02,000\nSubtítulo dos\n")
+        .expect("escribir subtítulo 2");
+
+    let salida = dir.join("multipista.mkv");
+    let estado = Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-f")
+        .arg("lavfi")
+        .arg("-i")
+        .arg("testsrc=duration=3:size=320x240:rate=30")
+        .arg("-f")
+        .arg("lavfi")
+        .arg("-i")
+        .arg("sine=frequency=440:duration=3")
+        .arg("-f")
+        .arg("lavfi")
+        .arg("-i")
+        .arg("sine=frequency=880:duration=3")
+        .arg("-i")
+        .arg(&sub1)
+        .arg("-i")
+        .arg(&sub2)
+        .arg("-map")
+        .arg("0:v")
+        .arg("-map")
+        .arg("1:a")
+        .arg("-map")
+        .arg("2:a")
+        .arg("-map")
+        .arg("3:s")
+        .arg("-map")
+        .arg("4:s")
+        .arg("-c:v")
+        .arg("libx264")
+        .arg("-c:a")
+        .arg("aac")
+        .arg("-c:s")
+        .arg("srt")
+        .arg("-metadata:s:a:0")
+        .arg("language=spa")
+        .arg("-metadata:s:a:1")
+        .arg("language=eng")
+        .arg("-metadata:s:s:0")
+        .arg("language=spa")
+        .arg("-metadata:s:s:1")
+        .arg("language=eng")
+        .arg("-loglevel")
+        .arg("error")
+        .arg(&salida)
+        .status()
+        .expect("ejecutar ffmpeg para generar el vídeo multipista");
+    assert!(
+        estado.success(),
+        "ffmpeg no pudo generar el vídeo multipista"
+    );
+    salida
 }
 
 #[test]
@@ -122,4 +188,82 @@ fn reproductor_mpv_sin_archivo_falla_limpio() {
     );
     assert!(!reproductor.is_playing());
     assert!(reproductor.current_path().is_none());
+}
+
+#[test]
+fn reproductor_mpv_aplica_pistas_de_audio_y_subtitulos() {
+    if !disponible(MPV) || !disponible("ffmpeg") || !sesion_grafica_disponible() {
+        eprintln!("test salteado: se requiere mpv, ffmpeg y sesión gráfica");
+        return;
+    }
+
+    let dir = tempfile::tempdir().expect("crear directorio temporal");
+    let video = generar_video_multipista(dir.path());
+
+    let mut reproductor = MpvPlayer::new();
+    reproductor
+        .load_file_with_tracks(
+            video.to_str().unwrap(),
+            TrackSelection {
+                audio_stream_index: Some(1),
+                subtitle_stream_index: Some(1),
+                subtitles_disabled: false,
+            },
+        )
+        .expect("mpv debería cargar el vídeo con las pistas elegidas");
+
+    thread::sleep(Duration::from_millis(800));
+    let (audio, subtitle) = reproductor
+        .selected_track_ids()
+        .expect("consultar las pistas activas");
+
+    assert_eq!(
+        audio,
+        Some(2),
+        "debería estar activa la segunda pista de audio"
+    );
+    assert_eq!(
+        subtitle,
+        Some(2),
+        "debería estar activa la segunda pista de subtítulos"
+    );
+
+    reproductor.stop().expect("detener");
+}
+
+#[test]
+fn reproductor_mpv_desactiva_subtitulos_con_sid_no() {
+    if !disponible(MPV) || !disponible("ffmpeg") || !sesion_grafica_disponible() {
+        eprintln!("test salteado: se requiere mpv, ffmpeg y sesión gráfica");
+        return;
+    }
+
+    let dir = tempfile::tempdir().expect("crear directorio temporal");
+    let video = generar_video_multipista(dir.path());
+
+    let mut reproductor = MpvPlayer::new();
+    reproductor
+        .load_file_with_tracks(
+            video.to_str().unwrap(),
+            TrackSelection {
+                audio_stream_index: Some(0),
+                subtitle_stream_index: None,
+                subtitles_disabled: true,
+            },
+        )
+        .expect("mpv debería cargar el vídeo sin subtítulos");
+
+    thread::sleep(Duration::from_millis(800));
+    let (audio, subtitle) = reproductor
+        .selected_track_ids()
+        .expect("consultar las pistas activas");
+
+    assert_eq!(
+        audio,
+        Some(1),
+        "debería estar activa la primera pista de audio"
+    );
+    assert_eq!(subtitle, None, "los subtítulos deberían estar desactivados");
+
+    reproductor.stop().expect("detener");
 }

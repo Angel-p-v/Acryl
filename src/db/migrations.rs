@@ -137,6 +137,20 @@ const MEDIA_BANNER_PATH_SQL: &str = r#"
 ALTER TABLE media ADD COLUMN banner_path TEXT;
 "#;
 
+/// Preferencias de pista por archivo y marca de extracción con `ffprobe`.
+///
+/// `audio_stream_index` y `subtitle_stream_index` guardan índices relativos al
+/// tipo, empezando en 0 (el orden en que los devuelve `ffprobe`). `NULL`
+/// significa «automático»: mpv elige la pista por defecto. Para desactivar los
+/// subtítulos se usa `subtitles_disabled = 1`, porque `NULL` ya representa el
+/// comportamiento automático y necesitamos distinguir ambos casos.
+const MEDIA_FILE_TRACKS_SQL: &str = r#"
+ALTER TABLE media_files ADD COLUMN audio_stream_index INTEGER;
+ALTER TABLE media_files ADD COLUMN subtitle_stream_index INTEGER;
+ALTER TABLE media_files ADD COLUMN subtitles_disabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE media_files ADD COLUMN streams_indexed_at TEXT;
+"#;
+
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -167,5 +181,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 6,
         name: "media-banner-path",
         sql: MEDIA_BANNER_PATH_SQL,
+    },
+    Migration {
+        version: 7,
+        name: "media-file-tracks",
+        sql: MEDIA_FILE_TRACKS_SQL,
     },
 ];

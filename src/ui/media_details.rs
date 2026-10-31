@@ -55,6 +55,7 @@ pub struct MediaDetails {
     on_watched: Option<Rc<dyn Fn()>>,
     on_play: Option<Rc<dyn Fn()>>,
     on_play_episode: Option<Rc<dyn Fn(String)>>,
+    on_edit_tracks: Option<Rc<dyn Fn(String)>>,
     on_open_season: Option<Rc<dyn Fn(i64)>>,
 }
 
@@ -137,6 +138,7 @@ impl MediaDetails {
             on_watched: None,
             on_play: None,
             on_play_episode: None,
+            on_edit_tracks: None,
             on_open_season: None,
         }
     }
@@ -355,6 +357,18 @@ impl MediaDetails {
                 ep_label.set_hexpand(true);
                 row.append(&ep_label);
 
+                let tracks_btn = Button::with_label("Pistas");
+                tracks_btn.add_css_class("flat");
+                tracks_btn.set_tooltip_text(Some("Elegir pista de audio y subtítulos"));
+                let tracks_file_path = f.file_path.clone();
+                let on_edit_tracks = self.on_edit_tracks.clone();
+                tracks_btn.connect_clicked(move |_| {
+                    if let Some(cb) = &on_edit_tracks {
+                        cb(tracks_file_path.clone());
+                    }
+                });
+                row.append(&tracks_btn);
+
                 let play_btn = Button::with_label("▶");
                 play_btn.add_css_class("flat");
                 play_btn.set_tooltip_text(Some(&format!("Reproducir {}", episode_label)));
@@ -414,6 +428,18 @@ impl MediaDetails {
             ep_label.set_halign(gtk4::Align::Start);
             ep_label.set_hexpand(true);
             row.append(&ep_label);
+
+            let tracks_btn = Button::with_label("Pistas");
+            tracks_btn.add_css_class("flat");
+            tracks_btn.set_tooltip_text(Some("Elegir pista de audio y subtítulos"));
+            let tracks_file_path = f.file_path.clone();
+            let on_edit_tracks = self.on_edit_tracks.clone();
+            tracks_btn.connect_clicked(move |_| {
+                if let Some(cb) = &on_edit_tracks {
+                    cb(tracks_file_path.clone());
+                }
+            });
+            row.append(&tracks_btn);
 
             let play_btn = Button::with_label("▶");
             play_btn.add_css_class("flat");
@@ -512,6 +538,15 @@ impl MediaDetails {
         F: Fn(String) + 'static,
     {
         self.on_play_episode = Some(Rc::new(f));
+    }
+
+    /// Establece el callback para editar las pistas de audio y subtítulos de
+    /// un archivo (recibe la ruta del archivo).
+    pub fn on_edit_tracks<F>(&mut self, f: F)
+    where
+        F: Fn(String) + 'static,
+    {
+        self.on_edit_tracks = Some(Rc::new(f));
     }
 }
 

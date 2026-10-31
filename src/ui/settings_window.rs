@@ -262,6 +262,19 @@ impl FolderManager {
                         summary.indexed_folders += 1;
                         summary.media_added += media_added;
                         summary.files_added += files_added;
+
+                        // Extrae las pistas de audio/subtítulos de los archivos
+                        // nuevos sin bloquear la UI. Un fallo aquí no invalida
+                        // la indexación: la reproducción seguirá funcionando con
+                        // las pistas predeterminadas de mpv.
+                        if let Err(error) =
+                            crate::core::library::index_missing_streams(&db_path, Some(folder))
+                        {
+                            eprintln!(
+                                "No se pudieron analizar las pistas de '{}': {}",
+                                folder, error
+                            );
+                        }
                     }
                     Err(error) => summary.errors.push(format!("{}: {}", folder, error)),
                 }
