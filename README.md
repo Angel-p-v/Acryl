@@ -273,6 +273,9 @@ Acryl detecta automáticamente películas, series y anime a partir de la estruct
   entre corchetes (`Solo Leveling S01 [1080p]`).
 - Las carpetas que solo contienen otras carpetas (`Peliculas/`, `Series/`) se
   recorren como contenedores y no crean un medio propio.
+- Los nombres se limpian de resolución, códecs, fuentes, audio y grupos de
+  release (`1080p`, `x265`, `H.264`, `BluRay`, `WEB-DL`, `DDP5.1`, `[YTS.MX]`...)
+  para obtener títulos correctos y mejorar las búsquedas de metadatos.
 - Se omiten los archivos ocultos y los enlaces simbólicos, y se limita la
   profundidad de escaneo para evitar recorridos infinitos.
 

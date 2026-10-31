@@ -184,7 +184,7 @@ impl LibraryService {
                 media_id: series_id,
                 season: None,
                 episode: Some(index as i32 + 1),
-                title: Some(file_name(video)),
+                title: Some(media_file_title(video)),
                 file_path: path_string(video),
                 size_bytes: file_size(video),
                 mtime_ms: None,
@@ -244,7 +244,7 @@ impl LibraryService {
                 media_id: season_id,
                 season: None,
                 episode: Some(index as i32 + 1),
-                title: Some(file_name(video)),
+                title: Some(media_file_title(video)),
                 file_path: path_string(video),
                 size_bytes: file_size(video),
                 mtime_ms: None,
@@ -269,7 +269,7 @@ impl LibraryService {
                 media_id,
                 season: None,
                 episode: None,
-                title: Some(file_name(video)),
+                title: Some(media_file_title(video)),
                 file_path: path_string(video),
                 size_bytes: file_size(video),
                 mtime_ms: None,
@@ -609,7 +609,9 @@ fn looks_like_episode(name: &str) -> bool {
 }
 
 fn is_short_numeric_stem(path: &Path) -> bool {
-    let stem = file_stem(path);
+    let raw = file_stem(path);
+    let cleaned = clean_title(&raw);
+    let stem = if cleaned.is_empty() { raw } else { cleaned };
     !stem.is_empty() && stem.len() <= 3 && stem.chars().all(|character| character.is_ascii_digit())
 }
 
@@ -624,10 +626,13 @@ fn is_season_dir(path: &Path) -> bool {
         .trim()
         .to_lowercase();
 
-    if name.is_empty() {
-        return false;
-    }
+    is_season_name(&name)
+}
 
+/// Núcleo de detección de temporadas sobre un nombre ya normalizado a
+/// minúsculas. Se reutiliza tanto para carpetas como para grupos entre
+/// corchetes o paréntesis del título.
+fn is_season_name(name: &str) -> bool {
     // "1", "01", "12"
     if name.len() <= 2 && name.chars().all(|character| character.is_ascii_digit()) {
         return true;
@@ -636,7 +641,7 @@ fn is_season_dir(path: &Path) -> bool {
     // "Season 1", "Temporada 2", "Solo Leveling Season 2", "TEMP 1".
     if ["season", "temporada", "temp"]
         .iter()
-        .any(|keyword| has_season_number_after(&name, keyword))
+        .any(|keyword| has_season_number_after(name, keyword))
     {
         return true;
     }
@@ -644,7 +649,7 @@ fn is_season_dir(path: &Path) -> bool {
     // "1ª Temporada", "1a temporada", "2º Temporada".
     if ["season", "temporada", "temp"]
         .iter()
-        .any(|keyword| has_season_number_before(&name, keyword))
+        .any(|keyword| has_season_number_before(name, keyword))
     {
         return true;
     }
@@ -652,7 +657,7 @@ fn is_season_dir(path: &Path) -> bool {
     // "S01", "T2", "Solo Leveling S01", "Solo Leveling - S02".
     ['s', 't']
         .iter()
-        .any(|marker| has_short_season_marker(&name, *marker))
+        .any(|marker| has_short_season_marker(name, *marker))
 }
 
 /// Busca `<keyword> <número>` en cualquier posición, aceptando separadores
@@ -762,11 +767,248 @@ fn detect_media_type(path: &Path) -> &'static str {
     if is_anime { "anime" } else { "series" }
 }
 
+/// Elimina etiquetas técnicas habituales para obtener el título real:
+/// resolución (`1080p`, `2160p`, `4K`), códecs (`x265`, `HEVC`, `H.264`),
+/// fuentes (`BluRay`, `WEB-DL`), audio (`DDP5.1`, `DTS`, `AAC`) y grupos de
+/// release entre corchetes (`[YTS.MX]`, `[SubsPlease]`).
+fn clean_title(raw: &str) -> String {
+    let stripped = strip_metadata_groups(raw);
+
+    // Se separa por espacios y guiones bajos; los puntos solo separan cuando
+    // forman parte de un nombre de release (`Movie.2024.1080p`), no en
+    // abreviaturas como `Dr. Strangelove`.
+    let mut parts: Vec<&str> = Vec::new();
+    for word in stripped.split(|character: char| character.is_whitespace() || character == '_') {
+        if word.is_empty() {
+            continue;
+        }
+        let without_trailing_dot = word.trim_end_matches('.');
+        if without_trailing_dot.contains('.') {
+            parts.extend(
+                without_trailing_dot
+                    .split('.')
+                    .filter(|part| !part.is_empty()),
+            );
+        } else {
+            parts.push(word);
+        }
+    }
+
+    let mut tokens: Vec<&str> = Vec::new();
+    let mut index = 0;
+    while index < parts.len() {
+        let token = trim_title_token(parts[index]);
+        index += 1;
+        if token.is_empty() {
+            continue;
+        }
+
+        // H.264 / H.265 / X.264 quedan partidos por el punto.
+        if (token.eq_ignore_ascii_case("h") || token.eq_ignore_ascii_case("x"))
+            && index < parts.len()
+        {
+            let next = trim_title_token(parts[index]);
+            if next.starts_with("264") || next.starts_with("265") {
+                break;
+            }
+        }
+
+        if is_strong_technical_token(token) {
+            // A partir de la resolución o el códec, el resto suele ser release
+            // (fuente, audio, grupo): se descarta.
+            break;
+        }
+        if is_weak_technical_token(token) {
+            // Al principio de la cadena podría ser parte del título real
+            // (por ejemplo la película «Dual»): solo se descarta si ya hay
+            // título antes.
+            if tokens.is_empty() {
+                tokens.push(token);
+            }
+            continue;
+        }
+
+        tokens.push(token);
+    }
+
+    tokens.join(" ").trim().to_string()
+}
+
+/// Quita grupos entre corchetes o paréntesis que no aportan al título.
+/// Se conservan los años (`(1999)`) y las marcas de temporada (`[S01]`), que
+/// sí son útiles para nombrar el medio.
+fn strip_metadata_groups(raw: &str) -> String {
+    let mut output = String::with_capacity(raw.len());
+    let mut chars = raw.char_indices().peekable();
+
+    while let Some((index, character)) = chars.next() {
+        let closing = match character {
+            '[' => ']',
+            '(' => ')',
+            _ => {
+                output.push(character);
+                continue;
+            }
+        };
+
+        let Some(relative_end) = raw[index + character.len_utf8()..].find(closing) else {
+            output.push(character);
+            continue;
+        };
+        let content_start = index + character.len_utf8();
+        let content_end = content_start + relative_end;
+        let content = raw[content_start..content_end].trim();
+
+        if is_year(content) {
+            output.push(' ');
+            if character == '(' {
+                output.push('(');
+            }
+            output.push_str(content);
+            if character == '(' {
+                output.push(')');
+            }
+            output.push(' ');
+        } else if is_season_name(&content.to_lowercase()) {
+            output.push(' ');
+            output.push_str(content);
+            output.push(' ');
+        } else {
+            output.push(' ');
+        }
+
+        let end = content_end + closing.len_utf8();
+        while let Some((position, _)) = chars.peek() {
+            if *position < end {
+                chars.next();
+            } else {
+                break;
+            }
+        }
+    }
+
+    output
+}
+
+fn is_year(value: &str) -> bool {
+    value.len() == 4 && value.chars().all(|character| character.is_ascii_digit())
+}
+
+fn trim_title_token(token: &str) -> &str {
+    token.trim_matches(['{', '}', ',', ';', '!', '?', '"', '\'', '·'])
+}
+
+/// Etiquetas que marcan el inicio de la parte técnica del nombre.
+fn is_strong_technical_token(token: &str) -> bool {
+    let lower = token.to_lowercase();
+    let core =
+        lower.trim_matches(|character: char| !character.is_alphanumeric() && character != '-');
+    if core.is_empty() {
+        return false;
+    }
+
+    let base = core.split('-').next().unwrap_or(core);
+    let compact = core.replace('-', "");
+
+    is_resolution(base)
+        || base.starts_with("x26")
+        || base.starts_with("h26")
+        || matches!(
+            base,
+            "hevc"
+                | "avc"
+                | "av1"
+                | "vp9"
+                | "xvid"
+                | "divx"
+                | "10bit"
+                | "8bit"
+                | "hi10p"
+                | "hdr"
+                | "hdr10"
+                | "dovi"
+                | "dolby"
+                | "vision"
+                | "sdr"
+                | "3d"
+                | "remux"
+                | "bdremux"
+                | "dvd"
+                | "hdtv"
+                | "dvdrip"
+                | "hdrip"
+                | "camrip"
+                | "cam"
+                | "ts"
+                | "tc"
+                | "truehd"
+                | "atmos"
+                | "flac"
+                | "mp3"
+                | "opus"
+        )
+        || matches!(
+            compact.as_str(),
+            "bluray" | "bdrip" | "brrip" | "webdl" | "webrip" | "web"
+        )
+        || matches!(compact.as_str(), "aac" | "ac3" | "eac3" | "dts")
+        || base.starts_with("ddp")
+        || base.starts_with("dts")
+        || base.starts_with("aac")
+        || base.starts_with("ac3")
+        || base.starts_with("eac3")
+        || base
+            .strip_prefix("dd")
+            .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()))
+}
+
+fn is_resolution(base: &str) -> bool {
+    if matches!(base, "4k" | "8k" | "uhd" | "fhd" | "qhd" | "hd" | "sd") {
+        return true;
+    }
+
+    if let Some(digits) = base.strip_suffix(['p', 'i'])
+        && matches!(digits.len(), 3 | 4)
+        && digits.chars().all(|character| character.is_ascii_digit())
+    {
+        return true;
+    }
+
+    base.strip_suffix("fps").is_some_and(|digits| {
+        !digits.is_empty() && digits.chars().all(|character| character.is_ascii_digit())
+    })
+}
+
+/// Etiquetas que se pueden eliminar sin cortar el resto del título.
+fn is_weak_technical_token(token: &str) -> bool {
+    let lower = token.to_lowercase();
+    let core = lower.trim_matches(|character: char| !character.is_alphanumeric());
+    matches!(
+        core,
+        "audio"
+            | "subs"
+            | "sub"
+            | "multi"
+            | "vose"
+            | "dual"
+            | "proper"
+            | "repack"
+            | "nfofix"
+            | "internal"
+            | "dubbed"
+            | "subtitled"
+    )
+}
+
 fn folder_title(path: &Path) -> String {
-    path.file_name()
+    let raw = path
+        .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| path.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string());
+
+    let cleaned = clean_title(&raw);
+    if cleaned.is_empty() { raw } else { cleaned }
 }
 
 fn file_name(path: &Path) -> String {
@@ -781,15 +1023,32 @@ fn file_stem(path: &Path) -> String {
         .unwrap_or_else(|| file_name(path))
 }
 
+/// Título visible de un archivo de vídeo, sin extensión ni etiquetas técnicas.
+fn media_file_title(path: &Path) -> String {
+    let raw = file_stem(path);
+    let cleaned = clean_title(&raw);
+    if cleaned.is_empty() {
+        file_name(path)
+    } else {
+        cleaned
+    }
+}
+
 fn movie_title(video: &Path) -> String {
-    let stem = file_stem(video);
+    let raw_stem = file_stem(video);
+    let cleaned = clean_title(&raw_stem);
+    let stem = if cleaned.is_empty() {
+        raw_stem
+    } else {
+        cleaned
+    };
+
     if GENERIC_MOVIE_STEMS.contains(&stem.to_lowercase().as_str())
         && let Some(parent) = video.parent()
-        && let Some(parent_name) = parent.file_name()
     {
-        let parent_name = parent_name.to_string_lossy().to_string();
-        if !parent_name.is_empty() {
-            return parent_name;
+        let parent_title = folder_title(parent);
+        if !parent_title.is_empty() {
+            return parent_title;
         }
     }
     stem
@@ -1090,6 +1349,65 @@ mod tests {
     }
 
     #[test]
+    fn indexa_nombres_con_codecs_y_resolucion() {
+        let (db_path, _db_dir) = temp_db();
+        let library = TempDir::new().expect("biblioteca temporal");
+        let root = library.path();
+
+        touch(
+            &root
+                .join("Peliculas")
+                .join("Dune Part Two (2024) [2160p]")
+                .join("movie.1080p.mkv"),
+        );
+        touch(
+            &root
+                .join("Series")
+                .join("Solo Leveling [1080p]")
+                .join("Solo Leveling S01 1080p x265")
+                .join("S01E01.1080p.mkv"),
+        );
+        touch(&root.join("Anime").join("Frieren").join("01.1080p.mkv"));
+        touch(&root.join("Anime").join("Frieren").join("02.1080p.mkv"));
+
+        LibraryService::index_folder(&db_path, root.to_str().unwrap()).expect("indexar");
+
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let titles = list_titles(&mut conn);
+        assert!(titles.contains(&(
+            "Dune Part Two (2024)".to_string(),
+            "movie".to_string(),
+            None
+        )));
+        assert!(titles.contains(&("Solo Leveling".to_string(), "series".to_string(), None)));
+        assert!(titles.contains(&("Frieren".to_string(), "anime".to_string(), None)));
+        assert_eq!(titles.len(), 3, "solo deben mostrarse los medios padre");
+
+        let series_id: i64 = conn
+            .query_row(
+                "SELECT id FROM media WHERE title = 'Solo Leveling'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("id de la serie");
+        let anime_id: i64 = conn
+            .query_row("SELECT id FROM media WHERE title = 'Frieren'", [], |row| {
+                row.get(0)
+            })
+            .expect("id del anime");
+
+        let mut repo = MediaRepository::new(&mut conn);
+        let seasons = repo.list_children(series_id).expect("temporadas");
+        assert_eq!(seasons.len(), 1);
+        assert_eq!(seasons[0].title, "Solo Leveling S01");
+
+        let episodes = repo.list_files_by_media(anime_id).expect("episodios");
+        assert_eq!(episodes.len(), 2);
+        assert_eq!(episodes[0].title.as_deref(), Some("01"));
+        assert_eq!(episodes[1].title.as_deref(), Some("02"));
+    }
+
+    #[test]
     fn indexa_pelicula_con_un_unico_video_en_subcarpeta() {
         let (db_path, _db_dir) = temp_db();
         let library = TempDir::new().expect("biblioteca temporal");
@@ -1190,6 +1508,35 @@ mod tests {
                 !is_season_dir(Path::new(name)),
                 "no debería detectarse como temporada: {name}"
             );
+        }
+    }
+
+    #[test]
+    fn limpia_codecs_resolucion_y_grupos_de_release() {
+        let cases = [
+            ("Inception.2010.1080p.BluRay.x264-GROUP", "Inception 2010"),
+            (
+                "Dune Part Two 2024 2160p WEB-DL DDP5.1 H.265",
+                "Dune Part Two 2024",
+            ),
+            ("Movie.2024.H.264-GROUP", "Movie 2024"),
+            ("Movie 2024 BluRay x265", "Movie 2024"),
+            ("Movie 2024 WEBDL", "Movie 2024"),
+            ("Movie 2024 AAC 5.1", "Movie 2024"),
+            ("Solo Leveling S01 1080p x265", "Solo Leveling S01"),
+            ("Solo Leveling [1080p x265]", "Solo Leveling"),
+            ("Solo Leveling (S01) [1080p]", "Solo Leveling S01"),
+            ("[SubsPlease] Frieren - 01 [1080p]", "Frieren - 01"),
+            ("The Matrix (1999)", "The Matrix (1999)"),
+            (
+                "Spider-Man: No Way Home (2021)",
+                "Spider-Man: No Way Home (2021)",
+            ),
+            ("Dr. Strangelove", "Dr. Strangelove"),
+            ("Dual", "Dual"),
+        ];
+        for (raw, expected) in cases {
+            assert_eq!(clean_title(raw), expected, "limpieza de '{raw}'");
         }
     }
 
