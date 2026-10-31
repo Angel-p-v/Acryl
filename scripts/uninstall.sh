@@ -8,6 +8,10 @@
 #   - el icono
 #   - (con --purge) también la base de datos, configuración y caché de pósters
 #
+# Además pregunta si quieres desinstalar las dependencias de sistema que
+# instaló el installer (GTK4, Libadwaita, mpv, etc.) y si quieres eliminar
+# Rust / Cargo (solo si no lo usas para otros proyectos).
+#
 # Usa las mismas rutas que install.sh. Si se instaló con --system, usar --system.
 #
 # Uso:
@@ -29,6 +33,15 @@ ICON_DIR="${ICON_DIR:-$HOME/.local/share/icons/hicolor/scalable/apps}"
 SYSTEM_MODE=0
 FORCE=0
 PURGE=0
+REMOVE_DEPS=0
+REMOVE_RUST=0
+
+# Paquetes que el installer sabe instalar (por gestor de paquetes)
+DEPS_APT="libgtk-4-dev libadwaita-1-dev librsvg2-dev libgdk-pixbuf2.0-dev mpv pkg-config"
+DEPS_PACMAN="gtk4 libadwaita librsvg gdk-pixbuf2 mpv pkgconf"
+DEPS_DNF="gtk4-devel libadwaita-devel librsvg2-devel gdk-pixbuf2-devel mpv pkgconf"
+DEPS_ZYPPER="gtk4-devel libadwaita-devel librsvg2-devel gdk-pixbuf2-devel mpv pkgconf"
+DEPS_APK="gtk4-dev libadwaita-dev librsvg-dev gdk-pixbuf-dev mpv pkgconf"
 
 ###############################################################################
 # Funciones de ayuda
@@ -97,70 +110,28 @@ parse_args() {
 }
 
 require_cmd() {
-    command -v "$1" >/dev/null 2>&1 || error "Falta el comando requerido: $1"
+    command -v "$1" >/dev/null 2>&1 || return 1
+    return 0
+}
+
+detect_package_manager() {
+    if require_cmd apt-get; then echo "apt"; return 0; fi
+    if require_cmd pacman; then echo "pacman"; return 0; fi
+    if require_cmd dnf; then echo "dnf"; return 0; fi
+    if require_cmd zypper; then echo "zypper"; return 0; fi
+    if require_cmd apk; then echo "apk"; return 0; fi
+    return 1
 }
 
 confirm() {
     if [[ "$FORCE" -eq 1 ]]; then
         return 0
     fi
-    if [[ "$PURGE" -eq 1 ]]; then
-        printf '\n'
-        warn "ATENCIÓN: --purge borrará TODOS los datos de la aplicación, incluyendo:"
-        warn "  - Base de datos SQLite (acryl.db)"
-        warn "  - Configuración YAML (config.yaml)"
-        warn "  - Caché de pósters descargados"
-        warn "  Esta acción es IRREVERSIBLE."
-        printf '\n'
-        read -rp "¿Estás seguro de que quieres desinstalar y borrar todo de $APP_NAME? [s/N] " resp
-    else
-        read -rp "¿Estás seguro de que quieres desinstalar $APP_NAME? [s/N] " resp
-    fi
+    read -rp "$1 [s/N] " resp
     case "$resp" in
         s|S|y|Y) return 0 ;;
-        *) log "Desinstalación cancelada."; exit 0 ;;
+        *) return 1 ;;
     esac
-}
-
-# --- Rutas de datos de la app (mismo cálculo que el código Rust) -------------
-
-data_dir() {
-    if [[ -n "${XDG_DATA_HOME:-}" ]]; then
-        echo "${XDG_DATA_HOME}/acryl"
-    elif [[ -n "${HOME:-}" ]]; then
-        echo "${HOME}/.local/share/acryl"
-    else
-        echo "acryl-data"
-    fi
-}
-
-config_path() {
-    if [[ -n "${ACRYL_CONFIG:-}" ]]; then
-        echo "${ACRYL_CONFIG}"
-    elif [[ -n "${HOME:-}" ]]; then
-        echo "${HOME}/.local/share/acryl/config.yaml"
-    else
-        echo "config.yaml"
-    fi
-}
-
-poster_cache_dir() {
-    echo "$(data_dir)/cache/posters"
-}
-
-db_path_from_config() {
-    local cfg="$1"
-    if [[ -f "$cfg" ]]; then
-        # Intenta leer db_path del YAML (formato simple: db_path: "/ruta")
-        local val
-        val=$(grep -E '^[[:space:]]*db_path:' "$cfg" 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*db_path:[[:space:]]*//; s/^["'"'"']//; s/["'"'"']$//' || true)
-        if [[ -n "$val" ]]; then
-            echo "$val"
-            return 0
-        fi
-    fi
-    # Valor por defecto: data_dir/acryl.db
-    echo "$(data_dir)/acryl.db"
 }
 
 remove_binary() {
@@ -205,14 +176,37 @@ remove_icon() {
 purge_user_data() {
     local data_dir_path config_file db_file poster_dir
 
-    data_dir_path="$(data_dir)"
-    config_file="$(config_path)"
-    db_file="$(db_path_from_config "$config_file")"
-    poster_dir="$(poster_cache_dir)"
+    # Rutas de datos (mismo cálculo que el código Rust)
+    if [[ -n "${XDG_DATA_HOME:-}" ]]; then
+        data_dir_path="${XDG_DATA_HOME}/acryl"
+    elif [[ -n "${HOME:-}" ]]; then
+        data_dir_path="${HOME}/.local/share/acryl"
+    else
+        data_dir_path="acryl-data"
+    fi
+
+    if [[ -n "${ACRYL_CONFIG:-}" ]]; then
+        config_file="${ACRYL_CONFIG}"
+    elif [[ -n "${HOME:-}" ]]; then
+        config_file="${HOME}/.local/share/acryl/config.yaml"
+    else
+        config_file="config.yaml"
+    fi
+
+    poster_dir="${data_dir_path}/cache/posters"
+
+    # db_path: leer del config.yaml si existe, fallback a data_dir/acryl.db
+    db_file="${data_dir_path}/acryl.db"
+    if [[ -f "$config_file" ]]; then
+        local val
+        val=$(grep -E '^[[:space:]]*db_path:' "$config_file" 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*db_path:[[:space:]]*//; s/^["'"'"']//; s/["'"'"']$//' || true)
+        if [[ -n "$val" ]]; then
+            db_file="$val"
+        fi
+    fi
 
     log "Purgando datos de usuario de $APP_NAME..."
 
-    # Base de datos SQLite
     if [[ -f "$db_file" ]]; then
         log "Eliminando base de datos: $db_file"
         rm -f "$db_file"
@@ -220,7 +214,6 @@ purge_user_data() {
         warn "No se encontró la base de datos: $db_file (se omite)"
     fi
 
-    # Configuración YAML
     if [[ -f "$config_file" ]]; then
         log "Eliminando configuración: $config_file"
         rm -f "$config_file"
@@ -228,7 +221,6 @@ purge_user_data() {
         warn "No se encontró la configuración: $config_file (se omite)"
     fi
 
-    # Caché de pósters
     if [[ -d "$poster_dir" ]]; then
         log "Eliminando caché de pósters: $poster_dir"
         rm -rf "$poster_dir"
@@ -236,11 +228,8 @@ purge_user_data() {
         warn "No se encontró el caché de pósters: $poster_dir (se omite)"
     fi
 
-    # Si el data dir quedó vacío (o solo tiene carpetas vacías), intentar limpiarlo
     if [[ -d "$data_dir_path" ]]; then
-        # Elimina carpetas vacías recursivamente hacia arriba hasta data_dir
         find "$data_dir_path" -type d -empty -delete 2>/dev/null || true
-        # Si data_dir quedó vacío, lo eliminamos también
         if [[ -d "$data_dir_path" ]] && [[ -z "$(ls -A "$data_dir_path" 2>/dev/null)" ]]; then
             log "Eliminando directorio de datos vacío: $data_dir_path"
             rmdir "$data_dir_path" 2>/dev/null || true
@@ -248,6 +237,90 @@ purge_user_data() {
     fi
 
     log "Datos de usuario purgados."
+}
+
+remove_system_deps() {
+    local pm
+    if ! pm=$(detect_package_manager); then
+        warn "No se detectó ningún gestor de paquetes soportado. No se pueden eliminar dependencias de sistema."
+        return 0
+    fi
+
+    local deps=""
+    case "$pm" in
+        apt)    deps="$DEPS_APT" ;;
+        pacman) deps="$DEPS_PACMAN" ;;
+        dnf)    deps="$DEPS_DNF" ;;
+        zypper) deps="$DEPS_ZYPPER" ;;
+        apk)    deps="$DEPS_APK" ;;
+    esac
+
+    log "Dependencias de sistema que podría eliminar: $deps"
+    warn "AVISO: esto también podría afectar a otras aplicaciones que las usen."
+
+    if ! confirm "¿Desinstalar estas dependencias de sistema?"; then
+        log "Se conservan las dependencias de sistema."
+        return 0
+    fi
+
+    case "$pm" in
+        apt)
+            sudo apt-get remove -y $deps || warn "Falló la eliminación de algunas dependencias."
+            sudo apt-get autoremove -y || true
+            ;;
+        pacman)
+            sudo pacman -Rs --noconfirm $deps || warn "Falló la eliminación de algunas dependencias."
+            ;;
+        dnf)
+            sudo dnf remove -y $deps || warn "Falló la eliminación de algunas dependencias."
+            sudo dnf autoremove -y || true
+            ;;
+        zypper)
+            sudo zypper remove -y $deps || warn "Falló la eliminación de algunas dependencias."
+            ;;
+        apk)
+            sudo apk del $deps || warn "Falló la eliminación de algunas dependencias."
+            ;;
+    esac
+
+    log "Dependencias de sistema eliminadas (o se omitieron las que no se encontraron)."
+}
+
+remove_rust() {
+    if ! require_cmd cargo; then
+        warn "Rust/Cargo no está instalado (no se encontró 'cargo')."
+        return 0
+    fi
+
+    warn "ADVERTENCIA: si usas Rust/Cargo para otros proyectos, eliminarlo los dejará sin funcionar."
+    log "Rust se instaló mediante rustup en ~/.cargo y ~/.rustup."
+
+    if ! confirm "¿Desinstalar Rust y Cargo completamente?"; then
+        log "Se conserva Rust/Cargo."
+        return 0
+    fi
+
+    if [[ -f "$HOME/.cargo/bin/rustup" ]]; then
+        "$HOME/.cargo/bin/rustup" self uninstall -y || warn "Falló rustup self uninstall."
+    else
+        warn "No se encontró rustup en ~/.cargo/bin/rustup."
+    fi
+
+    # Eliminar carpetas de rustup y cargo si existen
+    local removed_any=0
+    for dir in "$HOME/.cargo" "$HOME/.rustup"; do
+        if [[ -d "$dir" ]]; then
+            log "Eliminando $dir..."
+            rm -rf "$dir"
+            removed_any=1
+        fi
+    done
+
+    if [[ "$removed_any" -eq 1 ]]; then
+        log "Rust/Cargo eliminado. Recuerda quitar ~/.cargo/bin de tu PATH si lo habías añadido."
+    else
+        warn "No se encontraron carpetas de Rust/Cargo para eliminar."
+    fi
 }
 
 update_desktop_database() {
@@ -280,15 +353,49 @@ main() {
     fi
 
     log "=== Desinstalador de $APP_NAME ==="
-    confirm
+
+    # Confirmación general
+    if [[ "$PURGE" -eq 1 ]]; then
+        printf '\n'
+        warn "ATENCIÓN: --purge borrará TODOS los datos de la aplicación, incluyendo:"
+        warn "  - Base de datos SQLite (acryl.db)"
+        warn "  - Configuración YAML (config.yaml)"
+        warn "  - Caché de pósters descargados"
+        warn "  Esta acción es IRREVERSIBLE."
+        printf '\n'
+        if ! confirm "¿Estás seguro de que quieres desinstalar y borrar todo de $APP_NAME?"; then
+            log "Desinstalación cancelada."
+            exit 0
+        fi
+    else
+        if ! confirm "¿Estás seguro de que quieres desinstalar $APP_NAME?"; then
+            log "Desinstalación cancelada."
+            exit 0
+        fi
+    fi
+
+    # 1. Archivos de la app
     remove_binary
     remove_desktop
     remove_icon
 
+    # 2. Datos de usuario (--purge)
     if [[ "$PURGE" -eq 1 ]]; then
         purge_user_data
     fi
 
+    # 3. Preguntar por dependencias de sistema
+    printf '\n'
+    log "--- Dependencias de sistema ---"
+    warn "El installer pudo haber instalado: GTK4, Libadwaita, librsvg2, gdk-pixbuf2, mpv, pkg-config."
+    remove_system_deps
+
+    # 4. Preguntar por Rust / Cargo
+    printf '\n'
+    log "--- Rust / Cargo ---"
+    remove_rust
+
+    # 5. Actualizar cachés
     update_desktop_database
     update_icon_cache
 
