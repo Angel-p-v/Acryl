@@ -145,49 +145,62 @@ cd acryl
 ./scripts/install.sh
 ```
 
+#### Requisitos previos (instálalos manualmente antes)
+
+El script **no** instala dependencias de sistema ni Rust/Cargo por ti. Antes de
+ejecutarlo, asegúrate de tener instalado en tu distro:
+
+| Paquete | Propósito |
+|---------|-----------|
+| `libgtk-4-dev` | Interfaz gráfica (GTK4) |
+| `libadwaita-1-dev` | Componentes de UI (Libadwaita) |
+| `librsvg2-dev` | Renderizado de SVG |
+| `libgdk-pixbuf2.0-dev` | Decodificación de imágenes (pósters) |
+| `mpv` | Reproducción de vídeo (proceso externo) |
+| Rust / Cargo ≥ 1.90 | Compilación de la aplicación |
+| `pkg-config` | Detección de librerías |
+
+Ejemplo en Debian/Ubuntu:
+
+```bash
+sudo apt install libgtk-4-dev libadwaita-1-dev librsvg2-dev \
+  libgdk-pixbuf2.0-dev mpv pkg-config
+```
+
+Y Rust/Cargo (si no lo tienes):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+#### Ejecución del instalador
+
+```bash
+./scripts/install.sh
+```
+
 El script hace lo siguiente:
 
-1. Detecta tu gestor de paquetes (`apt`, `pacman`, `dnf`, `zypper` o `apk`).
-2. Instala las dependencias de sistema (`libgtk-4`, `libadwaita-1`, `librsvg2`, `gdk-pixbuf2`, etc.).
-3. Instala Rust/Cargo (≥ 1.90) si falta o está desactualizado.
-4. Compila la aplicación con `cargo build --release`.
-5. Instala el binario en `~/.local/bin/acryl`.
-6. Crea la entrada `.desktop` en `~/.local/share/applications/` para que puedas
+1. Verifica que `cargo`, `rustc`, `pkg-config`, GTK4 y Libadwaita estén disponibles.
+2. Compila la aplicación con `cargo build --release`.
+3. Instala el binario en `~/.local/bin/acryl`.
+4. Crea la entrada `.desktop` en `~/.local/share/applications/` para que puedas
    buscar y ejecutar Acryl desde el menú de aplicaciones.
-7. Instala el lanzador con captura de errores.
+5. Instala el icono en `~/.local/share/icons/hicolor/scalable/apps/`.
 
 Al terminar, busca **Acryl** en el menú de aplicaciones o ejecuta `acryl`.
 
-> **Nota:** el script usa `sudo` para instalar dependencias de sistema. La entrada
-> `.desktop` y el icono se instalan a nivel de usuario (`~/.local`), sin necesidad
-> de root. **No requiere Node.js ni npm.**
+> **Nota:** el binario y la entrada `.desktop` se instalan a nivel de usuario
+> (`~/.local`), sin necesidad de root. Si quieres instalar para todos los usuarios,
+> usa `sudo ./scripts/install.sh --system`. **No requiere Node.js ni npm.**
 
 ---
 
 ### 🗑️ Cómo desinstalar
 
-Si ya no necesitas Acryl, ejecuta el desinstalador:
-
-**Opción A — Ejecutar directamente (sin clonar):**
+Si ya no necesitas Acryl, ejecuta el desinstalador desde el directorio clonado:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/scripts/uninstall.sh | bash
-```
-
-### 🗑️ Cómo desinstalar
-
-Si ya no necesitas Acryl, ejecuta el desinstalador:
-
-**Opción A — Ejecutar directamente (sin clonar):**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/scripts/uninstall.sh | bash
-```
-
-**Opción B — Clonar el repositorio y ejecutar desde allí:**
-
-```bash
-git clone https://github.com/Angel-p-v/app-media-manager.git acryl
 cd acryl
 ./scripts/uninstall.sh
 ```
@@ -196,47 +209,25 @@ El desinstalador elimina:
 
 - La entrada `.desktop` de `~/.local/share/applications`.
 - El icono de `~/.local/share/icons/hicolor/scalable/apps/`.
-- El binario de `~/.local/bin/acryl` y el lanzador de `~/.local/bin/acryl-launcher`.
+- El binario de `~/.local/bin/acryl`.
 
-**Por defecto no borra** el código fuente clonado ni la base de datos de tu biblioteca (`acril.db`), para que no pierdas tus medios indexados.
+**Por defecto no borra** el código fuente clonado ni la base de datos de tu biblioteca (`acryl.db`), para que no pierdas tus medios indexados.
 
-#### Borrado absoluto (`--purge`)
+#### Borrado absoluto (`--purge` / `-p`)
 
-Si quieres eliminar absolutamente TODO —incluido el código fuente clonado y la base de datos `acril.db` (tus medios indexados)— usa la opción `--purge`:
+Si quieres eliminar absolutamente **TODO** lo relacionado con Acryl —incluida la base de datos `acryl.db` (tus medios indexados), la configuración YAML y el caché de pósters— usa la opción `--purge`:
 
 ```bash
-# Opción A
-curl -fsSL https://raw.githubusercontent.com/Angel-p-v/app-media-manager/main/scripts/uninstall.sh | bash -s -- --purge
-
-# Opción B
-git clone https://github.com/Angel-p-v/app-media-manager.git acryl
-cd acryl
 ./scripts/uninstall.sh --purge
 ```
 
-> **⚠️ Advertencia:** `--purge` borra tu base de datos `acril.db` y no se puede deshacer. El script pedirá confirmación antes de proceder.
-
----
-
-### Binario compilado
-
-Una vez compilado, el binario se genera en:
-
-```
-target/release/acryl
-```
-
----
-
-### Modo desarrollo
-
-Si quieres ejecutar la aplicación en modo desarrollo (sin instalar):
+Si instalaste con `--system`, desinstala también con `--system`:
 
 ```bash
-git clone https://github.com/Angel-p-v/app-media-manager.git acryl
-cd acryl
-cargo run
+sudo ./scripts/uninstall.sh --system --purge
 ```
+
+> **⚠️ Advertencia:** `--purge` borra tu base de datos `acryl.db`, la configuración y el caché de pósters, y **no se puede deshacer**. El script pedirá confirmación antes de proceder (usa `-f` para saltarte la confirmación).
 
 ---
 
@@ -289,35 +280,34 @@ sinopsis, póster y banner).
 
 ```
 app-media-manager/
-├── src/                      ← Rust puro (sin Tauri, sin WebView)
+├── src/                      ← Rust puro (sin Tauri, sin WebView, sin Node.js)
 │   ├── main.rs               Punto de entrada de la aplicación GTK4
-│   ├── core/                 ← Lógica de negocio (library, metadata, player, poster_service)
-│   ├── db/                   SQLite, repositorios, migraciones, FTS5
+│   ├── lib.rs                Biblioteca (config, core, db, ui)
 │   ├── config/               Gestión de configuración YAML
-│   ├── ui/                   Interfaz GTK4 / Libadwaita
-│   │   ├── main_window.rs    Ventana principal
-│   │   ├── search_bar.rs     Barra de búsqueda
-│   │   ├── media_list.rs     Galería de medios con pósters
-│   │   ├── media_details.rs  Vista de detalles
-│   │   └── poster.rs         Renderizado de pósters, banners y marcadores
-│   ├── Cargo.toml
-│   └── Cargo.lock
+│   ├── core/                 Lógica de negocio (library, metadata, player, poster_service)
+│   ├── db/                   SQLite, conexiones, repositorios, migraciones, FTS5
+│   └── ui/                   Interfaz GTK4 / Libadwaita
+│       ├── main_window.rs    Ventana principal
+│       ├── media_list.rs     Galería de medios con pósters
+│       ├── media_details.rs  Vista de detalles
+│       ├── search_bar.rs     Barra de búsqueda
+│       ├── settings_window.rs Vista de ajustes
+│       └── poster.rs         Renderizado de pósters con gdk-pixbuf
 ├── scripts/                  Scripts de instalación y desinstalación
-│   ├── install.sh            Instalador automático (sin Node.js)
-│   ├── uninstall.sh          Desinstalador
-│   ├── diagnose-deep.sh      Diagnóstico profundo Wayland/Hyprland
-│   ├── diagnose-final.sh     Diagnóstico final de renderizado
-│   ├── fix-blank-screen.sh   Script de solución para pantalla en blanco
-│   ├── fix-blank-screen-final.sh Script final de solución
-│   └── acryl-launcher.sh     Lanzador con captura de errores
+│   ├── install.sh            Instalador (sin Node.js, sin privilegios de root por defecto)
+│   └── uninstall.sh          Desinstalador (con opción --purge para borrar todo)
+├── diagnostic/               Scripts de diagnóstico Wayland/Hyprland
+├── tests/                    Pruebas de integración (SQLite temporal, mpv)
+├── docs/                     Documentación y ADRs
+│   └── adr/                  Decisiones de arquitectura
+├── icons/                    Recursos gráficos (icono, etc.)
 ├── PLAN_DESKTOP.md           Plan de migración y hitos del proyecto
 ├── AGENTS.md                 Instrucciones para el desarrollo
 ├── CONTRIBUTING.md           Flujo de trabajo y Pull Requests
 ├── SECURITY.md               Política de seguridad
 ├── LICENSE                   Licencia MIT
 ├── README.md                 Este archivo
-└── docs/                     Documentación y ADRs
-    └── adr/                  Decisiones de arquitectura
+└── Cargo.toml                Proyecto Rust único (edición 2024, rust 1.90)
 ```
 
 ---
