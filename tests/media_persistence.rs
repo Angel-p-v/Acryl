@@ -740,3 +740,252 @@ fn overwrite_metadata_reemplaza_campos_y_actualiza_fts() {
         .expect("buscar por el título antiguo");
     assert!(old_results.is_empty());
 }
+
+#[test]
+fn categorias_crear_listar_y_asociar() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let media_id = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "series".to_string(),
+            title: "Solo Leveling".to_string(),
+            sort_title: "solo leveling".to_string(),
+            year: Some(2024),
+            folder_path: "/media/solo-leveling".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert media")
+        .id
+    };
+
+    // Crear categorías y asociarlas al medio.
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        let accion = repo
+            .get_or_create_category("Acción")
+            .expect("crear categoría Acción");
+        let animacion = repo
+            .get_or_create_category("Animación")
+            .expect("crear categoría Animación");
+        repo.set_media_categories(media_id, &[accion, animacion])
+            .expect("asociar categorías");
+    }
+
+    // Listar categorías disponibles.
+    let todas = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.list_categories().expect("listar categorías")
+    };
+    assert_eq!(todas.len(), 2);
+    assert!(todas.iter().any(|c| c.name == "Acción"));
+    assert!(todas.iter().any(|c| c.name == "Animación"));
+
+    // Cargar categorías del medio.
+    let cats_media = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.load_categories_for_media(media_id)
+            .expect("categorías del medio")
+    };
+    assert_eq!(cats_media.len(), 2);
+    assert!(cats_media.contains(&"Acción".to_string()));
+    assert!(cats_media.contains(&"Animación".to_string()));
+
+    // El slug se normaliza (sin duplicados al volver a crear).
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        let accion_otra = repo
+            .get_or_create_category("Acción")
+            .expect("recrear categoría Acción");
+        assert_eq!(
+            todas.iter().find(|c| c.name == "Acción").unwrap().id,
+            accion_otra,
+            "no debe duplicar la categoría existente"
+        );
+    }
+}
+
+#[test]
+fn filtrado_por_categoria_devuelve_solo_medios_asociados() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let (m1, m2) = {
+        let mut repo = MediaRepository::new(&mut conn);
+        let m1 = repo
+            .upsert(&MediaInput {
+                r#type: "series".to_string(),
+                title: "Serie Acción".to_string(),
+                sort_title: "serie accion".to_string(),
+                year: Some(2024),
+                folder_path: "/media/serie-accion".to_string(),
+                parent_id: None,
+            })
+            .expect("upsert m1")
+            .id;
+        let m2 = repo
+            .upsert(&MediaInput {
+                r#type: "series".to_string(),
+                title: "Serie Comedia".to_string(),
+                sort_title: "serie comedia".to_string(),
+                year: Some(2024),
+                folder_path: "/media/serie-comedia".to_string(),
+                parent_id: None,
+            })
+            .expect("upsert m2")
+            .id;
+        (m1, m2)
+    };
+
+    // Asociar categorías.
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        let accion = repo.get_or_create_category("Acción").expect("crear Acción");
+        let comedia = repo
+            .get_or_create_category("Comedia")
+            .expect("crear Comedia");
+        repo.set_media_categories(m1, &[accion])
+            .expect("asociar Acción a m1");
+        repo.set_media_categories(m2, &[comedia])
+            .expect("asociar Comedia a m2");
+    }
+
+    // Filtrar por Acción: solo m1.
+    let por_accion = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.list_by_category(
+            1, // id de "Acción" (primera creada)
+            ListMediaOptions {
+                r#type: None,
+                limit: Some(50),
+                offset: Some(0),
+                order_by: None,
+            },
+        )
+        .expect("filtrar por categoría")
+    };
+    assert_eq!(por_accion.len(), 1);
+    assert_eq!(por_accion[0].title, "Serie Acción");
+
+    // Filtrar por Comedia: solo m2.
+    let por_comedia = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.list_by_category(
+            2, // id de "Comedia"
+            ListMediaOptions {
+                r#type: None,
+                limit: Some(50),
+                offset: Some(0),
+                order_by: None,
+            },
+        )
+        .expect("filtrar por categoría")
+    };
+    assert_eq!(por_comedia.len(), 1);
+    assert_eq!(por_comedia[0].title, "Serie Comedia");
+}
+
+#[test]
+fn vote_average_guardado_y_recuperado() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let media_id = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "series".to_string(),
+            title: "Solo Leveling".to_string(),
+            sort_title: "solo leveling".to_string(),
+            year: Some(2024),
+            folder_path: "/media/solo-leveling".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert media")
+        .id
+    };
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_vote_average(media_id, Some(8.5))
+            .expect("guardar vote_average");
+    }
+
+    let media = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.find_by_id(media_id)
+            .expect("buscar media")
+            .expect("media existente")
+    };
+    assert_eq!(media.vote_average, Some(8.5));
+
+    // Sin puntuación: None.
+    let media_id2 = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "movie".to_string(),
+            title: "Película sin puntuación".to_string(),
+            sort_title: "pelicula sin puntuacion".to_string(),
+            year: None,
+            folder_path: "/media/pelicula".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert media 2")
+        .id
+    };
+    let media2 = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.find_by_id(media_id2)
+            .expect("buscar media")
+            .expect("media existente")
+    };
+    assert_eq!(media2.vote_average, None);
+}
+
+#[test]
+fn episode_image_path_en_media_files() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let media_id = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "series".to_string(),
+            title: "Serie".to_string(),
+            sort_title: "serie".to_string(),
+            year: None,
+            folder_path: "/media/serie".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert media")
+        .id
+    };
+
+    // Insertar archivo con imagen de episodio.
+    {
+        // Upsert_many no soporta episode_image_path directamente; usamos SQL.
+        conn.execute(
+            "INSERT INTO media_files (media_id, season, episode, title, file_path, episode_image_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                media_id,
+                1,
+                1,
+                "Episodio 1",
+                "/media/serie/S01E01.mkv",
+                "https://example.com/episode1.jpg",
+            ],
+        )
+        .expect("insertar archivo con imagen de episodio");
+    }
+
+    let files = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.list_files_by_media(media_id).expect("listar archivos")
+    };
+    assert_eq!(files.len(), 1);
+    assert_eq!(
+        files[0].episode_image_path.as_deref(),
+        Some("https://example.com/episode1.jpg")
+    );
+}

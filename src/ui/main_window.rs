@@ -281,23 +281,27 @@ impl MainWindow {
 
         // Callback: botón Categorías -> abre la página de selección y filtro.
         let this_cat = this.clone();
-        this.borrow_mut().categories_button.connect_clicked(move |_| {
-            let w = this_cat.borrow();
-            w.stack.set_visible_child_name("categories");
-            drop(w);
-            Self::populate_categories_page(&this_cat);
-        });
+        this.borrow_mut()
+            .categories_button
+            .connect_clicked(move |_| {
+                let w = this_cat.borrow();
+                w.stack.set_visible_child_name("categories");
+                drop(w);
+                Self::populate_categories_page(&this_cat);
+            });
 
         // Callback: botón "Ver todo" -> quita el filtro de categoría.
         let this_clear = this.clone();
-        this.borrow_mut().clear_category_button.connect_clicked(move |_| {
-            let w = this_clear.borrow();
-            w.current_category.replace(None);
-            w.current_category_name.replace(None);
-            Self::load_media_by_category(&this_clear, None);
-            w.stack.set_visible_child_name("list");
-            w.media_list.refresh();
-        });
+        this.borrow_mut()
+            .clear_category_button
+            .connect_clicked(move |_| {
+                let w = this_clear.borrow();
+                w.current_category.replace(None);
+                w.current_category_name.replace(None);
+                Self::load_media_by_category(&this_clear, None);
+                w.stack.set_visible_child_name("list");
+                w.media_list.refresh();
+            });
 
         // Callback: al seleccionar un medio de la lista, mostrar detalles.
         let this_clone = this.clone();

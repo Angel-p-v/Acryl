@@ -207,8 +207,7 @@ impl MediaList {
         } else {
             (usable_width / CARD_WIDTH).clamp(MIN_COLUMNS, MAX_COLUMNS)
         };
-        self.flowbox
-            .set_max_children_per_line(columns);
+        self.flowbox.set_max_children_per_line(columns);
         self.flowbox.set_min_children_per_line(1);
     }
 

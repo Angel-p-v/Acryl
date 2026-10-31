@@ -224,14 +224,12 @@ impl MediaDetails {
         self.synopsis_label
             .set_label(&media.synopsis.clone().unwrap_or_default());
         self.banner.set_info(&media.title, &info_label);
-        self.banner
-            .set_images(media.banner_path.as_deref(), None);
+        self.banner.set_images(media.banner_path.as_deref(), None);
 
         // La puntuación de metadatos se muestra directamente (no es una acción
         // del usuario). Si no hay puntuación, no se inventa nada.
         if let Some(vote) = media.vote_average {
-            self.vote_label
-                .set_label(&format!("⭐ {:.1} / 10", vote));
+            self.vote_label.set_label(&format!("⭐ {:.1} / 10", vote));
             self.vote_label.set_visible(true);
         } else {
             self.vote_label.set_visible(false);
@@ -440,8 +438,7 @@ impl MediaDetails {
                 .set_model(Some(&self.season_dropdown_model));
             // Seleccionar la primera temporada por defecto.
             self.season_dropdown.set_selected(0);
-            self.selected_season
-                .replace(seasons.first().map(|s| s.id));
+            self.selected_season.replace(seasons.first().map(|s| s.id));
 
             let season_dropdown = self.season_dropdown.clone();
             let on_change_season = self.on_change_season.clone();

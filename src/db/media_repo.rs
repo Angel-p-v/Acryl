@@ -126,7 +126,7 @@ impl<'a> MediaRepository<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
-                    metadata_fetched_at, parent_id, rating
+                    metadata_fetched_at, parent_id, rating, vote_average
              FROM media WHERE id = ?1",
         )?;
         let row = stmt.query_row(params![id], map_media_row);
@@ -515,8 +515,7 @@ impl<'a> MediaRepository<'a> {
         sql.push_str(" OFFSET ?");
         params.push(Box::new(options.offset.unwrap_or(0)));
 
-        let params_slice: Vec<&dyn rusqlite::ToSql> =
-            params.iter().map(|p| p.as_ref()).collect();
+        let params_slice: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
         let mut stmt = self.conn.prepare(&sql)?;
         let rows: Vec<Media> = stmt
             .query_map(params_slice.as_slice(), map_media_row)?
@@ -564,12 +563,29 @@ impl<'a> MediaRepository<'a> {
     }
 
     /// Guarda la puntuación obtenida de los metadatos (vote_average, 0-10).
-    pub fn set_vote_average(&mut self, media_id: i64, vote_average: Option<f64>) -> RusqliteResult<()> {
+    pub fn set_vote_average(
+        &mut self,
+        media_id: i64,
+        vote_average: Option<f64>,
+    ) -> RusqliteResult<()> {
         self.conn.execute(
             "UPDATE media SET vote_average = ?1, updated_at = datetime('now') WHERE id = ?2",
             params![vote_average, media_id],
         )?;
         Ok(())
+    }
+
+    /// Obtiene la puntuación de metadatos de un medio (vote_average, 0-10).
+    pub fn get_vote_average(&mut self, media_id: i64) -> RusqliteResult<Option<f64>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT vote_average FROM media WHERE id = ?1")?;
+        let row = stmt.query_row(params![media_id], |row| Ok(row.get::<_, f64>(0).ok()));
+        match row {
+            Ok(vote) => Ok(vote),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     /// Sobrescribe todos los metadatos de un medio con los datos obtenidos de TVmaze.
@@ -761,7 +777,7 @@ fn map_media_row(row: &rusqlite::Row<'_>) -> RusqliteResult<Media> {
         metadata_fetched_at: row.get(13)?,
         parent_id: row.get(14)?,
         rating: row.get::<_, i32>(15).unwrap_or(0),
-        vote_average: row.get::<_, Option<f64>>(16).ok().flatten(),
+        vote_average: row.get::<_, f64>(16).ok(),
         categories: Vec::new(),
     })
 }
