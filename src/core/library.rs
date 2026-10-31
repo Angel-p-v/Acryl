@@ -613,7 +613,9 @@ fn is_short_numeric_stem(path: &Path) -> bool {
     !stem.is_empty() && stem.len() <= 3 && stem.chars().all(|character| character.is_ascii_digit())
 }
 
-/// Detecta carpetas de temporada (`Season 1`, `Temporada 2`, `S01`, `2`).
+/// Detecta carpetas de temporada: `Season 1`, `Temporada 2`, `S01`, `2` y
+/// variantes con el título delante (`Solo Leveling S01`, `Solo Leveling - S02`,
+/// `Solo Leveling Season 2`).
 fn is_season_dir(path: &Path) -> bool {
     let name = path
         .file_name()
@@ -622,28 +624,73 @@ fn is_season_dir(path: &Path) -> bool {
         .trim()
         .to_lowercase();
 
-    for prefix in ["season", "temporada"] {
-        if let Some(rest) = name.strip_prefix(prefix) {
-            let rest = rest.trim();
-            if !rest.is_empty() && rest.chars().all(|character| character.is_ascii_digit()) {
-                return true;
-            }
-        }
-    }
-
-    // S01, S1, T02
-    for prefix in ['s', 't'] {
-        if let Some(rest) = name.strip_prefix(prefix)
-            && !rest.is_empty()
-            && rest.len() <= 3
-            && rest.chars().all(|character| character.is_ascii_digit())
-        {
-            return true;
-        }
+    if name.is_empty() {
+        return false;
     }
 
     // "1", "01", "12"
-    !name.is_empty() && name.len() <= 2 && name.chars().all(|character| character.is_ascii_digit())
+    if name.len() <= 2 && name.chars().all(|character| character.is_ascii_digit()) {
+        return true;
+    }
+
+    // "Season 1", "Temporada 2", "Solo Leveling Season 2".
+    ["season", "temporada"]
+        .iter()
+        .any(|keyword| ends_with_season_number(&name, keyword))
+
+    // "S01", "T2", "Solo Leveling S01", "Solo Leveling - S02".
+        || ['s', 't']
+            .iter()
+            .any(|keyword| ends_with_season_marker(&name, *keyword))
+}
+
+/// Comprueba si el nombre termina con `<keyword> <número>` (por ejemplo
+/// `season 1` o `temporada 2`). La palabra clave debe estar al principio o
+/// precedida por un separador para no confundirla con parte del título.
+fn ends_with_season_number(name: &str, keyword: &str) -> bool {
+    let Some(position) = name.rfind(keyword) else {
+        return false;
+    };
+
+    if position > 0
+        && name[..position]
+            .chars()
+            .next_back()
+            .is_some_and(|previous| previous.is_alphanumeric())
+    {
+        return false;
+    }
+
+    let rest = &name[position + keyword.len()..];
+    let rest = rest.trim_matches(is_season_separator);
+    !rest.is_empty() && rest.len() <= 3 && rest.chars().all(|character| character.is_ascii_digit())
+}
+
+/// Comprueba si el nombre termina con una marca corta de temporada (`s01`,
+/// `t2`), opcionalmente precedida por el título (`solo leveling s01`).
+fn ends_with_season_marker(name: &str, marker: char) -> bool {
+    let Some(position) = name.rfind(marker) else {
+        return false;
+    };
+
+    // Al principio vale "S01"; en medio, exigimos un separador antes para no
+    // confundir palabras como "friends" con una temporada.
+    if position > 0
+        && !name[..position]
+            .chars()
+            .next_back()
+            .is_some_and(is_season_separator)
+    {
+        return false;
+    }
+
+    let rest = &name[position + marker.len_utf8()..];
+    let rest = rest.trim_matches(is_season_separator);
+    !rest.is_empty() && rest.len() <= 3 && rest.chars().all(|character| character.is_ascii_digit())
+}
+
+fn is_season_separator(character: char) -> bool {
+    character.is_whitespace() || matches!(character, '-' | '_' | '.' | '(' | ')' | '[' | ']')
 }
 
 /// Las rutas que contienen un componente `Anime`/`Animes` se clasifican como
@@ -935,6 +982,57 @@ mod tests {
     }
 
     #[test]
+    fn indexa_temporadas_con_titulo_delante_y_reasigna_padres_antiguos() {
+        let (db_path, _db_dir) = temp_db();
+        let library = TempDir::new().expect("biblioteca temporal");
+        let root = library.path();
+        let season1 = root.join("Solo Leveling").join("Solo Leveling S01");
+        let season2 = root.join("Solo Leveling").join("Solo Leveling S02");
+        touch(&season1.join("S01E01.mkv"));
+        touch(&season2.join("S02E01.mkv"));
+
+        // Simula una BD antigua donde las temporadas se indexaron como series
+        // independientes (parent_id NULL), como ocurría antes de esta corrección.
+        {
+            let conn = open_db(&db_path).expect("abrir BD");
+            for season in [&season1, &season2] {
+                let title = season.file_name().unwrap().to_string_lossy().to_string();
+                conn.execute(
+                    "INSERT INTO media (type, title, sort_title, folder_path, parent_id)
+                     VALUES ('series', ?1, ?1, ?2, NULL)",
+                    rusqlite::params![title, season.to_str().unwrap()],
+                )
+                .expect("insertar temporada antigua");
+            }
+        }
+
+        LibraryService::index_folder(&db_path, root.to_str().unwrap()).expect("indexar");
+
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let titles = list_titles(&mut conn);
+        assert_eq!(
+            titles,
+            vec![("Solo Leveling".to_string(), "series".to_string(), None)]
+        );
+
+        let series_id: i64 = conn
+            .query_row(
+                "SELECT id FROM media WHERE title = 'Solo Leveling' AND parent_id IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("id de la serie");
+        let mut repo = MediaRepository::new(&mut conn);
+        let seasons = repo.list_children(series_id).expect("temporadas");
+        assert_eq!(seasons.len(), 2);
+        assert!(
+            seasons
+                .iter()
+                .all(|season| season.parent_id == Some(series_id))
+        );
+    }
+
+    #[test]
     fn indexa_pelicula_con_un_unico_video_en_subcarpeta() {
         let (db_path, _db_dir) = temp_db();
         let library = TempDir::new().expect("biblioteca temporal");
@@ -982,7 +1080,14 @@ mod tests {
         assert!(is_season_dir(Path::new("/serie/Temporada 2")));
         assert!(is_season_dir(Path::new("/serie/S01")));
         assert!(is_season_dir(Path::new("/serie/2")));
+        assert!(is_season_dir(Path::new("/serie/Solo Leveling S01")));
+        assert!(is_season_dir(Path::new("/serie/Solo Leveling S02")));
+        assert!(is_season_dir(Path::new("/serie/Solo Leveling - S02")));
+        assert!(is_season_dir(Path::new("/serie/Solo Leveling Season 2")));
+        assert!(is_season_dir(Path::new("/serie/Solo Leveling Temporada 2")));
         assert!(!is_season_dir(Path::new("/serie/Breaking Bad")));
+        assert!(!is_season_dir(Path::new("/serie/Friends")));
+        assert!(!is_season_dir(Path::new("/serie/1917")));
     }
 
     #[test]
