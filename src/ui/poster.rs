@@ -12,15 +12,15 @@ use std::rc::Rc;
 use std::sync::Once;
 
 /// Altura del banner de la vista de detalles.
-const BANNER_HEIGHT: i32 = 220;
+const BANNER_HEIGHT: i32 = 320;
 
 /// Tamaño máximo con el que se carga la imagen del banner (se recorta con
 /// `ContentFit::Cover` al espacio disponible).
-const BANNER_IMAGE_MAX_WIDTH: i32 = 1280;
-const BANNER_IMAGE_MAX_HEIGHT: i32 = 720;
+const BANNER_IMAGE_MAX_WIDTH: i32 = 1920;
+const BANNER_IMAGE_MAX_HEIGHT: i32 = 1080;
 
 /// Radio de las esquinas del banner, en píxeles.
-const BANNER_RADIUS: f64 = 14.0;
+const BANNER_RADIUS: f64 = 16.0;
 
 /// Resolución a la que se muestrea el póster para extraer su paleta.
 const PALETTE_SAMPLE_SIZE: i32 = 24;
@@ -34,28 +34,107 @@ pub fn install_poster_css() {
         let provider = gtk4::CssProvider::new();
         provider.load_from_data(
             ".poster-card { \
-                 background-color: rgba(128, 128, 128, 0.10); \
-                 border-radius: 14px; \
+                 background-color: #2a2a2a; \
+                 border: 1px solid #3a3a3a; \
+                 border-radius: 10px; \
                  padding: 8px; \
+                 transition: all 200ms ease; \
              } \
              .poster-card:hover { \
-                 background-color: rgba(128, 128, 128, 0.18); \
+                 background-color: #333333; \
+                 border-color: #ff6b35; \
+                 transform: scale(1.02); \
+             } \
+             .poster-card:selected { \
+                 background-color: #3a3a3a; \
+                 border-color: #ff6b35; \
              } \
              .poster-placeholder { \
-                 background-color: rgba(128, 128, 128, 0.12); \
-                 border-radius: 12px; \
+                 background-color: #333333; \
+                 border-radius: 8px; \
              } \
-             .poster-title { font-weight: 600; } \
-             .poster-year { font-size: 0.9em; opacity: 0.7; } \
-             .banner { border-radius: 14px; } \
+             .poster-title { \
+                 font-weight: 600; \
+                 font-size: 0.95em; \
+                 color: #ffffff; \
+             } \
+             .poster-year { \
+                 font-size: 0.85em; \
+                 color: #a0a0a0; \
+             } \
+             .banner { border-radius: 16px; } \
              .banner-title { \
-                 font-size: 1.9em; \
-                 font-weight: 700; \
+                 font-size: 2.2em; \
+                 font-weight: 800; \
                  color: #ffffff; \
              } \
              .banner-subtitle { \
-                 font-size: 1em; \
-                 color: rgba(255, 255, 255, 0.85); \
+                 font-size: 1.1em; \
+                 color: #cccccc; \
+             } \
+             .episode-row { \
+                 background-color: #2a2a2a; \
+                 border: 1px solid #3a3a3a; \
+                 border-radius: 8px; \
+                 padding: 8px 12px; \
+                 margin: 4px 0; \
+                 transition: all 150ms ease; \
+             } \
+             .episode-row:hover { \
+                 background-color: #333333; \
+                 border-color: #ff6b35; \
+             } \
+             .episode-row:selected { \
+                 background-color: #3a3a3a; \
+                 border-color: #ff6b35; \
+             } \
+             .season-section { \
+                 margin-top: 24px; \
+             } \
+             .season-title { \
+                 font-weight: 700; \
+                 font-size: 1.1em; \
+                 color: #ffffff; \
+                 margin-bottom: 8px; \
+             } \
+             .play-button { \
+                 background-color: #ff6b35; \
+                 color: #ffffff; \
+                 border-radius: 4px; \
+                 font-weight: 600; \
+                 min-width: 100px; \
+                 min-height: 36px; \
+             } \
+             .play-button:hover { \
+                 background-color: #e85a2c; \
+             } \
+             .flat-button { \
+                 background-color: transparent; \
+                 border: none; \
+                 color: #cccccc; \
+                 font-size: 0.9em; \
+             } \
+             .flat-button:hover { \
+                 color: #ffffff; \
+                 background-color: #3a3a3a; \
+                 border-radius: 4px; \
+             } \
+             .details-header { \
+                 background-color: #1a1a1a; \
+                 border-radius: 16px; \
+                 padding: 20px; \
+                 margin-bottom: 16px; \
+             } \
+             .synopsis-text { \
+                 color: #e0e0e0; \
+                 line-height: 1.5; \
+             } \
+             .media-type { \
+                 font-size: 0.8em; \
+                 text-transform: uppercase; \
+                 letter-spacing: 1px; \
+                 color: #ff6b35; \
+                 font-weight: 700; \
              }",
         );
 

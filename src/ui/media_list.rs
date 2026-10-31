@@ -11,9 +11,9 @@ use gtk4::{Box, FlowBox, GestureClick, Label, Orientation, ScrolledWindow};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// Tamaño del póster en la galería (proporción 2:3).
-const CARD_POSTER_WIDTH: i32 = 200;
-const CARD_POSTER_HEIGHT: i32 = 300;
+/// Tamaño del póster en la galería (proporción 2:3, más grande y alto).
+const CARD_POSTER_WIDTH: i32 = 260;
+const CARD_POSTER_HEIGHT: i32 = 390;
 
 /// Tarjeta individual de un medio (póster + título + año).
 struct MediaCard {
@@ -22,15 +22,15 @@ struct MediaCard {
 
 impl MediaCard {
     fn new(media: &Media, on_select: Rc<dyn Fn(i64)>) -> Self {
-        let card = Box::new(Orientation::Vertical, 6);
+        let card = Box::new(Orientation::Vertical, 8);
         card.add_css_class("poster-card");
         card.set_halign(gtk4::Align::Center);
         card.set_valign(gtk4::Align::Start);
-        card.set_size_request(220, 390);
-        card.set_margin_top(4);
-        card.set_margin_bottom(4);
-        card.set_margin_start(4);
-        card.set_margin_end(4);
+        card.set_size_request(CARD_POSTER_WIDTH + 40, CARD_POSTER_HEIGHT + 80);
+        card.set_margin_top(8);
+        card.set_margin_bottom(8);
+        card.set_margin_start(8);
+        card.set_margin_end(8);
 
         // Cargar póster desde caché si está disponible.
         let pixbuf = media
@@ -61,7 +61,7 @@ impl MediaCard {
         // Título
         let title_label = Label::new(Some(&media.title));
         title_label.set_wrap(true);
-        title_label.set_max_width_chars(24);
+        title_label.set_max_width_chars(22);
         title_label.set_justify(gtk4::Justification::Center);
         title_label.set_halign(gtk4::Align::Center);
         title_label.add_css_class("poster-title");
@@ -108,16 +108,16 @@ impl MediaList {
         flowbox.set_vexpand(true);
         flowbox.set_valign(gtk4::Align::Start);
         flowbox.set_halign(gtk4::Align::Fill);
-        flowbox.set_max_children_per_line(8);
+        flowbox.set_max_children_per_line(4);
         flowbox.set_min_children_per_line(1);
-        flowbox.set_row_spacing(20);
-        flowbox.set_column_spacing(20);
+        flowbox.set_row_spacing(24);
+        flowbox.set_column_spacing(24);
         flowbox.set_homogeneous(true);
         flowbox.set_selection_mode(gtk4::SelectionMode::None);
-        flowbox.set_margin_top(10);
-        flowbox.set_margin_bottom(10);
-        flowbox.set_margin_start(10);
-        flowbox.set_margin_end(10);
+        flowbox.set_margin_top(12);
+        flowbox.set_margin_bottom(12);
+        flowbox.set_margin_start(12);
+        flowbox.set_margin_end(12);
 
         let scrolled = ScrolledWindow::new();
         scrolled.set_hexpand(true);
