@@ -142,10 +142,20 @@ pub fn install_theme_css() {
 
         /* Barra superior */
         css.push_str(&format!(
-            ".top-bar {{ background-color: {}; border-bottom: 1px solid {}; padding: 12px 0; }}\n",
+            ".top-bar {{ background-color: {}; border-bottom: 1px solid {}; padding: 10px 0; }}\n",
             colors::TOP_BAR, colors::BORDER,
         ));
         css.push_str(".top-bar .app-title { font-weight: 800; font-size: 1.35rem; }\n");
+
+        /* Navegación horizontal (Novedades / Popular / Simulcasts / Categorías) */
+        css.push_str(&format!(
+            ".nav-button {{ background-color: transparent; border: none; color: {}; font-size: 0.9rem; font-weight: 600; padding: 6px 12px; margin: 0 4px; border-radius: {}; min-height: 32px; }}\n",
+            colors::TEXT_SECONDARY, radius::SMALL,
+        ));
+        css.push_str(&format!(
+            ".nav-button:hover {{ background-color: {}; color: {}; }}\n",
+            colors::SURFACE, colors::TEXT_PRIMARY,
+        ));
 
         /* Tarjeta de medio en galería */
         css.push_str(&format!(
@@ -163,10 +173,10 @@ pub fn install_theme_css() {
             radius::MEDIUM,
         ));
 
-        /* Badge de tipo (Anime / Serie / Película) - estilo chip */
+        /* Etiqueta de tipo en tarjeta de galería (Anime / Serie / Película) */
         css.push_str(&format!(
-            ".type-badge {{ background-color: {}; color: {}; border-radius: {}; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 3px 9px; }}\n",
-            colors::ACCENT, colors::BTN_PRIMARY_TEXT, radius::SMALL,
+            ".card-type-label {{ color: {}; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }}\n",
+            colors::ACCENT,
         ));
 
         /* Badge de continuación */

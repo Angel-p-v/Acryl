@@ -22,62 +22,31 @@ use std::rc::Rc;
 const CARD_POSTER_WIDTH: i32 = 220;
 const CARD_POSTER_HEIGHT: i32 = 330;
 
-/// Badge de tipo mostrado en la esquina superior izquierda del póster.
-struct TypeBadge {
-    widget: Box,
-}
-
-impl TypeBadge {
-    fn new(media_type: &str) -> Self {
-        let label = match media_type {
-            "anime" => "Anime",
-            "series" => "Serie",
-            "movie" => "Película",
-            other => other,
-        };
-
-        let box_ = Box::new(Orientation::Horizontal, 0);
-        box_.set_halign(gtk4::Align::Start);
-        box_.set_valign(gtk4::Align::Start);
-        box_.set_margin_start(10);
-        box_.set_margin_top(10);
-
-        let label_widget = Label::new(Some(label));
-        label_widget.add_css_class("type-badge");
-        box_.append(&label_widget);
-
-        Self { widget: box_ }
-    }
-}
-
-/// Tarjeta individual de un medio (póster + badge + título + año).
+/// Tarjeta individual de un medio (póster + título + etiqueta de tipo).
+/// Diseño al estilo Crunchyroll: póster grande con título y etiqueta debajo.
 struct MediaCard {
     widget: Box,
 }
 
 impl MediaCard {
     fn new(media: &Media, on_select: Rc<dyn Fn(i64)>) -> Self {
-        let card = Box::new(Orientation::Vertical, 10);
+        let card = Box::new(Orientation::Vertical, 8);
         card.add_css_class("media-card");
         card.set_halign(gtk4::Align::Center);
         card.set_valign(gtk4::Align::Start);
-        card.set_size_request(CARD_POSTER_WIDTH + 32, CARD_POSTER_HEIGHT + 110);
+        card.set_size_request(CARD_POSTER_WIDTH + 24, CARD_POSTER_HEIGHT + 90);
         card.set_margin_top(12);
         card.set_margin_bottom(12);
-        card.set_margin_start(12);
-        card.set_margin_end(12);
+        card.set_margin_start(10);
+        card.set_margin_end(10);
 
-        // Contenedor del póster con badge solapado arriba-izquierda.
+        // Póster (ocupa la mayor parte de la tarjeta).
         let poster_stack = Box::new(Orientation::Vertical, 0);
         poster_stack.set_hexpand(false);
         poster_stack.set_vexpand(false);
         poster_stack.set_halign(gtk4::Align::Center);
         poster_stack.set_valign(gtk4::Align::Start);
         poster_stack.set_size_request(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
-
-        // Badge de tipo solapado sobre el póster.
-        let badge = TypeBadge::new(&media.r#type);
-        poster_stack.append(&badge.widget);
 
         // Póster.
         let pixbuf = media
@@ -109,10 +78,23 @@ impl MediaCard {
 
         card.append(&poster_stack);
 
+        // Etiqueta de tipo (Anime / Serie / Película) debajo del póster.
+        let type_label_text = match media.r#type.as_str() {
+            "anime" => "Anime",
+            "series" => "Serie",
+            "movie" => "Película",
+            other => other,
+        };
+        let type_label = Label::new(Some(type_label_text));
+        type_label.set_halign(gtk4::Align::Center);
+        type_label.set_valign(gtk4::Align::Start);
+        type_label.add_css_class("card-type-label");
+        card.append(&type_label);
+
         // Título.
         let title_label = Label::new(Some(&media.title));
         title_label.set_wrap(true);
-        title_label.set_max_width_chars(22);
+        title_label.set_max_width_chars(24);
         title_label.set_justify(gtk4::Justification::Center);
         title_label.set_halign(gtk4::Align::Center);
         title_label.set_valign(gtk4::Align::Start);

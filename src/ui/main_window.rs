@@ -60,7 +60,7 @@ impl MainWindow {
         window.set_content(Some(&toast_overlay));
 
         // Barra superior al estilo Crunchyroll: logo a la izquierda,
-        // búsqueda en el centro, ajustes a la derecha.
+        // navegación horizontal en el centro, acciones y búsqueda a la derecha.
         let top_bar = Box::new(Orientation::Horizontal, 0);
         top_bar.set_hexpand(true);
         top_bar.set_halign(gtk4::Align::Fill);
@@ -74,20 +74,44 @@ impl MainWindow {
         logo_label.set_margin_end(24);
         logo_label.set_xalign(0.0);
         logo_label.set_hexpand(false);
-        logo_label.set_markup("<b><span size='large' foreground='#f75c03'>A</span>cryl</b>");
+        logo_label.set_markup("<b><span size='x-large' foreground='#f75c03'>A</span>cryl</b>");
         top_bar.append(&logo_label);
 
-        // Barra de búsqueda central.
+        // Navegación horizontal (Novedades, Popular, Simulcasts, Categorías).
+        let nav_box = Box::new(Orientation::Horizontal, 0);
+        nav_box.set_halign(gtk4::Align::Start);
+        nav_box.set_valign(gtk4::Align::Center);
+        nav_box.set_hexpand(false);
+        nav_box.add_css_class("nav-box");
+
+        let nav_items = [
+            ("Novedades", "new"),
+            ("Popular", "popular"),
+            ("Simulcasts", "simulcast"),
+            ("Categorías", "categories"),
+        ];
+        for (label_text, _route) in nav_items.iter() {
+            let nav_btn = Button::with_label(label_text);
+            nav_btn.add_css_class("nav-button");
+            nav_btn.set_valign(gtk4::Align::Center);
+            nav_box.append(&nav_btn);
+        }
+
+        top_bar.append(&nav_box);
+
+        // Barra de búsqueda a la derecha del centro.
         let search_bar = SearchBar::new(&db_path);
-        search_bar.widget().set_hexpand(true);
-        search_bar.widget().set_margin_start(0);
-        search_bar.widget().set_margin_end(0);
+        search_bar.widget().set_hexpand(false);
+        search_bar.widget().set_width_request(320);
+        search_bar.widget().set_halign(gtk4::Align::Center);
+        search_bar.widget().set_valign(gtk4::Align::Center);
         top_bar.append(search_bar.widget());
 
-        // Indicador de biblioteca y botón de ajustes a la derecha.
+        // Acciones a la derecha: biblioteca, ajustes.
         let right_box = Box::new(Orientation::Horizontal, 0);
         right_box.set_halign(gtk4::Align::End);
         right_box.set_valign(gtk4::Align::Center);
+        right_box.set_hexpand(false);
         right_box.set_margin_end(16);
 
         let library_status = Label::new(None);
