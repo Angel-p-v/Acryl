@@ -7,7 +7,9 @@
 //! - Todo el área es clickeable para abrir los detalles.
 //!
 //! La galería es responsive: el número de columnas por línea se ajusta
-//! dinámicamente al ancho de la ventana.
+//! dinámicamente al ancho de la ventana. Las tarjetas se distribuyen desde la
+//! izquierda con un espaciado pequeño, uniforme y sin centrarlas
+//! individualmente.
 
 use crate::core::poster_service::cached_path;
 use crate::db::media_repo::Media;
@@ -19,11 +21,26 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 /// Tamaño del póster en la galería (relación 2:3).
-const CARD_POSTER_WIDTH: i32 = 220;
-const CARD_POSTER_HEIGHT: i32 = 330;
+const CARD_POSTER_WIDTH: i32 = 200;
+const CARD_POSTER_HEIGHT: i32 = 300;
+
+/// Ancho estimado de una tarjeta completa (póster + márgenes + padding).
+const CARD_WIDTH: u32 = 248;
+
+/// Espaciado uniforme entre tarjetas (horizontal y vertical).
+const CARD_SPACING: i32 = 12;
+
+/// Margen exterior de la galería respecto al área de contenido.
+const GALLERY_MARGIN: i32 = 16;
+
+/// Número mínimo y máximo de columnas por línea.
+const MIN_COLUMNS: u32 = 2;
+const MAX_COLUMNS: u32 = 8;
 
 /// Tarjeta individual de un medio (póster + título + etiqueta de tipo).
 /// Diseño al estilo Crunchyroll: póster grande con título y etiqueta debajo.
+/// Las tarjetas no se centran individualmente; se colocan consecutivamente
+/// desde la izquierda del área de contenido.
 struct MediaCard {
     widget: Box,
 }
@@ -32,18 +49,20 @@ impl MediaCard {
     fn new(media: &Media, on_select: Rc<dyn Fn(i64)>) -> Self {
         let card = Box::new(Orientation::Vertical, 8);
         card.add_css_class("media-card");
-        card.set_halign(gtk4::Align::Center);
+        // Alineación al inicio: las tarjetas se colocan consecutivamente desde
+        // la izquierda, sin ocupar el espacio sobrante de forma individual.
+        card.set_halign(gtk4::Align::Start);
         card.set_valign(gtk4::Align::Start);
-        card.set_margin_top(12);
-        card.set_margin_bottom(12);
-        card.set_margin_start(10);
-        card.set_margin_end(10);
+        card.set_margin_top(CARD_SPACING);
+        card.set_margin_bottom(CARD_SPACING);
+        card.set_margin_start(CARD_SPACING);
+        card.set_margin_end(CARD_SPACING);
 
         // Póster (ocupa la mayor parte de la tarjeta).
         let poster_stack = Box::new(Orientation::Vertical, 0);
         poster_stack.set_hexpand(false);
         poster_stack.set_vexpand(false);
-        poster_stack.set_halign(gtk4::Align::Center);
+        poster_stack.set_halign(gtk4::Align::Start);
         poster_stack.set_valign(gtk4::Align::Start);
         poster_stack.set_size_request(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
 
@@ -85,7 +104,7 @@ impl MediaCard {
             other => other,
         };
         let type_label = Label::new(Some(type_label_text));
-        type_label.set_halign(gtk4::Align::Center);
+        type_label.set_halign(gtk4::Align::Start);
         type_label.set_valign(gtk4::Align::Start);
         type_label.add_css_class("card-type-label");
         card.append(&type_label);
@@ -93,9 +112,9 @@ impl MediaCard {
         // Título.
         let title_label = Label::new(Some(&media.title));
         title_label.set_wrap(true);
-        title_label.set_max_width_chars(22);
-        title_label.set_justify(gtk4::Justification::Center);
-        title_label.set_halign(gtk4::Align::Center);
+        title_label.set_max_width_chars(18);
+        title_label.set_justify(gtk4::Justification::Left);
+        title_label.set_halign(gtk4::Align::Start);
         title_label.set_valign(gtk4::Align::Start);
         title_label.set_lines(2);
         title_label.add_css_class("poster-title");
@@ -105,7 +124,7 @@ impl MediaCard {
         if let Some(year) = media.year {
             let year_label = Label::new(Some(&format!("{}", year)));
             year_label.add_css_class("poster-year");
-            year_label.set_halign(gtk4::Align::Center);
+            year_label.set_halign(gtk4::Align::Start);
             card.append(&year_label);
         }
 
@@ -143,16 +162,18 @@ impl MediaList {
         flowbox.set_vexpand(true);
         flowbox.set_valign(gtk4::Align::Start);
         flowbox.set_halign(gtk4::Align::Fill);
-        flowbox.set_max_children_per_line(5);
+        // Las tarjetas se distribuyen desde la izquierda sin centrar cada una
+        // individualmente ni repartir el espacio sobrentante entre ellas.
+        flowbox.set_max_children_per_line(MIN_COLUMNS);
         flowbox.set_min_children_per_line(1);
-        flowbox.set_row_spacing(28);
-        flowbox.set_column_spacing(24);
+        flowbox.set_row_spacing(CARD_SPACING as u32);
+        flowbox.set_column_spacing(CARD_SPACING as u32);
         flowbox.set_homogeneous(true);
         flowbox.set_selection_mode(gtk4::SelectionMode::None);
-        flowbox.set_margin_top(20);
-        flowbox.set_margin_bottom(20);
-        flowbox.set_margin_start(20);
-        flowbox.set_margin_end(20);
+        flowbox.set_margin_top(GALLERY_MARGIN);
+        flowbox.set_margin_bottom(GALLERY_MARGIN);
+        flowbox.set_margin_start(GALLERY_MARGIN);
+        flowbox.set_margin_end(GALLERY_MARGIN);
 
         let scrolled = ScrolledWindow::new();
         scrolled.set_hexpand(true);
@@ -177,18 +198,17 @@ impl MediaList {
 
     /// Ajusta el número máximo de columnas por línea según el ancho
     /// disponible de la galería, para que sea responsive en distintas
-    /// resoluciones de pantalla.
+    /// resoluciones de pantalla. Las tarjetas siguen empezando desde la
+    /// izquierda y ocupan progresivamente todo el ancho disponible.
     pub fn set_responsive_columns(&self, available_width: i32) {
-        // Cada tarjeta ocupa ~284px (poster 220 + márgenes y padding).
-        // Calculamos cuántas caben con un mínimo de 2 y un máximo de 8.
-        let card_width = CARD_POSTER_WIDTH + 56; // 220 + 32 de márgenes laterales
-        let columns = if available_width < 600 {
-            2
+        let usable_width = available_width.saturating_sub(2 * GALLERY_MARGIN) as u32;
+        let columns = if usable_width < 600 {
+            MIN_COLUMNS
         } else {
-            (available_width / card_width).clamp(2, 8)
+            (usable_width / CARD_WIDTH).clamp(MIN_COLUMNS, MAX_COLUMNS)
         };
         self.flowbox
-            .set_max_children_per_line(columns.try_into().unwrap_or(2));
+            .set_max_children_per_line(columns);
         self.flowbox.set_min_children_per_line(1);
     }
 

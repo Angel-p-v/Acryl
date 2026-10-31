@@ -32,6 +32,19 @@ pub struct MainWindow {
     db_path: String,
     metadata_sync_running: Rc<Cell<bool>>,
     toast_overlay: ToastOverlay,
+    /// Botón "Categorías" de la barra superior.
+    categories_button: Button,
+    /// Lista de categorías de la página de filtro.
+    categories_list: Box,
+    /// Botón "Ver todo" para limpiar el filtro de categoría.
+    clear_category_button: Button,
+    /// Página de la que se abrió Ajustes, para volver a ella (no siempre al
+    /// inicio) al pulsar Volver.
+    previous_page: Rc<Cell<Option<String>>>,
+    /// Categoría activa como filtro de la biblioteca (`None` = sin filtro).
+    current_category: Rc<RefCell<Option<i64>>>,
+    /// Nombre de la categoría activa, para mostrarlo en la interfaz.
+    current_category_name: Rc<RefCell<Option<String>>>,
 }
 
 type MainWindowRef = Rc<RefCell<MainWindow>>;
@@ -69,7 +82,8 @@ impl MainWindow {
         top_bar.set_valign(gtk4::Align::Center);
         top_bar.add_css_class("top-bar");
 
-        // Sección izquierda: logo / nombre de la app.
+        // Sección izquierda: logo / nombre de la app (navega al inicio al
+        // hacer clic).
         let left_section = Box::new(Orientation::Horizontal, 0);
         left_section.set_halign(gtk4::Align::Start);
         left_section.set_valign(gtk4::Align::Center);
@@ -87,25 +101,19 @@ impl MainWindow {
 
         top_bar.append(&left_section);
 
-        // Sección centro: navegación horizontal (se expande para centrar).
+        // Sección centro: navegación horizontal (se expande para centrar
+        // los elementos sin dejar huecos entre ellos).
         let nav_box = Box::new(Orientation::Horizontal, 8);
         nav_box.set_halign(gtk4::Align::Center);
         nav_box.set_valign(gtk4::Align::Center);
         nav_box.set_hexpand(true);
         nav_box.add_css_class("nav-box");
 
-        let nav_items = [
-            ("Novedades", "new"),
-            ("Popular", "popular"),
-            ("Simulcasts", "simulcast"),
-            ("Categorías", "categories"),
-        ];
-        for (label_text, _route) in nav_items.iter() {
-            let nav_btn = Button::with_label(label_text);
-            nav_btn.add_css_class("nav-button");
-            nav_btn.set_valign(gtk4::Align::Center);
-            nav_box.append(&nav_btn);
-        }
+        // Botón "Categorías": abre el selector de categorías para filtrar.
+        let categories_button = Button::with_label("Categorías");
+        categories_button.add_css_class("nav-button");
+        categories_button.set_valign(gtk4::Align::Center);
+        nav_box.append(&categories_button);
 
         top_bar.append(&nav_box);
 
@@ -177,6 +185,43 @@ impl MainWindow {
         empty_page.set_hexpand(true);
         stack.add_titled(&empty_page, Some("empty"), "Vacía");
 
+        // --- Página de categorías: selección y filtrado de la biblioteca ---
+        let categories_page = Box::new(Orientation::Vertical, 0);
+        categories_page.set_hexpand(true);
+        categories_page.set_vexpand(true);
+
+        let categories_title = Label::new(Some("Categorías"));
+        categories_title.set_halign(gtk4::Align::Start);
+        categories_title.set_margin_top(20);
+        categories_title.set_margin_start(24);
+        categories_title.set_margin_bottom(12);
+        categories_title.add_css_class("heading");
+        categories_page.append(&categories_title);
+
+        let categories_scrolled = ScrolledWindow::new();
+        categories_scrolled.set_hexpand(true);
+        categories_scrolled.set_vexpand(true);
+        categories_scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
+        categories_scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
+
+        let categories_list = Box::new(Orientation::Vertical, 6);
+        categories_list.set_hexpand(true);
+        categories_list.set_margin_start(24);
+        categories_list.set_margin_end(24);
+        categories_scrolled.set_child(Some(&categories_list));
+        categories_page.append(&categories_scrolled);
+
+        // Botón para limpiar el filtro y mostrar todos los medios.
+        let clear_category_button = Button::with_label("Ver todo");
+        clear_category_button.add_css_class("flat-button");
+        clear_category_button.set_halign(gtk4::Align::Start);
+        clear_category_button.set_margin_start(24);
+        clear_category_button.set_margin_bottom(16);
+        clear_category_button.set_visible(false);
+        categories_page.append(&clear_category_button);
+
+        stack.add_titled(&categories_page, Some("categories"), "Categorías");
+
         let media_details = Rc::new(RefCell::new(MediaDetails::new(&db_path, 0)));
         media_details.borrow_mut().set_db_path(&db_path);
 
@@ -212,12 +257,47 @@ impl MainWindow {
             db_path: db_path.clone(),
             metadata_sync_running: Rc::new(Cell::new(false)),
             toast_overlay,
+            categories_button,
+            categories_list,
+            clear_category_button,
+            previous_page: Rc::new(Cell::new(None)),
+            current_category: Rc::new(RefCell::new(None)),
+            current_category_name: Rc::new(RefCell::new(None)),
         }));
 
         this.borrow().window.present();
 
         // Cargar medios iniciales (SQLite local, rápido).
         Self::load_media(&this, &db_path);
+
+        // Logo: acceso directo a la pantalla principal desde cualquier vista.
+        let this_logo = this.clone();
+        let logo_click = gtk4::GestureClick::new();
+        logo_click.connect_pressed(move |_, _, _, _| {
+            let w = this_logo.borrow();
+            w.go_home();
+        });
+        logo_label.add_controller(logo_click);
+
+        // Callback: botón Categorías -> abre la página de selección y filtro.
+        let this_cat = this.clone();
+        this.borrow_mut().categories_button.connect_clicked(move |_| {
+            let w = this_cat.borrow();
+            w.stack.set_visible_child_name("categories");
+            drop(w);
+            Self::populate_categories_page(&this_cat);
+        });
+
+        // Callback: botón "Ver todo" -> quita el filtro de categoría.
+        let this_clear = this.clone();
+        this.borrow_mut().clear_category_button.connect_clicked(move |_| {
+            let w = this_clear.borrow();
+            w.current_category.replace(None);
+            w.current_category_name.replace(None);
+            Self::load_media_by_category(&this_clear, None);
+            w.stack.set_visible_child_name("list");
+            w.media_list.refresh();
+        });
 
         // Callback: al seleccionar un medio de la lista, mostrar detalles.
         let this_clone = this.clone();
@@ -233,10 +313,13 @@ impl MainWindow {
             w.show_details(media_id);
         });
 
-        // Callback: botón de Ajustes -> navega a la vista de ajustes dentro del Stack.
+        // Callback: botón de Ajustes -> navega a la vista de ajustes dentro del Stack,
+        // recordando la página de origen para poder volver a ella.
         let this_clone = this.clone();
         this.borrow_mut().settings_button.connect_clicked(move |_| {
             let w = this_clone.borrow();
+            let current = w.stack.visible_child_name().map(|name| name.to_string());
+            w.previous_page.set(current);
             w.stack.set_visible_child_name("settings");
         });
 
@@ -281,17 +364,19 @@ impl MainWindow {
             });
         });
 
-        // Conectar botón Volver de ajustes -> vuelve a la lista.
+        // Conectar botón Volver de ajustes -> vuelve a la página de origen
+        // (serie, película, temporada o lista), no siempre al inicio.
         let this_clone = this.clone();
         this.borrow_mut()
             .settings_view
             .cancel_button()
             .connect_clicked(move |_| {
                 let w = this_clone.borrow();
-                w.stack.set_visible_child_name("list");
+                w.go_back_to_previous();
             });
 
-        // Conectar botón Guardar de ajustes -> guarda, vuelve a la lista y recarga medios.
+        // Conectar botón Guardar de ajustes -> guarda, recarga medios y vuelve
+        // a la página de origen (no siempre al inicio).
         let this_clone = this.clone();
         let db_path_for_reload = db_path.clone();
         this.borrow_mut()
@@ -299,11 +384,14 @@ impl MainWindow {
             .save_button()
             .connect_clicked(move |_| {
                 let w = this_clone.borrow();
-                w.stack.set_visible_child_name("list");
+                // Recargar medios después de guardar ajustes (pueden haber
+                // cambiado las carpetas).
                 drop(w);
-                // Recargar medios después de guardar ajustes (pueden haber cambiado las carpetas).
                 Self::load_media(&this_clone, &db_path_for_reload);
                 Self::start_metadata_sync(&this_clone, db_path_for_reload.clone());
+                // Volver a la página de origen después de guardar.
+                let w = this_clone.borrow();
+                w.go_back_to_previous();
             });
 
         // Conectar botón de metadatos -> confirma y lanza la actualización forzada.
@@ -523,6 +611,158 @@ impl MainWindow {
     fn show_list(&self) {
         self.stack.set_visible_child_name("list");
         self.media_list.refresh();
+    }
+
+    /// Navega a la pantalla principal de la biblioteca, limpiando filtros o
+    /// estado temporal. Se usa al pulsar el logo desde cualquier pantalla.
+    fn go_home(&self) {
+        // Limpiar el buscador para mostrar la biblioteca completa.
+        self.search_bar.clear_query();
+        self.stack.set_visible_child_name("list");
+        self.media_list.refresh();
+    }
+
+    /// Vuelve a la página de origen de Ajustes (serie, película, temporada o
+    /// lista). Si no hay página registrada, vuelve a la lista principal.
+    fn go_back_to_previous(&self) {
+        let previous = self.previous_page.take();
+        match previous.as_deref() {
+            Some("details") => {
+                let media_id = self.media_details.borrow().media_id();
+                if media_id > 0 {
+                    self.show_details(media_id);
+                } else {
+                    self.show_list();
+                }
+            }
+            Some(page) => {
+                self.stack.set_visible_child_name(page);
+            }
+            None => {
+                self.show_list();
+            }
+        }
+    }
+
+    /// Rellena la página de categorías con la lista disponible en la BD y
+    /// actualiza el estado visual del filtro activo.
+    fn populate_categories_page(this: &MainWindowRef) {
+        let w = this.borrow();
+        let db_path = w.db_path.clone();
+        let active_id = *w.current_category.borrow();
+        drop(w);
+
+        let mut conn = match open_db(&db_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Error abriendo BD para categorías: {}", e);
+                return;
+            }
+        };
+        let mut repo = MediaRepository::new(&mut conn);
+        let categories = repo.list_categories().unwrap_or_default();
+        close_db(conn);
+
+        let w = this.borrow();
+        // Limpiar lista existente.
+        while let Some(child) = w.categories_list.first_child() {
+            w.categories_list.remove(&child);
+        }
+
+        // Botón "Todas" para quitar el filtro.
+        let all_button = Button::with_label("Todas las categorías");
+        all_button.add_css_class("nav-button");
+        all_button.set_hexpand(false);
+        all_button.set_valign(gtk4::Align::Center);
+        if active_id.is_some() {
+            all_button.add_css_class("active");
+        }
+        let this_all = this.clone();
+        all_button.connect_clicked(move |_| {
+            let w = this_all.borrow();
+            w.current_category.replace(None);
+            w.current_category_name.replace(None);
+            Self::load_media_by_category(&this_all, None);
+            w.stack.set_visible_child_name("list");
+            w.media_list.refresh();
+        });
+        w.categories_list.append(&all_button);
+
+        for category in categories.iter() {
+            let btn = Button::with_label(&category.name);
+            btn.add_css_class("nav-button");
+            btn.set_hexpand(false);
+            btn.set_valign(gtk4::Align::Center);
+            if active_id == Some(category.id) {
+                btn.add_css_class("active");
+            }
+            let this_cat = this.clone();
+            let cat_id = category.id;
+            let cat_name = category.name.clone();
+            btn.connect_clicked(move |_| {
+                let w = this_cat.borrow();
+                w.current_category.replace(Some(cat_id));
+                w.current_category_name.replace(Some(cat_name.clone()));
+                Self::load_media_by_category(&this_cat, Some(cat_id));
+                w.stack.set_visible_child_name("list");
+                w.media_list.refresh();
+            });
+            w.categories_list.append(&btn);
+        }
+
+        // Mostrar u ocultar el botón "Ver todo" según si hay filtro activo.
+        let active = w.current_category.borrow().is_some();
+        if active {
+            w.clear_category_button.set_visible(true);
+        } else {
+            w.clear_category_button.set_visible(false);
+        }
+        drop(w);
+    }
+
+    /// Carga los medios filtrados por categoría (o todos si es None) en la
+    /// galería y actualiza el contador.
+    fn load_media_by_category(this: &MainWindowRef, category_id: Option<i64>) {
+        let db_path = {
+            let w = this.borrow();
+            w.db_path.clone()
+        };
+        let mut conn = match open_db(&db_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Error abriendo BD: {}", e);
+                return;
+            }
+        };
+        let mut repo = MediaRepository::new(&mut conn);
+        let media = match category_id {
+            Some(id) => repo
+                .list_by_category(
+                    id,
+                    crate::db::media_repo::ListMediaOptions {
+                        r#type: None,
+                        limit: Some(500),
+                        offset: Some(0),
+                        order_by: None,
+                    },
+                )
+                .unwrap_or_default(),
+            None => repo
+                .list(crate::db::media_repo::ListMediaOptions {
+                    r#type: None,
+                    limit: Some(500),
+                    offset: Some(0),
+                    order_by: None,
+                })
+                .unwrap_or_default(),
+        };
+        close_db(conn);
+
+        let media_count = media.len();
+        let mut w = this.borrow_mut();
+        w.media_count = media_count;
+        w.media_list.set_media(media);
+        Self::update_library_status(&w);
     }
 
     fn toggle_favorite(&self) {

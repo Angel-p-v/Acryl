@@ -772,10 +772,11 @@ fn slugify(name: &str) -> String {
     for c in name.to_lowercase().chars() {
         if c.is_ascii_alphanumeric() {
             slug.push(c);
-        } else if c.is_whitespace() || c == '-' || c == '_' {
-            if !slug.ends_with('-') && !slug.is_empty() {
-                slug.push('-');
-            }
+        } else if (c.is_whitespace() || c == '-' || c == '_')
+            && !slug.ends_with('-')
+            && !slug.is_empty()
+        {
+            slug.push('-');
         }
     }
     if slug.is_empty() {
