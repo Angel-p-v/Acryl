@@ -2,9 +2,10 @@
 #
 # scripts/update.sh — Actualizador de acryl
 #
-# Ejecuta git pull para traer los últimos cambios del repositorio y, a
-# continuación, ejecuta scripts/install.sh para recompilar e instalar la
-# aplicación en un solo paso.
+# Actualiza la aplicación en un solo paso:
+#   1. Ejecuta `git pull` para traer los últimos cambios del repositorio.
+#   2. Ejecuta `scripts/install.sh`, que instala/actualiza todas las
+#      dependencias necesarias (sistema, Rust/Cargo) y recompila la app.
 #
 # Uso:
 #   ./scripts/update.sh                 # actualiza e instala en rutas de usuario
@@ -29,8 +30,8 @@ usage() {
 Uso: $0 [opciones]
 
 Opciones:
-  --system     Actualiza e instala en rutas del sistema. Requiere sudo.
-               Pasa --system al instalador al finalizar.
+  --system     Actualiza e instala en rutas del sistema. Pasa --system al
+               instalador al finalizar. Requiere sudo.
   -h, --help   Muestra esta ayuda y sale
 
 Ejemplos:
@@ -53,7 +54,8 @@ parse_args() {
 }
 
 require_cmd() {
-    command -v "$1" >/dev/null 2>&1 || error "Falta el comando requerido: $1"
+    command -v "$1" >/dev/null 2>&1 || return 1
+    return 0
 }
 
 main() {
@@ -68,7 +70,7 @@ main() {
         error "No se encontró el directorio .git. Ejecuta este script desde la raíz del repositorio de acryl."
     fi
 
-    require_cmd git
+    require_cmd git || error "Falta 'git', necesario para actualizar."
 
     log "=== Actualizador de acryl ==="
 
@@ -93,7 +95,7 @@ main() {
 
     log "Cambios obtenidos correctamente desde el remoto."
 
-    # Ejecutar el instalador
+    # Ejecutar el instalador (instala/actualiza dependencias y compila)
     log "Ejecutando scripts/install.sh..."
     if [[ "$SYSTEM_MODE" -eq 1 ]]; then
         sudo ./scripts/install.sh --system

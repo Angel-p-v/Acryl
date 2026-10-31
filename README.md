@@ -145,54 +145,37 @@ cd acryl
 ./scripts/install.sh
 ```
 
-#### Requisitos previos (instálalos manualmente antes)
+#### Cómo instalar
 
-El script **no** instala dependencias de sistema ni Rust/Cargo por ti. Antes de
-ejecutarlo, asegúrate de tener instalado en tu distro:
-
-| Paquete | Propósito |
-|---------|-----------|
-| `libgtk-4-dev` | Interfaz gráfica (GTK4) |
-| `libadwaita-1-dev` | Componentes de UI (Libadwaita) |
-| `librsvg2-dev` | Renderizado de SVG |
-| `libgdk-pixbuf2.0-dev` | Decodificación de imágenes (pósters) |
-| `mpv` | Reproducción de vídeo (proceso externo) |
-| Rust / Cargo ≥ 1.90 | Compilación de la aplicación |
-| `pkg-config` | Detección de librerías |
-
-Ejemplo en Debian/Ubuntu:
+Acryl no tiene releases publicados. La única forma de instalarlo es clonando
+el repositorio y ejecutando el script de instalación:
 
 ```bash
-sudo apt install libgtk-4-dev libadwaita-1-dev librsvg2-dev \
-  libgdk-pixbuf2.0-dev mpv pkg-config
-```
-
-Y Rust/Cargo (si no lo tienes):
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-#### Ejecución del instalador
-
-```bash
+git clone https://github.com/Angel-p-v/app-media-manager.git acryl
+cd acryl
 ./scripts/install.sh
 ```
 
-El script hace lo siguiente:
+El script **instala todo lo necesario** para que la aplicación funcione:
 
-1. Verifica que `cargo`, `rustc`, `pkg-config`, GTK4 y Libadwaita estén disponibles.
-2. Compila la aplicación con `cargo build --release`.
-3. Instala el binario en `~/.local/bin/acryl`.
-4. Crea la entrada `.desktop` en `~/.local/share/applications/` para que puedas
+1. Detecta tu gestor de paquetes (`apt`, `pacman`, `dnf`, `zypper` o `apk`) e
+   instala las dependencias de sistema (`libgtk-4`, `libadwaita-1`,
+   `librsvg2`, `gdk-pixbuf2`, `mpv`, `pkg-config`). Usa `sudo` solo para este
+   paso.
+2. Instala Rust / Cargo (≥ 1.90) si falta o está desactualizado.
+3. Compila la aplicación con `cargo build --release`.
+4. Instala el binario en `~/.local/bin/acryl`.
+5. Crea la entrada `.desktop` en `~/.local/share/applications/` para que puedas
    buscar y ejecutar Acryl desde el menú de aplicaciones.
-5. Instala el icono en `~/.local/share/icons/hicolor/scalable/apps/`.
+6. Instala el icono en `~/.local/share/icons/hicolor/scalable/apps/`.
 
 Al terminar, busca **Acryl** en el menú de aplicaciones o ejecuta `acryl`.
 
 > **Nota:** el binario y la entrada `.desktop` se instalan a nivel de usuario
-> (`~/.local`), sin necesidad de root. Si quieres instalar para todos los usuarios,
-> usa `sudo ./scripts/install.sh --system`. **No requiere Node.js ni npm.**
+> (`~/.local`), sin necesidad de root para esos archivos. Solo se requiere
+> `sudo` para instalar las dependencias de sistema. Si quieres instalar para
+> todos los usuarios, usa `sudo ./scripts/install.sh --system`. **No requiere
+> Node.js ni npm.**
 
 ---
 
@@ -212,6 +195,14 @@ El desinstalador elimina:
 - El binario de `~/.local/bin/acryl`.
 
 **Por defecto no borra** el código fuente clonado ni la base de datos de tu biblioteca (`acryl.db`), para que no pierdas tus medios indexados.
+
+Además, el desinstalador te preguntará:
+
+- Si quieres eliminar las **dependencias de sistema** que instaló el installer
+  (GTK4, Libadwaita, mpv, etc.). Se te advierte que esto podría afectar a otras
+  aplicaciones que las usen.
+- Si quieres desinstalar **Rust / Cargo**. Se te advierte que solo lo hagas si
+  no lo usas para otros proyectos.
 
 #### Borrado absoluto (`--purge` / `-p`)
 
