@@ -17,7 +17,7 @@ use std::rc::Rc;
 use std::sync::Once;
 
 /// Altura del banner hero de la vista de detalles (Crunchyroll usa banners altos).
-const BANNER_HEIGHT: i32 = 520;
+const BANNER_HEIGHT: i32 = 620;
 
 /// Tamaño máximo con el que se carga la imagen del banner.
 const BANNER_IMAGE_MAX_WIDTH: i32 = 1920;
@@ -200,6 +200,7 @@ pub struct Banner {
     overlay: Overlay,
     picture: Picture,
     drawing: DrawingArea,
+    poster_picture: Picture,
     palette: Rc<RefCell<BannerPalette>>,
     title_label: Label,
     subtitle_label: Label,
@@ -228,6 +229,20 @@ impl Banner {
             draw_banner(cr, width, height, *palette_for_draw.borrow());
         });
 
+        // Póster vertical superpuesto sobre el banner (estilo Crunchyroll):
+        // se posiciona abajo-izquierda, sobresaliendo ligeramente del borde
+        // inferior del banner.
+        let poster_picture = Picture::new();
+        poster_picture.set_hexpand(false);
+        poster_picture.set_vexpand(false);
+        poster_picture.set_halign(gtk4::Align::Start);
+        poster_picture.set_valign(gtk4::Align::End);
+        poster_picture.set_margin_start(24);
+        poster_picture.set_margin_bottom(-40);
+        poster_picture.set_size_request(180, 270);
+        poster_picture.set_content_fit(gtk4::ContentFit::Cover);
+        poster_picture.set_visible(false);
+
         let overlay = Overlay::new();
         overlay.set_child(Some(&drawing));
         overlay.set_hexpand(true);
@@ -239,6 +254,9 @@ impl Banner {
 
         overlay.add_overlay(&picture);
         overlay.set_measure_overlay(&picture, true);
+
+        overlay.add_overlay(&poster_picture);
+        overlay.set_measure_overlay(&poster_picture, false);
 
         let title_label = Label::new(None);
         title_label.set_halign(gtk4::Align::Start);
@@ -257,7 +275,7 @@ impl Banner {
         text_box.set_valign(gtk4::Align::End);
         text_box.set_margin_top(24);
         text_box.set_margin_bottom(30);
-        text_box.set_margin_start(28);
+        text_box.set_margin_start(220);
         text_box.set_margin_end(28);
         text_box.set_can_target(false);
         text_box.append(&title_label);
@@ -268,6 +286,7 @@ impl Banner {
             overlay,
             picture,
             drawing,
+            poster_picture,
             palette,
             title_label,
             subtitle_label,
@@ -310,6 +329,24 @@ impl Banner {
                 self.picture.set_visible(false);
                 *self.palette.borrow_mut() = poster_palette(poster_url);
                 self.drawing.queue_draw();
+            }
+        }
+
+        // Póster superpuesto: se muestra si hay póster disponible.
+        let poster = poster_url
+            .filter(|url| !url.is_empty())
+            .and_then(cached_path)
+            .and_then(|cache_path| GtkPixbuf::from_file_at_scale(&cache_path, 180, 270, true).ok());
+
+        match poster {
+            Some(pixbuf) => {
+                let texture = gtk4::gdk::Texture::for_pixbuf(&pixbuf);
+                self.poster_picture.set_paintable(Some(&texture));
+                self.poster_picture.set_visible(true);
+            }
+            None => {
+                self.poster_picture.set_paintable(gtk4::gdk::Texture::NONE);
+                self.poster_picture.set_visible(false);
             }
         }
     }

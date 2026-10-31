@@ -5,6 +5,9 @@
 //! - Título y año debajo.
 //! - Efecto hover con elevación.
 //! - Todo el área es clickeable para abrir los detalles.
+//!
+//! La galería es responsive: el número de columnas por línea se ajusta
+//! dinámicamente al ancho de la ventana.
 
 use crate::core::poster_service::cached_path;
 use crate::db::media_repo::Media;
@@ -36,8 +39,8 @@ impl TypeBadge {
         let box_ = Box::new(Orientation::Horizontal, 0);
         box_.set_halign(gtk4::Align::Start);
         box_.set_valign(gtk4::Align::Start);
-        box_.set_margin_start(8);
-        box_.set_margin_top(8);
+        box_.set_margin_start(10);
+        box_.set_margin_top(10);
 
         let label_widget = Label::new(Some(label));
         label_widget.add_css_class("type-badge");
@@ -58,7 +61,7 @@ impl MediaCard {
         card.add_css_class("media-card");
         card.set_halign(gtk4::Align::Center);
         card.set_valign(gtk4::Align::Start);
-        card.set_size_request(CARD_POSTER_WIDTH + 32, CARD_POSTER_HEIGHT + 100);
+        card.set_size_request(CARD_POSTER_WIDTH + 32, CARD_POSTER_HEIGHT + 110);
         card.set_margin_top(12);
         card.set_margin_bottom(12);
         card.set_margin_start(12);
@@ -109,9 +112,10 @@ impl MediaCard {
         // Título.
         let title_label = Label::new(Some(&media.title));
         title_label.set_wrap(true);
-        title_label.set_max_width_chars(24);
+        title_label.set_max_width_chars(22);
         title_label.set_justify(gtk4::Justification::Center);
         title_label.set_halign(gtk4::Align::Center);
+        title_label.set_valign(gtk4::Align::Start);
         title_label.add_css_class("poster-title");
         card.append(&title_label);
 
@@ -159,14 +163,14 @@ impl MediaList {
         flowbox.set_halign(gtk4::Align::Fill);
         flowbox.set_max_children_per_line(5);
         flowbox.set_min_children_per_line(1);
-        flowbox.set_row_spacing(24);
-        flowbox.set_column_spacing(20);
+        flowbox.set_row_spacing(28);
+        flowbox.set_column_spacing(24);
         flowbox.set_homogeneous(true);
         flowbox.set_selection_mode(gtk4::SelectionMode::None);
-        flowbox.set_margin_top(16);
-        flowbox.set_margin_bottom(16);
-        flowbox.set_margin_start(16);
-        flowbox.set_margin_end(16);
+        flowbox.set_margin_top(20);
+        flowbox.set_margin_bottom(20);
+        flowbox.set_margin_start(20);
+        flowbox.set_margin_end(20);
 
         let scrolled = ScrolledWindow::new();
         scrolled.set_hexpand(true);
@@ -187,6 +191,23 @@ impl MediaList {
 
     pub fn widget(&self) -> &Box {
         &self.content
+    }
+
+    /// Ajusta el número máximo de columnas por línea según el ancho
+    /// disponible de la galería, para que sea responsive en distintas
+    /// resoluciones de pantalla.
+    pub fn set_responsive_columns(&self, available_width: i32) {
+        // Cada tarjeta ocupa ~284px (poster 220 + márgenes y padding).
+        // Calculamos cuántas caben con un mínimo de 2 y un máximo de 8.
+        let card_width = CARD_POSTER_WIDTH + 56; // 220 + 32 de márgenes laterales
+        let columns = if available_width < 600 {
+            2
+        } else {
+            (available_width / card_width).clamp(2, 8)
+        };
+        self.flowbox
+            .set_max_children_per_line(columns.try_into().unwrap_or(2));
+        self.flowbox.set_min_children_per_line(1);
     }
 
     pub fn set_media(&mut self, media: Vec<Media>) {
