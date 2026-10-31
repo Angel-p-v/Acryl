@@ -151,6 +151,11 @@ ALTER TABLE media_files ADD COLUMN subtitles_disabled INTEGER NOT NULL DEFAULT 0
 ALTER TABLE media_files ADD COLUMN streams_indexed_at TEXT;
 "#;
 
+/// Añade la columna de calificación (0-5) a la tabla media.
+const MEDIA_RATING_SQL: &str = r#"
+ALTER TABLE media ADD COLUMN rating INTEGER NOT NULL DEFAULT 0 CHECK (rating >= 0 AND rating <= 5);
+"#;
+
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -186,5 +191,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 7,
         name: "media-file-tracks",
         sql: MEDIA_FILE_TRACKS_SQL,
+    },
+    Migration {
+        version: 8,
+        name: "media-rating",
+        sql: MEDIA_RATING_SQL,
     },
 ];

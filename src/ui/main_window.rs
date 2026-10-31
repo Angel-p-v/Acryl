@@ -281,12 +281,29 @@ impl MainWindow {
         this.borrow_mut()
             .media_details
             .borrow_mut()
-            .on_play(move || {
-                let w = this_clone.borrow();
-                w.play_file();
+            .on_rate(move |rating| {
+                let this = this_clone.clone();
+                let w = this.borrow();
+                let media_id = w.media_details.borrow().media_id();
+                let db_path = w.db_path.clone();
+                let mut conn = match open_db(&db_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Error abriendo BD: {}", e);
+                        return;
+                    }
+                };
+                let mut repo = MediaRepository::new(&mut conn);
+                if let Err(e) = repo.set_rating(media_id, rating) {
+                    eprintln!("Error calificando medio: {}", e);
+                }
+                close_db(conn);
+                // Refrescar para mostrar la nueva calificación.
+                w.media_details.borrow_mut().load_media(media_id);
+                w.show_toast(&format!("Calificación: {}★", rating));
             });
 
-        // Callback: reproducir un episodio concreto con mpv (proceso externo).
+        // Callback: reproducir el archivo principal (episodio por ver o primero).
         let this_clone = this.clone();
         this.borrow_mut()
             .media_details
@@ -299,17 +316,7 @@ impl MainWindow {
                 }
             });
 
-        // Callback: al hacer clic en "Abrir" de una temporada, navegar a los detalles de esa temporada.
-        let this_clone = this.clone();
-        this.borrow_mut()
-            .media_details
-            .borrow_mut()
-            .on_open_season(move |season_id| {
-                let w = this_clone.borrow();
-                w.show_details(season_id);
-            });
-
-        // Callback: abrir el selector de audio y subtítulos de un archivo.
+        // Callback: abrir el selector de audio y subtítulos del archivo principal.
         let this_clone = this.clone();
         this.borrow_mut()
             .media_details
@@ -331,47 +338,14 @@ impl MainWindow {
                 );
             });
 
-        // Callback: botón universal de pistas para todo el medio actual.
+        // Callback: cambiar de temporada (navegar a los detalles de esa temporada).
         let this_clone = this.clone();
         this.borrow_mut()
             .media_details
             .borrow_mut()
-            .on_edit_all_tracks(move || {
-                let this = this_clone.clone();
-                let w = this.borrow();
-                let media_id = w.media_details.borrow().media_id();
-                let db_path = w.db_path.clone();
-                // Obtener el primer archivo del medio actual para abrir el diálogo de pistas.
-                let mut conn = match open_db(&db_path) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        eprintln!("Error abriendo BD: {}", e);
-                        return;
-                    }
-                };
-                let mut repo = MediaRepository::new(&mut conn);
-                let first_file = repo.first_file_path_for_media(media_id).unwrap_or(None);
-                close_db(conn);
-
-                if let Some(file_path) = first_file {
-                    crate::ui::track_dialog::show_track_dialog(
-                        &w.window,
-                        &w.db_path,
-                        &file_path,
-                        Rc::new({
-                            let this_for_toast = this.clone();
-                            move || {
-                                let w2 = this_for_toast.borrow();
-                                w2.show_toast("Pistas guardadas");
-                            }
-                        }),
-                    );
-                } else {
-                    w.show_error(
-                        "No hay episodios",
-                        "Este medio no tiene ningún archivo para elegir pistas.",
-                    );
-                }
+            .on_change_season(move |season_id| {
+                let w = this_clone.borrow();
+                w.show_details(season_id);
             });
 
         // Completar metadatos y pósters que falten sin bloquear la UI.
@@ -508,35 +482,6 @@ impl MainWindow {
             self.media_details.borrow_mut().set_media(&m);
         } else {
             close_db(conn);
-        }
-    }
-
-    fn play_file(&self) {
-        let media_id = self.media_details.borrow().media_id();
-        let mut conn = match open_db(&self.db_path) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Error abriendo BD: {}", e);
-                return;
-            }
-        };
-        let mut repo = MediaRepository::new(&mut conn);
-        let files = repo.list_files_by_media(media_id).unwrap_or_default();
-        close_db(conn);
-
-        if let Some(f) = files.first() {
-            if let Err(error) =
-                crate::core::player::play_external(&self.db_path, Some(media_id), &f.file_path)
-            {
-                eprintln!("No se pudo reproducir '{}': {}", f.file_path, error);
-                self.show_error("No se pudo reproducir", &error.to_string());
-            }
-        } else {
-            eprintln!("No hay archivos para el medio {}", media_id);
-            self.show_error(
-                "No hay archivos para reproducir",
-                "El medio seleccionado no tiene ningún archivo indexado.",
-            );
         }
     }
 
