@@ -151,15 +151,20 @@ impl MainWindow {
 
         let media_list = MediaList::new();
 
-        // Configurar columnas responsivas para la galería (ancho ventana ~1200px).
-        media_list.set_responsive_columns(1160);
-
         // AdwClamp limita el ancho del contenido en pantallas anchas para que
         // las listas y pósters no se estiren desproporcionadamente.
         let list_clamp = Clamp::new();
         list_clamp.set_maximum_size(1600);
         list_clamp.set_tightening_threshold(1200);
         list_clamp.set_child(Some(media_list.widget()));
+
+        // Página principal: lista de medios (envuelta en Clamp).
+        stack.add_titled(&list_clamp, Some("list"), "Lista");
+
+        // Configurar columnas responsivas para la galería según el ancho
+        // inicial de la ventana. Se calcula restando los márgenes del
+        // FlowBox y del Clamp.
+        media_list.set_responsive_columns(1160);
 
         // Página principal: lista de medios (envuelta en Clamp).
         stack.add_titled(&list_clamp, Some("list"), "Lista");

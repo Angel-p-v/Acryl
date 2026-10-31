@@ -201,6 +201,7 @@ pub struct Banner {
     picture: Picture,
     drawing: DrawingArea,
     poster_picture: Picture,
+    text_box: Box,
     palette: Rc<RefCell<BannerPalette>>,
     title_label: Label,
     subtitle_label: Label,
@@ -275,7 +276,7 @@ impl Banner {
         text_box.set_valign(gtk4::Align::End);
         text_box.set_margin_top(24);
         text_box.set_margin_bottom(30);
-        text_box.set_margin_start(220);
+        text_box.set_margin_start(28);
         text_box.set_margin_end(28);
         text_box.set_can_target(false);
         text_box.append(&title_label);
@@ -287,6 +288,7 @@ impl Banner {
             picture,
             drawing,
             poster_picture,
+            text_box,
             palette,
             title_label,
             subtitle_label,
@@ -343,10 +345,14 @@ impl Banner {
                 let texture = gtk4::gdk::Texture::for_pixbuf(&pixbuf);
                 self.poster_picture.set_paintable(Some(&texture));
                 self.poster_picture.set_visible(true);
+                // Ajustar margen izquierdo del texto para dejar espacio al póster superpuesto.
+                self.text_box.set_margin_start(220);
             }
             None => {
                 self.poster_picture.set_paintable(gtk4::gdk::Texture::NONE);
                 self.poster_picture.set_visible(false);
+                // Sin póster superpuesto, margen normal.
+                self.text_box.set_margin_start(28);
             }
         }
     }

@@ -79,6 +79,7 @@ impl MediaDetails {
         box_.set_margin_end(0);
         box_.set_valign(gtk4::Align::Start);
         box_.set_hexpand(true);
+        box_.set_vexpand(true);
 
         let banner = Banner::new();
 
@@ -88,6 +89,7 @@ impl MediaDetails {
         synopsis_label.set_xalign(0.0);
         synopsis_label.set_hexpand(true);
         synopsis_label.set_wrap(true);
+        synopsis_label.set_max_width_chars(100);
         synopsis_label.add_css_class("synopsis-text");
 
         // Banner hero a todo el ancho.
@@ -146,6 +148,7 @@ impl MediaDetails {
         // Contenedor de contenido dinámico.
         let content_container = Box::new(Orientation::Vertical, 0);
         content_container.set_hexpand(true);
+        content_container.set_vexpand(true);
         content_container.set_valign(gtk4::Align::Start);
 
         box_.append(&details_header);

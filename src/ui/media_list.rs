@@ -34,7 +34,6 @@ impl MediaCard {
         card.add_css_class("media-card");
         card.set_halign(gtk4::Align::Center);
         card.set_valign(gtk4::Align::Start);
-        card.set_size_request(CARD_POSTER_WIDTH + 24, CARD_POSTER_HEIGHT + 90);
         card.set_margin_top(12);
         card.set_margin_bottom(12);
         card.set_margin_start(10);
@@ -94,10 +93,11 @@ impl MediaCard {
         // Título.
         let title_label = Label::new(Some(&media.title));
         title_label.set_wrap(true);
-        title_label.set_max_width_chars(24);
+        title_label.set_max_width_chars(22);
         title_label.set_justify(gtk4::Justification::Center);
         title_label.set_halign(gtk4::Align::Center);
         title_label.set_valign(gtk4::Align::Start);
+        title_label.set_lines(2);
         title_label.add_css_class("poster-title");
         card.append(&title_label);
 
