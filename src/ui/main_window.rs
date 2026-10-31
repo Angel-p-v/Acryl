@@ -107,12 +107,6 @@ impl MainWindow {
         nav_box.set_hexpand(true);
         nav_box.add_css_class("nav-box");
 
-        // Botón "Categorías": abre el selector de categorías para filtrar.
-        let categories_button = Button::with_label("Categorías");
-        categories_button.add_css_class("nav-button");
-        categories_button.set_valign(gtk4::Align::Center);
-        nav_box.append(&categories_button);
-
         top_bar.append(&nav_box);
 
         // Sección derecha: búsqueda y acciones.
