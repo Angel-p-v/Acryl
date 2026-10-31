@@ -48,6 +48,12 @@ impl SearchBar {
         &self.box_
     }
 
+    /// Limpia el texto de búsqueda y el etiquetado de resultados.
+    pub fn clear_query(&self) {
+        self.entry.set_text("");
+        self.results_label.set_label("");
+    }
+
     pub fn on_select<F>(&mut self, f: F)
     where
         F: Fn(i64) + 'static,

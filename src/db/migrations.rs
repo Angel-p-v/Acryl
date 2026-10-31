@@ -156,6 +156,39 @@ const MEDIA_RATING_SQL: &str = r#"
 ALTER TABLE media ADD COLUMN rating INTEGER NOT NULL DEFAULT 0 CHECK (rating >= 0 AND rating <= 5);
 "#;
 
+/// Tablas de categorías para filtrado de medios, puntuación obtenida de
+/// metadatos (vote_average de TVmaze) e imagen específica de episodio.
+const MEDIA_CATEGORIES_AND_VOTE_SQL: &str = r#"
+-- Catálogo de categorías (géneros/etiquetas) para filtrar la biblioteca.
+CREATE TABLE IF NOT EXISTS categories (
+  id          INTEGER PRIMARY KEY,
+  name        TEXT    NOT NULL,
+  slug        TEXT    NOT NULL UNIQUE,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_categories_slug ON categories(slug);
+
+-- Relación muchos-a-muchos entre medios y categorías.
+CREATE TABLE IF NOT EXISTS media_categories (
+  media_id    INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+  category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+  PRIMARY KEY (media_id, category_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_categories_media ON media_categories(media_id);
+CREATE INDEX IF NOT EXISTS idx_media_categories_category ON media_categories(category_id);
+
+-- Puntuación obtenida de los metadatos (vote_average de TVmaze), separada de
+-- la calificación de usuario (rating, 0-5 estrellas).
+ALTER TABLE media ADD COLUMN vote_average REAL;
+
+-- Imagen específica de episodio (thumbnail), independiente del póster de la
+-- serie. Se rellena cuando la fuente de metadatos proporciona una imagen por
+-- episodio; de lo contrario se usa un fallback visual.
+ALTER TABLE media_files ADD COLUMN episode_image_path TEXT;
+"#;
+
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -196,5 +229,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 8,
         name: "media-rating",
         sql: MEDIA_RATING_SQL,
+    },
+    Migration {
+        version: 9,
+        name: "media-categories-and-vote",
+        sql: MEDIA_CATEGORIES_AND_VOTE_SQL,
     },
 ];

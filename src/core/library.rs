@@ -171,12 +171,68 @@ impl LibraryService {
         }
 
         let series_type = detect_media_type(dir);
-        let series_id =
-            Self::upsert_named_media(conn, dir, folder_title(dir), series_type, None, counters)?;
+
+        // Si la carpeta actual es una temporada (por ejemplo se indexó
+        // directamente `Solo Leveling S01/`), extraemos el nombre base de la
+        // serie y creamos la temporada como hija, en lugar de crear una serie
+        // llamada "Solo Leveling S01".
+        let is_current_season = is_season_dir(dir);
+
+        let series_id = if is_current_season {
+            let series_title = extract_series_title_from_season_folder(
+                &dir.file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+            )
+            .unwrap_or_else(|| folder_title(dir));
+
+            Self::upsert_named_media(conn, dir, series_title, series_type, None, counters)?
+        } else {
+            Self::upsert_named_media(conn, dir, folder_title(dir), series_type, None, counters)?
+        };
         counters.folders_processed += 1;
 
         let mut videos = videos;
         videos.sort();
+
+        if is_current_season {
+            // La carpeta actual es una temporada indexada directamente (por
+            // ejemplo `Solo Leveling S01/` sin carpeta padre de serie). Como el
+            // folder_path de la serie y de la temporada sería el mismo, no
+            // creamos un registro de temporada separado (colisionaría por la
+            // restricción UNIQUE de folder_path). Guardamos los episodios como
+            // hijos directos de la serie, extrayendo el número de temporada
+            // del nombre de la carpeta cuando sea posible.
+            let season_number = extract_season_number_from_folder(
+                &dir.file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+            );
+
+            let files: Vec<MediaFileInput> = videos
+                .iter()
+                .enumerate()
+                .map(|(index, video)| MediaFileInput {
+                    media_id: series_id,
+                    season: season_number,
+                    episode: Some(index as i32 + 1),
+                    title: Some(media_file_title(video)),
+                    file_path: path_string(video),
+                    size_bytes: file_size(video),
+                    mtime_ms: None,
+                })
+                .collect();
+
+            Self::save_files(conn, &files, counters)?;
+
+            // Las subcarpetas que no son temporadas se recorren por si
+            // contienen medios independientes.
+            for other in &other_dirs {
+                Self::scan_directory(conn, other, depth + 1, counters)?;
+            }
+            return Ok(());
+        }
+
         let files: Vec<MediaFileInput> = videos
             .iter()
             .enumerate()
@@ -753,6 +809,170 @@ fn is_season_separator(character: char) -> bool {
             character,
             '-' | '_' | '.' | ':' | ',' | '#' | '(' | ')' | '[' | ']' | '·'
         )
+}
+
+/// Extrae el número de temporada desde el nombre de una carpeta
+/// (`Solo Leveling S01` → `Some(1)`, `Temporada 2` → `Some(2)`, `S01` → `Some(1)`).
+/// Devuelve `None` si no se encuentra un número de temporada.
+/// Extrae el nombre base de una serie a partir de una carpeta que se detectó
+/// como temporada (Solo Leveling S01 -> Solo Leveling, Show - S02 ->
+/// Show, Temporada 1 -> vacia). Devuelve None cuando no se puede
+/// determinar un nombre base distinto de la propia carpeta.
+fn extract_series_title_from_season_folder(name: &str) -> Option<String> {
+    let cleaned = name.to_lowercase();
+
+    // Quita marcadores cortos: s01, t2, s-01.
+    let cleaned = remove_short_season_marker(&cleaned, 's');
+    let cleaned = remove_short_season_marker(cleaned, 't');
+
+    // Quita palabras clave de temporada: season 1, temporada 2, temp 3.
+    let cleaned = remove_season_keyword(cleaned, "season");
+    let cleaned = remove_season_keyword(cleaned, "temporada");
+    let cleaned = remove_season_keyword(cleaned, "temp");
+
+    // Quita numeros aislados (1, 01, 12).
+    let cleaned: String = cleaned
+        .split_whitespace()
+        .filter(|part| !(part.len() <= 3 && part.chars().all(|c| c.is_ascii_digit())))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(clean_title(cleaned))
+    }
+}
+fn extract_season_number_from_folder(name: &str) -> Option<i32> {
+    let lowered = name.to_lowercase();
+
+    // Buscar patrón S01, S1, s01, etc.
+    let bytes = lowered.as_bytes();
+    for index in 0..bytes.len() {
+        if bytes[index] != b's' && bytes[index] != b't' {
+            continue;
+        }
+        if index > 0 && !is_season_separator(lowered[index - 1..].chars().next().unwrap_or(' ')) {
+            continue;
+        }
+        let after = &lowered[index + 1..];
+        let after = after.trim_start_matches(is_season_separator);
+        let digits = after.chars().take_while(|c| c.is_ascii_digit()).count();
+        if digits == 0 || digits > 3 {
+            continue;
+        }
+        let after_digits = &after[digits..];
+        if after_digits
+            .chars()
+            .next()
+            .is_none_or(|c| !c.is_alphanumeric())
+        {
+            return after[..digits].parse().ok();
+        }
+    }
+
+    // Buscar patrón "season 1", "temporada 2", "temp 3".
+    for keyword in ["season", "temporada", "temp"] {
+        if let Some(pos) = lowered.find(keyword) {
+            if pos > 0 && !is_season_separator(lowered[..pos].chars().next_back().unwrap_or(' ')) {
+                continue;
+            }
+            let after = &lowered[pos + keyword.len()..];
+            let after = after.trim_start_matches(is_season_separator);
+            let digits = after.chars().take_while(|c| c.is_ascii_digit()).count();
+            if digits == 0 || digits > 3 {
+                continue;
+            }
+            let after_digits = &after[digits..];
+            if after_digits
+                .chars()
+                .next()
+                .is_none_or(|c| !c.is_alphanumeric())
+            {
+                return after[..digits].parse().ok();
+            }
+        }
+    }
+
+    // Buscar número aislado (`1`, `01`, `12`) como nombre completo.
+    let trimmed = lowered.trim();
+    if trimmed.len() <= 3 && trimmed.chars().all(|c| c.is_ascii_digit()) {
+        return trimmed.parse().ok();
+    }
+
+    None
+}
+
+/// Elimina un marcador corto (`s01`, `t2`, `s-01`, `s_01`) de una cadena.
+fn remove_short_season_marker(text: &str, marker: char) -> &str {
+    let mut result = text;
+
+    for (index, _) in text.char_indices() {
+        if !text[index..].starts_with(marker) {
+            continue;
+        }
+        if index > 0 && !is_season_separator(text[index - 1..].chars().next().unwrap_or(' ')) {
+            continue;
+        }
+        let after_marker = &text[index + marker.len_utf8()..];
+        let after_marker = after_marker.trim_start_matches(is_season_separator);
+        let digits = after_marker
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .count();
+        if digits == 0 || digits > 3 {
+            continue;
+        }
+        let after_digits = &after_marker[digits..];
+        if after_digits
+            .chars()
+            .next()
+            .is_none_or(|c| !c.is_alphanumeric())
+        {
+            let start = &text[..index].trim_end_matches(is_season_separator);
+            let end = after_digits.trim_start_matches(is_season_separator);
+            if start.is_empty() {
+                result = end;
+            } else {
+                result = start;
+            }
+            break;
+        }
+    }
+
+    result
+}
+
+/// Elimina una palabra clave de temporada (`season 1`, `temporada 2`, etc.).
+fn remove_season_keyword<'a>(text: &'a str, keyword: &str) -> &'a str {
+    if let Some(pos) = text.find(keyword) {
+        if pos > 0 && !is_season_separator(text[pos - 1..].chars().next().unwrap_or(' ')) {
+            return text;
+        }
+        let after = &text[pos + keyword.len()..];
+        let after = after.trim_start_matches(is_season_separator);
+        let digits = after.chars().take_while(|c| c.is_ascii_digit()).count();
+        if digits == 0 || digits > 3 {
+            return text;
+        }
+        let after_digits = &after[digits..];
+        if after_digits
+            .chars()
+            .next()
+            .is_none_or(|c| !c.is_alphanumeric())
+        {
+            let start = text[..pos].trim_end_matches(is_season_separator);
+            let end = after_digits.trim_start_matches(is_season_separator);
+            if start.is_empty() {
+                return end;
+            }
+            if end.is_empty() {
+                return start;
+            }
+        }
+    }
+    text
 }
 
 /// Las rutas que contienen un componente `Anime`/`Animes` se clasifican como
@@ -1949,5 +2169,67 @@ mod tests {
         // nuevo a ffprobe.
         let again = ensure_media_streams(&db_path, &video_str, false).expect("reutilizar pistas");
         assert_eq!(again.len(), streams.len());
+    }
+
+    #[test]
+    fn extrae_nombre_base_de_serie_desde_carpeta_de_temporada() {
+        assert_eq!(
+            super::extract_series_title_from_season_folder("Solo Leveling S01"),
+            Some("solo leveling".to_string())
+        );
+        assert_eq!(
+            super::extract_series_title_from_season_folder("Show - S02"),
+            Some("show".to_string())
+        );
+        assert_eq!(
+            super::extract_series_title_from_season_folder("Temporada 1"),
+            None
+        );
+        assert_eq!(
+            super::extract_series_title_from_season_folder("Serie Nombre Temporada 2"),
+            Some("serie nombre".to_string())
+        );
+        assert_eq!(super::extract_series_title_from_season_folder("S01"), None);
+    }
+
+    #[test]
+    fn indexa_carpeta_de_temporada_como_raiz_crea_serie_con_nombre_base() {
+        let (db_path, _db_dir) = temp_db();
+        let library = TempDir::new().expect("biblioteca temporal");
+        let root = library.path();
+        // Indexamos directamente una carpeta de temporada sin carpeta padre de serie.
+        let season_dir = root.join("Solo Leveling S01");
+        touch(&season_dir.join("S01E01.mkv"));
+        touch(&season_dir.join("S01E02.mkv"));
+
+        LibraryService::index_folder(&db_path, root.to_str().unwrap())
+            .expect("indexar carpeta de temporada");
+
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let titles = list_titles(&mut conn);
+        // Debe crearse una serie "solo leveling" (no "Solo Leveling S01").
+        assert!(
+            titles.iter().any(|(t, _, _)| t == "solo leveling"),
+            "debe crearse la serie con nombre base: {:?}",
+            titles
+        );
+
+        let series_id: i64 = conn
+            .query_row(
+                "SELECT id FROM media WHERE title = 'solo leveling' AND parent_id IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("id de la serie");
+        let mut repo = MediaRepository::new(&mut conn);
+        // No se crea una temporada separada (mismo folder_path); los episodios
+        // son hijos directos de la serie con el numero de temporada asignado.
+        let seasons = repo.list_children(series_id).expect("temporadas");
+        assert_eq!(seasons.len(), 0, "no debe haber temporadas hijas separadas");
+
+        let episodes = repo.list_files_by_media(series_id).expect("episodios");
+        assert_eq!(episodes.len(), 2);
+        assert_eq!(episodes[0].season, Some(1));
+        assert_eq!(episodes[1].season, Some(1));
     }
 }

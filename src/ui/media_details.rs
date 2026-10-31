@@ -1,12 +1,13 @@
 //! Vista de detalles de un medio al estilo Crunchyroll.
 //!
 //! Distribución:
-//! - Banner hero a todo el ancho (520px) con título y tipo/año.
-//! - Fila de acciones en línea: Volver, Favorito, Visto, Calificación,
-//!   Pistas, Continuar/Reproducir.
-//! - Desplegable de temporada (solo series).
+//! - Banner hero a todo el ancho como imagen principal (sin póster duplicado).
+//! - Puntuación de metadatos (vote_average de TVmaze) mostrada directamente.
+//! - Fila de acciones en línea: Volver, Pistas, Continuar/Reproducir.
+//! - Desplegable de temporada (solo series) con selección por defecto.
 //! - Sinopsis.
-//! - Rejilla de episodios con portadas.
+//! - Rejilla de episodios filtrada por la temporada seleccionada, cada uno
+//!   con su propia imagen individual.
 //!
 //! Todas las interacciones funcionan: hover, active, focus, teclado.
 
@@ -23,9 +24,6 @@ use std::rc::Rc;
 /// Tamaño de la portada de un episodio en la rejilla (relación 16:9).
 const EPISODE_POSTER_WIDTH: i32 = 180;
 const EPISODE_POSTER_HEIGHT: i32 = 101;
-
-/// Número máximo de estrellas para la calificación.
-const MAX_STARS: i32 = 5;
 
 /// Destino del botón «Volver».
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,19 +50,18 @@ pub struct MediaDetails {
     main_button_file_path: Rc<RefCell<Option<String>>>,
     main_button_label: String,
     synopsis_label: Label,
-    favorite_button: Button,
-    watched_button: Button,
-    rating_button: Button,
     tracks_button: Button,
     play_button: Button,
     back_button: Button,
+    vote_label: Label,
     season_dropdown: DropDown,
     season_dropdown_model: gtk4::StringList,
     content_container: Box,
+    /// Temporadas disponibles (para el desplegable y filtrado).
+    seasons: Rc<RefCell<Vec<crate::db::media_repo::Media>>>,
+    /// Temporada actualmente seleccionada (None = sin temporadas, mostrar todo).
+    selected_season: Rc<RefCell<Option<i64>>>,
     on_back: Option<Rc<dyn Fn()>>,
-    on_favorite: Option<Rc<dyn Fn()>>,
-    on_watched: Option<Rc<dyn Fn()>>,
-    on_rate: Option<Rc<dyn Fn(i32)>>,
     on_play_episode: Option<Rc<dyn Fn(String)>>,
     on_edit_tracks: Option<Rc<dyn Fn(String)>>,
     on_change_season: Option<Rc<dyn Fn(i64)>>,
@@ -92,7 +89,7 @@ impl MediaDetails {
         synopsis_label.set_max_width_chars(100);
         synopsis_label.add_css_class("synopsis-text");
 
-        // Banner hero a todo el ancho.
+        // Banner hero a todo el ancho (imagen principal, sin póster duplicado).
         let details_header = Box::new(Orientation::Vertical, 0);
         details_header.add_css_class("details-header");
         details_header.set_hexpand(true);
@@ -111,18 +108,6 @@ impl MediaDetails {
         back_button.add_css_class("flat-button");
         buttons_box.append(&back_button);
 
-        let favorite_button = Button::with_label("★ Favorito");
-        favorite_button.add_css_class("flat-button");
-        buttons_box.append(&favorite_button);
-
-        let watched_button = Button::with_label("✓ Visto");
-        watched_button.add_css_class("flat-button");
-        buttons_box.append(&watched_button);
-
-        let rating_button = Button::with_label("☆☆☆☆☆ Calificar");
-        rating_button.add_css_class("flat-button");
-        buttons_box.append(&rating_button);
-
         let tracks_button = Button::with_label("🎵 Pistas");
         tracks_button.add_css_class("flat-button");
         tracks_button.set_tooltip_text(Some("Elegir pista de audio y subtítulos"));
@@ -132,6 +117,15 @@ impl MediaDetails {
         play_button.add_css_class("hero-action-btn");
         play_button.add_css_class("primary");
         buttons_box.append(&play_button);
+
+        // Puntuación de metadatos (vote_average de TVmaze). Es información del
+        // medio, no una acción del usuario, por tanto se muestra como etiqueta.
+        let vote_label = Label::new(None);
+        vote_label.set_halign(gtk4::Align::Start);
+        vote_label.set_valign(gtk4::Align::Center);
+        vote_label.set_margin_start(16);
+        vote_label.add_css_class("vote-average");
+        buttons_box.append(&vote_label);
 
         // Desplegable de temporada.
         let season_dropdown_model = gtk4::StringList::new(&[]);
@@ -145,7 +139,7 @@ impl MediaDetails {
         season_dropdown.set_margin_start(16);
         season_dropdown.set_visible(false);
 
-        // Contenedor de contenido dinámico.
+        // Contenedor de contenido dinámico (episodios filtrados por temporada).
         let content_container = Box::new(Orientation::Vertical, 0);
         content_container.set_hexpand(true);
         content_container.set_vexpand(true);
@@ -169,19 +163,16 @@ impl MediaDetails {
             main_button_file_path,
             main_button_label: "▶ Reproducir".to_string(),
             synopsis_label,
-            favorite_button,
-            watched_button,
-            rating_button,
             tracks_button,
             play_button,
             back_button,
+            vote_label,
             season_dropdown,
             season_dropdown_model,
             content_container,
+            seasons: Rc::new(RefCell::new(Vec::new())),
+            selected_season: Rc::new(RefCell::new(None)),
             on_back: None,
-            on_favorite: None,
-            on_watched: None,
-            on_rate: None,
             on_play_episode: None,
             on_edit_tracks: None,
             on_change_season: None,
@@ -233,8 +224,16 @@ impl MediaDetails {
         self.synopsis_label
             .set_label(&media.synopsis.clone().unwrap_or_default());
         self.banner.set_info(&media.title, &info_label);
-        self.banner
-            .set_images(media.banner_path.as_deref(), media.poster_path.as_deref());
+        self.banner.set_images(media.banner_path.as_deref(), None);
+
+        // La puntuación de metadatos se muestra directamente (no es una acción
+        // del usuario). Si no hay puntuación, no se inventa nada.
+        if let Some(vote) = media.vote_average {
+            self.vote_label.set_label(&format!("⭐ {:.1} / 10", vote));
+            self.vote_label.set_visible(true);
+        } else {
+            self.vote_label.set_visible(false);
+        }
 
         if media.parent_id.is_none() {
             self.series_poster_url = media.poster_path.clone();
@@ -246,8 +245,6 @@ impl MediaDetails {
                 None
             };
         }
-
-        self.update_rating_button(media.rating);
 
         let (label, _file_path) = if media.parent_id.is_none() {
             if let Ok(mut conn) = open_db(&self.db_path) {
@@ -283,25 +280,13 @@ impl MediaDetails {
         self.main_button_label = label;
         self.play_button.set_label(&self.main_button_label);
 
-        let fav_label = if media.is_favorite {
-            "★ Favorito (activo)"
-        } else {
-            "★ Favorito"
-        };
-        self.favorite_button.set_label(fav_label);
-
-        let wat_label = if media.is_watched {
-            "✓ Visto (activo)"
-        } else {
-            "✓ Visto"
-        };
-        self.watched_button.set_label(wat_label);
-
         while let Some(child) = self.content_container.first_child() {
             self.content_container.remove(&child);
         }
 
         self.season_dropdown.set_visible(false);
+        self.seasons.borrow_mut().clear();
+        self.selected_season.replace(None);
 
         if media.parent_id.is_none() && media.r#type == "series" {
             self.load_seasons_and_episodes(media);
@@ -317,22 +302,16 @@ impl MediaDetails {
         }
     }
 
-    fn update_rating_button(&self, rating: i32) {
-        let stars: String = (0..MAX_STARS)
-            .map(|i| if i < rating { "★" } else { "☆" })
-            .collect();
-        self.rating_button
-            .set_label(&format!("{} Calificar", stars));
-    }
-
     /// Crea una tarjeta de episodio al estilo Crunchyroll: portada arriba,
-    /// número y título debajo, botón de reproducción destacado.
+    /// número y título debajo, botón de reproducción destacado. Usa la imagen
+    /// individual del episodio cuando está disponible; de lo contrario, un
+    /// fallback visual apropiado.
     fn episode_card(
         &self,
         episode_label: &str,
         episode_number: &str,
         file_path: String,
-        poster_url: Option<&str>,
+        episode_image_url: Option<&str>,
     ) -> Box {
         let card = Box::new(Orientation::Vertical, 6);
         card.add_css_class("episode-card");
@@ -340,14 +319,13 @@ impl MediaDetails {
         card.set_vexpand(false);
         card.set_size_request(EPISODE_POSTER_WIDTH + 20, EPISODE_POSTER_HEIGHT + 90);
 
-        let effective_poster_url = poster_url.or(self.series_poster_url.as_deref());
-
+        // Imagen específica del episodio; sin fallback al póster de la serie.
         let poster_box = Box::new(Orientation::Vertical, 0);
         poster_box.set_size_request(EPISODE_POSTER_WIDTH, EPISODE_POSTER_HEIGHT);
         poster_box.set_halign(gtk4::Align::Center);
         poster_box.set_valign(gtk4::Align::Start);
 
-        if let Some(pixbuf) = effective_poster_url.and_then(cached_path).and_then(|path| {
+        if let Some(pixbuf) = episode_image_url.and_then(cached_path).and_then(|path| {
             GtkPixbuf::from_file_at_scale(&path, EPISODE_POSTER_WIDTH, EPISODE_POSTER_HEIGHT, true)
                 .ok()
         }) {
@@ -355,6 +333,8 @@ impl MediaDetails {
             picture.add_css_class("episode-poster");
             poster_box.append(&picture);
         } else {
+            // Fallback visual apropiado: icono genérico sin pretender ser el
+            // póster del episodio.
             let placeholder = placeholder_widget(EPISODE_POSTER_WIDTH, EPISODE_POSTER_HEIGHT);
             placeholder.add_css_class("episode-poster");
             poster_box.append(&placeholder);
@@ -430,7 +410,8 @@ impl MediaDetails {
         grid
     }
 
-    /// Carga y muestra las temporadas y episodios directos de una serie.
+    /// Carga y muestra las temporadas de una serie, seleccionando la primera
+    /// por defecto y mostrando únicamente sus episodios.
     fn load_seasons_and_episodes(&mut self, _media: &Media) {
         let (seasons, direct_files) = {
             let mut conn = match open_db(&self.db_path) {
@@ -446,13 +427,18 @@ impl MediaDetails {
             (seasons, direct_files)
         };
 
+        self.seasons.borrow_mut().clear();
+        self.seasons.borrow_mut().extend(seasons.clone());
+
         if !seasons.is_empty() {
             self.season_dropdown.set_visible(true);
             let season_names: Vec<&str> = seasons.iter().map(|s| s.title.as_str()).collect();
             self.season_dropdown_model = gtk4::StringList::new(&season_names);
             self.season_dropdown
                 .set_model(Some(&self.season_dropdown_model));
+            // Seleccionar la primera temporada por defecto.
             self.season_dropdown.set_selected(0);
+            self.selected_season.replace(seasons.first().map(|s| s.id));
 
             let season_dropdown = self.season_dropdown.clone();
             let on_change_season = self.on_change_season.clone();
@@ -475,111 +461,98 @@ impl MediaDetails {
             return;
         }
 
-        if !seasons.is_empty() {
-            for season in seasons.iter() {
-                let season_section = Box::new(Orientation::Vertical, 0);
-                season_section.add_css_class("season-grid-section");
-                season_section.set_hexpand(true);
-                season_section.set_valign(gtk4::Align::Start);
-
-                let season_title = Label::new(Some(&season.title));
-                season_title.set_halign(gtk4::Align::Start);
-                season_title.set_hexpand(true);
-                season_title.set_xalign(0.0);
-                season_title.add_css_class("season-grid-title");
-                season_section.append(&season_title);
-
-                let season_files = {
-                    let mut conn = match open_db(&self.db_path) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            eprintln!("Error abriendo BD: {}", e);
-                            continue;
-                        }
-                    };
-                    let mut repo = MediaRepository::new(&mut conn);
-                    repo.list_files_by_media(season.id).unwrap_or_default()
-                };
-
-                let season_poster_url = season.poster_path.as_deref();
-
-                let mut cards = Vec::new();
-                for f in season_files.iter() {
-                    let episode_label = match (f.season, f.episode) {
-                        (Some(s), Some(e)) => {
-                            format!("S{}E{} - {}", s, e, f.title.clone().unwrap_or_default())
-                        }
-                        (None, Some(e)) => {
-                            format!("Episodio {} - {}", e, f.title.clone().unwrap_or_default())
-                        }
-                        (Some(s), None) => {
-                            format!("Temporada {} - {}", s, f.title.clone().unwrap_or_default())
-                        }
-                        (None, None) => f.title.clone().unwrap_or_default(),
-                    };
-                    let episode_number = match (f.season, f.episode) {
-                        (Some(s), Some(e)) => format!("S{:02}E{:02}", s, e),
-                        (None, Some(e)) => format!("E{:02}", e),
-                        (Some(s), None) => format!("T{:02}", s),
-                        (None, None) => String::new(),
-                    };
-
-                    let card = self.episode_card(
-                        &episode_label,
-                        &episode_number,
-                        f.file_path.clone(),
-                        season_poster_url,
-                    );
-                    cards.push(card);
-                }
-
-                let grid = self.episode_grid(cards);
-                season_section.append(&grid);
-
-                self.content_container.append(&season_section);
-            }
-        }
-
-        if !direct_files.is_empty() {
-            let episodes_title = Label::new(Some("Episodios"));
-            episodes_title.set_halign(gtk4::Align::Start);
-            episodes_title.set_hexpand(true);
-            episodes_title.set_xalign(0.0);
-            episodes_title.add_css_class("season-grid-title");
-            self.content_container.append(&episodes_title);
-
-            let mut cards = Vec::new();
-            for f in direct_files.iter() {
-                let episode_label = match (f.season, f.episode) {
-                    (Some(s), Some(e)) => {
-                        format!("S{}E{} - {}", s, e, f.title.clone().unwrap_or_default())
-                    }
-                    (None, Some(e)) => {
-                        format!("Episodio {} - {}", e, f.title.clone().unwrap_or_default())
-                    }
-                    (Some(s), None) => {
-                        format!("Temporada {} - {}", s, f.title.clone().unwrap_or_default())
-                    }
-                    (None, None) => f.title.clone().unwrap_or_default(),
-                };
-                let episode_number = match (f.season, f.episode) {
-                    (Some(s), Some(e)) => format!("S{:02}E{:02}", s, e),
-                    (None, Some(e)) => format!("E{:02}", e),
-                    (Some(s), None) => format!("T{:02}", s),
-                    (None, None) => String::new(),
-                };
-
-                let card =
-                    self.episode_card(&episode_label, &episode_number, f.file_path.clone(), None);
-                cards.push(card);
-            }
-
-            let grid = self.episode_grid(cards);
-            self.content_container.append(&grid);
+        // Mostrar únicamente los episodios de la temporada seleccionada por
+        // defecto (la primera). Nunca mezclar episodios de temporadas distintas.
+        if let Some(first_season) = seasons.first() {
+            self.load_episodes_for_season(first_season.id);
+        } else if !direct_files.is_empty() {
+            self.load_episodes_for_files(&direct_files);
         }
     }
 
-    /// Carga y muestra los episodios (archivos) de una temporada en rejilla.
+    /// Carga y muestra los episodios de una temporada concreta (filtrado por
+    /// temporada, nunca mezcla temporadas diferentes).
+    pub fn load_episodes_for_season(&self, season_id: i64) {
+        self.selected_season.replace(Some(season_id));
+
+        let files = {
+            let mut conn = match open_db(&self.db_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error abriendo BD: {}", e);
+                    return;
+                }
+            };
+            let mut repo = MediaRepository::new(&mut conn);
+            let season = repo.find_by_id(season_id).unwrap_or(None);
+            let files = repo.list_files_by_media(season_id).unwrap_or_default();
+            (season, files)
+        };
+
+        let (season, files) = files;
+
+        // Limpiar el contenedor de contenido antes de mostrar los episodios de
+        // la nueva temporada, para evitar duplicados al cambiar de temporada.
+        while let Some(child) = self.content_container.first_child() {
+            self.content_container.remove(&child);
+        }
+
+        if let Some(season) = season {
+            let season_title = Label::new(Some(&season.title));
+            season_title.set_halign(gtk4::Align::Start);
+            season_title.set_hexpand(true);
+            season_title.set_xalign(0.0);
+            season_title.set_margin_top(24);
+            season_title.add_css_class("season-grid-title");
+            self.content_container.append(&season_title);
+        }
+
+        if files.is_empty() {
+            let no_files_label = Label::new(Some("Sin episodios en esta temporada"));
+            no_files_label.set_halign(gtk4::Align::Start);
+            no_files_label.set_valign(gtk4::Align::Start);
+            no_files_label.set_margin_top(24);
+            no_files_label.add_css_class("synopsis-text");
+            self.content_container.append(&no_files_label);
+            return;
+        }
+
+        let mut cards = Vec::new();
+        for f in files.iter() {
+            let episode_label = match (f.season, f.episode) {
+                (Some(s), Some(e)) => {
+                    format!("S{}E{} - {}", s, e, f.title.clone().unwrap_or_default())
+                }
+                (None, Some(e)) => {
+                    format!("Episodio {} - {}", e, f.title.clone().unwrap_or_default())
+                }
+                (Some(s), None) => {
+                    format!("Temporada {} - {}", s, f.title.clone().unwrap_or_default())
+                }
+                (None, None) => f.title.clone().unwrap_or_default(),
+            };
+            let episode_number = match (f.season, f.episode) {
+                (Some(s), Some(e)) => format!("S{:02}E{:02}", s, e),
+                (None, Some(e)) => format!("E{:02}", e),
+                (Some(s), None) => format!("T{:02}", s),
+                (None, None) => String::new(),
+            };
+
+            let card = self.episode_card(
+                &episode_label,
+                &episode_number,
+                f.file_path.clone(),
+                f.episode_image_path.as_deref(),
+            );
+            cards.push(card);
+        }
+
+        let grid = self.episode_grid(cards);
+        self.content_container.append(&grid);
+    }
+
+    /// Carga y muestra los episodios (archivos) de una temporada en rejilla,
+    /// usando la imagen individual de cada episodio.
     fn load_episodes(&self, media_id: i64) {
         let files = {
             let mut conn = match open_db(&self.db_path) {
@@ -633,6 +606,53 @@ impl MediaDetails {
         self.content_container.append(&grid);
     }
 
+    /// Carga y muestra los episodios de una lista de archivos dada (usado al
+    /// cambiar de temporada).
+    fn load_episodes_for_files(&self, files: &[crate::db::file_repo::MediaFile]) {
+        if files.is_empty() {
+            let no_files_label = Label::new(Some("Sin episodios disponibles"));
+            no_files_label.set_halign(gtk4::Align::Start);
+            no_files_label.set_valign(gtk4::Align::Start);
+            no_files_label.set_margin_top(24);
+            no_files_label.add_css_class("synopsis-text");
+            self.content_container.append(&no_files_label);
+            return;
+        }
+
+        let mut cards = Vec::new();
+        for f in files.iter() {
+            let episode_label = match (f.season, f.episode) {
+                (Some(s), Some(e)) => {
+                    format!("S{}E{} - {}", s, e, f.title.clone().unwrap_or_default())
+                }
+                (None, Some(e)) => {
+                    format!("Episodio {} - {}", e, f.title.clone().unwrap_or_default())
+                }
+                (Some(s), None) => {
+                    format!("Temporada {} - {}", s, f.title.clone().unwrap_or_default())
+                }
+                (None, None) => f.title.clone().unwrap_or_default(),
+            };
+            let episode_number = match (f.season, f.episode) {
+                (Some(s), Some(e)) => format!("S{:02}E{:02}", s, e),
+                (None, Some(e)) => format!("E{:02}", e),
+                (Some(s), None) => format!("T{:02}", s),
+                (None, None) => String::new(),
+            };
+
+            let card = self.episode_card(
+                &episode_label,
+                &episode_number,
+                f.file_path.clone(),
+                f.episode_image_path.as_deref(),
+            );
+            cards.push(card);
+        }
+
+        let grid = self.episode_grid(cards);
+        self.content_container.append(&grid);
+    }
+
     pub fn media_id(&self) -> i64 {
         self.media_id
     }
@@ -655,45 +675,6 @@ impl MediaDetails {
             cb_clone();
         });
         self.on_back = Some(cb);
-    }
-
-    pub fn on_favorite<F>(&mut self, f: F)
-    where
-        F: Fn() + 'static,
-    {
-        let cb = Rc::new(f);
-        let cb_clone = cb.clone();
-        self.favorite_button.connect_clicked(move |_| {
-            cb_clone();
-        });
-        self.on_favorite = Some(cb);
-    }
-
-    pub fn on_watched<F>(&mut self, f: F)
-    where
-        F: Fn() + 'static,
-    {
-        let cb = Rc::new(f);
-        let cb_clone = cb.clone();
-        self.watched_button.connect_clicked(move |_| {
-            cb_clone();
-        });
-        self.on_watched = Some(cb);
-    }
-
-    pub fn on_rate<F>(&mut self, f: F)
-    where
-        F: Fn(i32) + 'static,
-    {
-        let cb = Rc::new(f);
-        let cb_clone = cb.clone();
-        let rating_button_clone = self.rating_button.clone();
-        self.rating_button.connect_clicked(move |_| {
-            cb_clone(Self::stars_from_label(
-                &rating_button_clone.label().unwrap_or_default(),
-            ));
-        });
-        self.on_rate = Some(cb);
     }
 
     pub fn on_play_episode<F>(&mut self, f: F)
@@ -731,10 +712,6 @@ impl MediaDetails {
         F: Fn(i64) + 'static,
     {
         self.on_change_season = Some(Rc::new(f));
-    }
-
-    fn stars_from_label(label: &str) -> i32 {
-        label.chars().take_while(|c| *c == '★').count() as i32
     }
 }
 

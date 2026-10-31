@@ -41,8 +41,8 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 |-----------|-------------|
 | 📚 **Biblioteca local** | Indexa películas, series y anime en una base de datos SQLite con búsqueda FTS5 |
 | 🔍 **Búsqueda rápida** | Busca por título con filtrado por tipo y paginación |
-| 🖼️ **Pósteres, banners y metadatos** | Descarga pósteres y sinopsis desde TVmaze, banners anchos desde TVmaze/AniList, y los muestra en la biblioteca y en los detalles |
-| ⭐ **Favoritos y visto** | Marca contenido como favorito o visto con un solo clic |
+| 🏷️ **Categorías** | Filtra la biblioteca por géneros/etiquetas obtenidos de los metadatos (TVmaze) |
+| 🖼️ **Pósteres, banners y metadatos** | Descarga pósteres, sinopsis y puntuación (vote_average) desde TVmaze; banners anchos desde TVmaze/AniList. Imágenes individuales por episodio. |
 | ▶️ **Reproducción con mpv** | Abre el episodio seleccionado en `mpv` (ventana independiente) |
 | ⚙️ **Configuración YAML** | Ajustes persistentes en archivo YAML (idioma, ruta de base de datos, reproductor predeterminado) |
 | 🌐 **Idiomas** | Interfaz disponible en español e inglés |
@@ -252,12 +252,13 @@ Una vez iniciada la aplicación:
 1. **Indexar medios**: Acryl carga automáticamente los medios desde la base de datos SQLite configurada (`acryl.db` por defecto).
 2. **Buscar**: Escribe un título en el campo de búsqueda para filtrar resultados.
 3. **Ver detalles**: Haz clic en cualquier medio para ver su banner, sinopsis, año y archivos indexados.
-4. **Volver atrás**: En la vista de detalles, el botón «← Volver» regresa a la serie desde una temporada y a la lista principal desde una serie, película o anime.
-5. **Marcar favorito/visto**: Usa los botones de estado en la vista de detalles.
+4. **Volver atrás**: En la vista de detalles, el botón «← Volver» regresa a la serie desde una temporada o episodio, y a la lista principal desde una serie, película o anime.
+5. **Filtrar por categorías**: Desde la barra superior, pulsa «Categorías» para ver los géneros disponibles y filtrar la biblioteca. Usa «Ver todo» para quitar el filtro.
 6. **Reproducir**: Pulsa "▶ Reproducir" en la vista de detalles o en un episodio concreto; el archivo se abrirá en `mpv`.
-7. **Actualizar metadatos**: En Ajustes, pulsa "Actualizar todos los metadatos" para volver a consultar TVmaze y sobrescribir título, año, sinopsis, póster y banner de todos los medios indexados. La operación se ejecuta en segundo plano y pide confirmación.
-8. **Cambiar idioma**: Usa el selector de idioma en la parte superior de la aplicación.
-9. **Gestionar carpetas**: En Ajustes puedes añadir carpetas con el selector nativo
+7. **Puntuación de metadatos**: En la vista de detalles se muestra la puntuación obtenida de TVmaze (vote_average, 0-10) cuando está disponible.
+8. **Actualizar metadatos**: En Ajustes, pulsa "Actualizar todos los metadatos" para volver a consultar TVmaze y sobrescribir título, año, sinopsis, puntuación, póster y banner de todos los medios indexados. La operación se ejecuta en segundo plano y pide confirmación.
+9. **Cambiar idioma**: Usa el selector de idioma en la parte superior de la aplicación.
+10. **Gestionar carpetas**: En Ajustes puedes añadir carpetas con el selector nativo
    ("Examinar...") o escribiendo la ruta. Al añadir una carpeta se indexa en segundo
    plano y la galería se actualiza al terminar. "Reindexar todas las carpetas" vuelve
    a escanear las rutas configuradas. Al eliminar una carpeta se pide confirmación y
