@@ -166,9 +166,6 @@ impl MainWindow {
         // FlowBox y del Clamp.
         media_list.set_responsive_columns(1160);
 
-        // Página principal: lista de medios (envuelta en Clamp).
-        stack.add_titled(&list_clamp, Some("list"), "Lista");
-
         // Página vacía: AdwStatusPage cuando no hay medios indexados.
         let empty_page = StatusPage::new();
         empty_page.set_title("Sin medios indexados");
