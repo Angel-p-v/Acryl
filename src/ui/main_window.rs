@@ -46,8 +46,8 @@ impl MainWindow {
         let window = AdwApplicationWindow::builder()
             .application(app)
             .title("Acryl")
-            .default_width(1000)
-            .default_height(700)
+            .default_width(1200)
+            .default_height(800)
             .build();
 
         // AdwToastOverlay permite mostrar notificaciones temporales (AdwToast)
@@ -55,18 +55,26 @@ impl MainWindow {
         let toast_overlay = ToastOverlay::new();
 
         let content = Box::new(Orientation::Vertical, 0);
+        content.set_hexpand(true);
         content.set_vexpand(true);
         toast_overlay.set_child(Some(&content));
         window.set_content(Some(&toast_overlay));
 
         // Barra superior al estilo Crunchyroll: logo a la izquierda,
-        // navegación horizontal en el centro, acciones y búsqueda a la derecha.
+        // navegación en el centro, acciones y búsqueda a la derecha.
         let top_bar = Box::new(Orientation::Horizontal, 0);
         top_bar.set_hexpand(true);
+        top_bar.set_vexpand(false);
         top_bar.set_halign(gtk4::Align::Fill);
+        top_bar.set_valign(gtk4::Align::Center);
         top_bar.add_css_class("top-bar");
 
-        // Logo / nombre de la app a la izquierda.
+        // Sección izquierda: logo / nombre de la app.
+        let left_section = Box::new(Orientation::Horizontal, 0);
+        left_section.set_halign(gtk4::Align::Start);
+        left_section.set_valign(gtk4::Align::Center);
+        left_section.set_hexpand(false);
+
         let logo_label = Label::new(Some("Acryl"));
         logo_label.set_halign(gtk4::Align::Start);
         logo_label.set_valign(gtk4::Align::Center);
@@ -75,13 +83,15 @@ impl MainWindow {
         logo_label.set_xalign(0.0);
         logo_label.set_hexpand(false);
         logo_label.set_markup("<b><span size='x-large' foreground='#f75c03'>A</span>cryl</b>");
-        top_bar.append(&logo_label);
+        left_section.append(&logo_label);
 
-        // Navegación horizontal (Novedades, Popular, Simulcasts, Categorías).
-        let nav_box = Box::new(Orientation::Horizontal, 0);
-        nav_box.set_halign(gtk4::Align::Start);
+        top_bar.append(&left_section);
+
+        // Sección centro: navegación horizontal (se expande para centrar).
+        let nav_box = Box::new(Orientation::Horizontal, 8);
+        nav_box.set_halign(gtk4::Align::Center);
         nav_box.set_valign(gtk4::Align::Center);
-        nav_box.set_hexpand(false);
+        nav_box.set_hexpand(true);
         nav_box.add_css_class("nav-box");
 
         let nav_items = [
@@ -99,35 +109,38 @@ impl MainWindow {
 
         top_bar.append(&nav_box);
 
-        // Barra de búsqueda a la derecha del centro.
+        // Sección derecha: búsqueda y acciones.
+        let right_section = Box::new(Orientation::Horizontal, 0);
+        right_section.set_halign(gtk4::Align::End);
+        right_section.set_valign(gtk4::Align::Center);
+        right_section.set_hexpand(false);
+        right_section.set_margin_end(16);
+
+        // Barra de búsqueda.
         let search_bar = SearchBar::new(&db_path);
         search_bar.widget().set_hexpand(false);
-        search_bar.widget().set_width_request(320);
+        search_bar.widget().set_width_request(300);
         search_bar.widget().set_halign(gtk4::Align::Center);
         search_bar.widget().set_valign(gtk4::Align::Center);
-        top_bar.append(search_bar.widget());
+        right_section.append(search_bar.widget());
 
-        // Acciones a la derecha: biblioteca, ajustes.
-        let right_box = Box::new(Orientation::Horizontal, 0);
-        right_box.set_halign(gtk4::Align::End);
-        right_box.set_valign(gtk4::Align::Center);
-        right_box.set_hexpand(false);
-        right_box.set_margin_end(16);
-
+        // Indicador de biblioteca.
         let library_status = Label::new(None);
         library_status.add_css_class("dim-label");
         library_status.set_valign(gtk4::Align::Center);
+        library_status.set_margin_start(16);
         library_status.set_margin_end(16);
-        right_box.append(&library_status);
+        right_section.append(&library_status);
 
+        // Botón de ajustes.
         let settings_button = Button::with_label("⚙ Ajustes");
         settings_button.set_halign(gtk4::Align::End);
         settings_button.set_hexpand(false);
         settings_button.set_valign(gtk4::Align::Center);
         settings_button.add_css_class("flat-button");
-        right_box.append(&settings_button);
+        right_section.append(&settings_button);
 
-        top_bar.append(&right_box);
+        top_bar.append(&right_section);
 
         content.append(&top_bar);
 
@@ -138,11 +151,14 @@ impl MainWindow {
 
         let media_list = MediaList::new();
 
+        // Configurar columnas responsivas para la galería (ancho ventana ~1200px).
+        media_list.set_responsive_columns(1160);
+
         // AdwClamp limita el ancho del contenido en pantallas anchas para que
         // las listas y pósters no se estiren desproporcionadamente.
         let list_clamp = Clamp::new();
-        list_clamp.set_maximum_size(900);
-        list_clamp.set_tightening_threshold(700);
+        list_clamp.set_maximum_size(1600);
+        list_clamp.set_tightening_threshold(1200);
         list_clamp.set_child(Some(media_list.widget()));
 
         // Página principal: lista de medios (envuelta en Clamp).
