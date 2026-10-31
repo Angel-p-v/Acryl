@@ -25,13 +25,13 @@ const CARD_POSTER_WIDTH: i32 = 200;
 const CARD_POSTER_HEIGHT: i32 = 300;
 
 /// Ancho estimado de una tarjeta completa (póster + márgenes + padding).
-const CARD_WIDTH: u32 = 210;
+const CARD_WIDTH: u32 = 200;
 
-/// Espaciado uniforme entre tarjetas (horizontal y vertical).
-const CARD_SPACING: i32 = 8;
+/// Espaciado mínimo entre tarjetas (horizontal y vertical).
+const CARD_SPACING: i32 = 4;
 
-/// Margen exterior de la galería respecto al área de contenido.
-const GALLERY_MARGIN: i32 = 10;
+/// Margen exterior de la galería respecto al área de contenido (primer tarjeta desde el borde).
+const GALLERY_MARGIN: i32 = 12;
 
 /// Número mínimo y máximo de columnas por línea.
 const MIN_COLUMNS: u32 = 2;
@@ -57,7 +57,6 @@ impl MediaCard {
         card.set_margin_bottom(CARD_SPACING);
         card.set_margin_start(0);
         card.set_margin_end(0);
-
         // Póster (ocupa la mayor parte de la tarjeta).
         let poster_stack = Box::new(Orientation::Vertical, 0);
         poster_stack.set_hexpand(false);
