@@ -312,7 +312,7 @@ impl MediaDetails {
         let num_label = Label::new(Some(episode_number));
         num_label.set_halign(gtk4::Align::Center);
         num_label.set_valign(gtk4::Align::Start);
-        num_label.set_xalign(0.5);
+        num_label.set_justify(gtk4::Justification::Center);
         num_label.add_css_class("episode-number");
         card.append(&num_label);
 
@@ -320,10 +320,11 @@ impl MediaDetails {
         let title_label = Label::new(Some(episode_label));
         title_label.set_halign(gtk4::Align::Center);
         title_label.set_valign(gtk4::Align::Start);
-        title_label.set_xalign(0.5);
+        title_label.set_justify(gtk4::Justification::Center);
         title_label.set_wrap(true);
         title_label.set_max_width_chars(18);
         title_label.set_lines(2);
+        title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         title_label.add_css_class("episode-title");
         card.append(&title_label);
 

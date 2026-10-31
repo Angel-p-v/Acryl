@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::sync::Once;
 
 /// Altura del banner de la vista de detalles.
-const BANNER_HEIGHT: i32 = 320;
+const BANNER_HEIGHT: i32 = 400;
 
 /// Tamaño máximo con el que se carga la imagen del banner (se recorta con
 /// `ContentFit::Cover` al espacio disponible).
@@ -147,7 +147,6 @@ pub fn install_poster_css() {
                  padding: 8px; \
                  margin: 6px; \
                  min-width: 170px; \
-                 max-width: 190px; \
                  transition: all 150ms ease; \
              } \
              .episode-card:hover { \
@@ -167,15 +166,10 @@ pub fn install_poster_css() {
                  font-weight: 600; \
                  font-size: 0.82em; \
                  color: #e0e0e0; \
-                 text-align: center; \
-                 max-width-chars: 20; \
-                 wrap: true; \
-                 ellipsize: end; \
              } \
              .episode-number { \
                  font-size: 0.75em; \
                  color: #a0a0a0; \
-                 text-align: center; \
                  margin-bottom: 4px; \
              } \
              .episode-play-btn { \
