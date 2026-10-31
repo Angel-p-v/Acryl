@@ -9,8 +9,10 @@ use crate::ui::search_bar::SearchBar;
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, Orientation, ScrolledWindow, Stack, gio, glib};
-use libadwaita::ApplicationWindow as AdwApplicationWindow;
 use libadwaita::prelude::*;
+use libadwaita::{
+    ApplicationWindow as AdwApplicationWindow, Clamp, StatusPage, Toast, ToastOverlay,
+};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::mpsc::{self, TryRecvError};
@@ -29,6 +31,7 @@ pub struct MainWindow {
     media_count: usize,
     db_path: String,
     metadata_sync_running: Rc<Cell<bool>>,
+    toast_overlay: ToastOverlay,
 }
 
 type MainWindowRef = Rc<RefCell<MainWindow>>;
@@ -45,9 +48,14 @@ impl MainWindow {
             .default_height(700)
             .build();
 
+        // AdwToastOverlay permite mostrar notificaciones temporales (AdwToast)
+        // en la parte inferior de la ventana sin bloquear la UI.
+        let toast_overlay = ToastOverlay::new();
+
         let content = Box::new(Orientation::Vertical, 0);
         content.set_vexpand(true);
-        window.set_content(Some(&content));
+        toast_overlay.set_child(Some(&content));
+        window.set_content(Some(&toast_overlay));
 
         // Barra superior: búsqueda + botón de ajustes
         let top_bar = Box::new(Orientation::Horizontal, 10);
@@ -76,7 +84,27 @@ impl MainWindow {
         content.append(&stack);
 
         let media_list = MediaList::new();
-        stack.add_titled(media_list.widget(), Some("list"), "Lista");
+
+        // AdwClamp limita el ancho del contenido en pantallas anchas para que
+        // las listas y pósters no se estiren desproporcionadamente.
+        let list_clamp = Clamp::new();
+        list_clamp.set_maximum_size(900);
+        list_clamp.set_tightening_threshold(700);
+        list_clamp.set_child(Some(media_list.widget()));
+
+        // Página principal: lista de medios (envuelta en Clamp).
+        stack.add_titled(&list_clamp, Some("list"), "Lista");
+
+        // Página vacía: AdwStatusPage cuando no hay medios indexados.
+        let empty_page = StatusPage::new();
+        empty_page.set_title("Sin medios indexados");
+        empty_page.set_description(Some(
+            "Agrega una carpeta de videos en Ajustes para comenzar a indexar tu biblioteca.",
+        ));
+        empty_page.set_icon_name(Some("media-library-symbolic"));
+        empty_page.set_vexpand(true);
+        empty_page.set_hexpand(true);
+        stack.add_titled(&empty_page, Some("empty"), "Vacía");
 
         let media_details = Rc::new(RefCell::new(MediaDetails::new(&db_path, 0)));
         media_details.borrow_mut().set_db_path(&db_path);
@@ -112,6 +140,7 @@ impl MainWindow {
             media_count: 0,
             db_path: db_path.clone(),
             metadata_sync_running: Rc::new(Cell::new(false)),
+            toast_overlay,
         }));
 
         this.borrow().window.present();
@@ -173,6 +202,12 @@ impl MainWindow {
         this.borrow_mut().settings_view.on_library_changed(move || {
             let db_path = this_clone.borrow().db_path.clone();
             Self::load_media(&this_clone, &db_path);
+            let this = this_clone.clone();
+            glib::timeout_add_local(Duration::from_millis(500), move || {
+                let w = this.borrow();
+                w.show_toast("Indexación completada");
+                glib::ControlFlow::Break
+            });
         });
 
         // Conectar botón Volver de ajustes -> vuelve a la lista.
@@ -280,12 +315,19 @@ impl MainWindow {
             .media_details
             .borrow_mut()
             .on_edit_tracks(move |file_path| {
-                let w = this_clone.borrow();
+                let this = this_clone.clone();
+                let w = this.borrow();
                 crate::ui::track_dialog::show_track_dialog(
                     &w.window,
                     &w.db_path,
                     &file_path,
-                    Rc::new(|| {}),
+                    Rc::new({
+                        let this_for_toast = this.clone();
+                        move || {
+                            let w2 = this_for_toast.borrow();
+                            w2.show_toast("Pistas guardadas");
+                        }
+                    }),
                 );
             });
 
@@ -320,7 +362,24 @@ impl MainWindow {
         let mut w = this.borrow_mut();
         w.media_count = media_count;
         w.media_list.set_media(media);
+
+        // Alternar entre la lista de medios y la página vacía (AdwStatusPage)
+        // según si hay medios indexados.
+        if media_count > 0 {
+            w.stack.set_visible_child_name("list");
+        } else {
+            w.stack.set_visible_child_name("empty");
+        }
+
         Self::update_library_status(&w);
+    }
+
+    /// Muestra una notificación temporal (AdwToast) en la parte inferior de la
+    /// ventana. Se usa para confirmar acciones al usuario sin bloquear la UI.
+    fn show_toast(&self, message: &str) {
+        let toast = Toast::new(message);
+        toast.set_timeout(3000);
+        self.toast_overlay.add_toast(toast);
     }
 
     /// Actualiza el indicador de carpetas y medios de la barra superior.

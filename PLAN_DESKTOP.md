@@ -411,7 +411,7 @@ Objetivo: interfaz visual bonita con Libadwaita + CSS, renderizado de pósters d
 |------|-----------|--------|
 | **Hito G.1** | Infraestructura de datos masivos: tabla `media_streams`, índices, extracción con `ffprobe`, consultas paginadas | ✅ completado |
 | **Hito G.2** | Galería de pósters con caché local y descarga asíncrona desde TVmaze | ⚠️ parcial: caché y descarga asíncrona sí; la galería usa `FlowBox` con límite de 500 y no está virtualizada |
-| **Hito G.3** | UI moderna con Libadwaita y CSS de GTK4 (`AdwStatusPage`, `AdwToast`, `AdwClamp`) | Pendiente (siguiente tras G.4) |
+| **Hito G.3** | UI moderna con Libadwaita y CSS de GTK4 (`AdwStatusPage`, `AdwToast`, `AdwClamp`) | ✅ implementado |
 | **Hito G.4** | Selección de pistas audio / subtítulos y reproducción con `mpv` aplicando `--aid` / `--sid` | ✅ implementado |
 | **Hito G.5** | Pruebas de estrés con colección grande y ajuste de rendimiento | Pendiente |
 
@@ -424,7 +424,7 @@ Orden de trabajo vigente:
 1. ✅ Resolver **18.2** (hueco entre póster/banner y sinopsis en series con temporadas).
 2. ✅ Resolver **18.3** (póster principal y de temporada; evitar placeholders innecesarios).
 3. ✅ Completar **Hito G.4** (selección de audio/subtítulos y `--aid`/`--sid` en `mpv`).
-4. Completar **Hito G.3** (UI moderna con Libadwaita y CSS).
+4. ✅ Completar **Hito G.3** (UI moderna con Libadwaita y CSS).
 5. Completar **Hito G.5** (pruebas de estrés y rendimiento).
 6. Revisar si la galería necesita virtualización real (`GtkListView`) según el criterio del Hito G.2.
 7. Completar la i18n real y la vista de historial de reproducción (Hitos 7 y 8).
