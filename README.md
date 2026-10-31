@@ -247,11 +247,12 @@ Una vez iniciada la aplicación:
 1. **Indexar medios**: Acryl carga automáticamente los medios desde la base de datos SQLite configurada (`acryl.db` por defecto).
 2. **Buscar**: Escribe un título en el campo de búsqueda para filtrar resultados.
 3. **Ver detalles**: Haz clic en cualquier medio para ver su banner, sinopsis, año y archivos indexados.
-4. **Marcar favorito/visto**: Usa los botones de estado en la vista de detalles.
-5. **Reproducir**: Pulsa "▶ Reproducir" en la vista de detalles o en un episodio concreto; el archivo se abrirá en `mpv`.
-6. **Actualizar metadatos**: En Ajustes, pulsa "Actualizar todos los metadatos" para volver a consultar TVmaze y sobrescribir título, año, sinopsis, póster y banner de todos los medios indexados. La operación se ejecuta en segundo plano y pide confirmación.
-7. **Cambiar idioma**: Usa el selector de idioma en la parte superior de la aplicación.
-8. **Gestionar carpetas**: En Ajustes puedes añadir carpetas con el selector nativo
+4. **Volver atrás**: En la vista de detalles, el botón «← Volver» regresa a la serie desde una temporada y a la lista principal desde una serie, película o anime.
+5. **Marcar favorito/visto**: Usa los botones de estado en la vista de detalles.
+6. **Reproducir**: Pulsa "▶ Reproducir" en la vista de detalles o en un episodio concreto; el archivo se abrirá en `mpv`.
+7. **Actualizar metadatos**: En Ajustes, pulsa "Actualizar todos los metadatos" para volver a consultar TVmaze y sobrescribir título, año, sinopsis, póster y banner de todos los medios indexados. La operación se ejecuta en segundo plano y pide confirmación.
+8. **Cambiar idioma**: Usa el selector de idioma en la parte superior de la aplicación.
+9. **Gestionar carpetas**: En Ajustes puedes añadir carpetas con el selector nativo
    ("Examinar...") o escribiendo la ruta. Al añadir una carpeta se indexa en segundo
    plano y la galería se actualiza al terminar. "Reindexar todas las carpetas" vuelve
    a escanear las rutas configuradas. Al eliminar una carpeta se pide confirmación y

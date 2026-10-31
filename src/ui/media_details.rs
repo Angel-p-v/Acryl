@@ -7,11 +7,31 @@ use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, Orientation};
 use std::rc::Rc;
 
+/// Destino del botón «Volver» desde la vista de detalles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackTarget {
+    /// Una temporada vuelve a la vista de su serie o anime.
+    Parent(i64),
+    /// Una serie, película o anime vuelve a la lista principal.
+    List,
+}
+
+/// Calcula el destino de «Volver»: de una temporada se vuelve a su medio
+/// padre; del resto de medios, a la lista principal. Los identificadores no
+/// positivos se consideran inválidos y vuelven a la lista.
+pub fn back_target(parent_id: Option<i64>) -> BackTarget {
+    match parent_id.filter(|parent_id| *parent_id > 0) {
+        Some(parent_id) => BackTarget::Parent(parent_id),
+        None => BackTarget::List,
+    }
+}
+
 /// Componente de vista de detalles de un medio.
 pub struct MediaDetails {
     box_: Box,
     db_path: String,
     media_id: i64,
+    parent_id: Option<i64>,
     banner: Banner,
     synopsis_label: Label,
     favorite_button: Button,
@@ -72,6 +92,7 @@ impl MediaDetails {
             box_,
             db_path: db_path.to_string(),
             media_id,
+            parent_id: None,
             banner,
             synopsis_label,
             favorite_button,
@@ -116,6 +137,13 @@ impl MediaDetails {
     /// Si es una temporada (con parent_id), muestra sus episodios.
     pub fn set_media(&mut self, media: &Media) {
         self.media_id = media.id;
+        self.parent_id = media.parent_id;
+        self.back_button
+            .set_label(match back_target(media.parent_id) {
+                BackTarget::Parent(_) if media.r#type == "anime" => "← Volver al anime",
+                BackTarget::Parent(_) => "← Volver a la serie",
+                BackTarget::List => "← Volver a la lista",
+            });
         let type_label = match media.r#type.as_str() {
             "series" => "Serie",
             "anime" => "Anime",
@@ -332,6 +360,11 @@ impl MediaDetails {
         self.media_id
     }
 
+    /// Devuelve el medio padre cuando se está viendo una temporada.
+    pub fn parent_id(&self) -> Option<i64> {
+        self.parent_id
+    }
+
     /// Devuelve el widget Gtk.
     pub fn widget(&self) -> &Box {
         &self.box_
@@ -408,4 +441,25 @@ impl MediaDetails {
 
 fn escape_markup(text: &str) -> String {
     gtk4::glib::markup_escape_text(text).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn volver_desde_una_temporada_va_al_medio_padre() {
+        assert_eq!(back_target(Some(7)), BackTarget::Parent(7));
+    }
+
+    #[test]
+    fn volver_desde_un_medio_raiz_va_a_la_lista() {
+        assert_eq!(back_target(None), BackTarget::List);
+    }
+
+    #[test]
+    fn volver_ignora_padres_invalidos() {
+        assert_eq!(back_target(Some(0)), BackTarget::List);
+        assert_eq!(back_target(Some(-3)), BackTarget::List);
+    }
 }

@@ -467,6 +467,8 @@ Crear la rama `feat/plan-ui-visual-pistas-escala-masiva` e iniciar el **Hito G.1
   y archivos asociados sin tocar los vídeos del disco.
 - La barra superior muestra el número de medios y carpetas indexadas.
 - Reindexar conserva los metadatos ya sincronizados y es idempotente.
+- La vista de detalles permite volver de una temporada a su serie y de la serie a
+  la lista principal.
 
 ### 18.2. Series con temporadas en carpeta padre
 

@@ -214,7 +214,13 @@ impl MainWindow {
             .media_details
             .borrow_mut()
             .on_back(move || {
+                let parent_id = this_clone.borrow().media_details.borrow().parent_id();
                 let w = this_clone.borrow();
+                if let Some(parent_id) = parent_id
+                    && w.show_details(parent_id)
+                {
+                    return;
+                }
                 w.show_list();
             });
 
@@ -322,12 +328,14 @@ impl MainWindow {
         w.library_status.set_tooltip_text(tooltip.as_deref());
     }
 
-    fn show_details(&self, media_id: i64) {
+    /// Muestra los detalles de un medio. Devuelve `false` si el medio no
+    /// existe, para que la navegación pueda volver a la lista.
+    fn show_details(&self, media_id: i64) -> bool {
         let mut conn = match open_db(&self.db_path) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Error abriendo BD: {}", e);
-                return;
+                return false;
             }
         };
         let mut repo = MediaRepository::new(&mut conn);
@@ -337,6 +345,9 @@ impl MainWindow {
         if let Some(media) = media {
             self.media_details.borrow_mut().set_media(&media);
             self.stack.set_visible_child_name("details");
+            true
+        } else {
+            false
         }
     }
 
