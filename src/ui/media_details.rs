@@ -46,7 +46,6 @@ pub struct MediaDetails {
     media_id: i64,
     parent_id: Option<i64>,
     banner: Banner,
-    series_poster_url: Option<String>,
     main_button_file_path: Rc<RefCell<Option<String>>>,
     main_button_label: String,
     synopsis_label: Label,
@@ -159,7 +158,6 @@ impl MediaDetails {
             media_id,
             parent_id: None,
             banner,
-            series_poster_url: None,
             main_button_file_path,
             main_button_label: "▶ Reproducir".to_string(),
             synopsis_label,
@@ -233,17 +231,6 @@ impl MediaDetails {
             self.vote_label.set_visible(true);
         } else {
             self.vote_label.set_visible(false);
-        }
-
-        if media.parent_id.is_none() {
-            self.series_poster_url = media.poster_path.clone();
-        } else if let Some(parent_id) = media.parent_id {
-            self.series_poster_url = if let Ok(mut conn) = open_db(&self.db_path) {
-                let mut repo = MediaRepository::new(&mut conn);
-                repo.get_poster_by_id(parent_id).ok().flatten()
-            } else {
-                None
-            };
         }
 
         let (label, _file_path) = if media.parent_id.is_none() {

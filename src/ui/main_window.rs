@@ -32,8 +32,6 @@ pub struct MainWindow {
     db_path: String,
     metadata_sync_running: Rc<Cell<bool>>,
     toast_overlay: ToastOverlay,
-    /// Botón "Categorías" de la barra superior.
-    categories_button: Button,
     /// Lista de categorías de la página de filtro.
     categories_list: Box,
     /// Botón "Ver todo" para limpiar el filtro de categoría.
@@ -257,7 +255,6 @@ impl MainWindow {
             db_path: db_path.clone(),
             metadata_sync_running: Rc::new(Cell::new(false)),
             toast_overlay,
-            categories_button,
             categories_list,
             clear_category_button,
             previous_page: Rc::new(Cell::new(None)),
@@ -279,16 +276,18 @@ impl MainWindow {
         });
         logo_label.add_controller(logo_click);
 
-        // Callback: botón Categorías -> abre la página de selección y filtro.
+        // Botón "Categorías": abre el selector de categorías para filtrar.
+        let categories_button = Button::with_label("Categorías");
+        categories_button.add_css_class("nav-button");
+        categories_button.set_valign(gtk4::Align::Center);
         let this_cat = this.clone();
-        this.borrow_mut()
-            .categories_button
-            .connect_clicked(move |_| {
-                let w = this_cat.borrow();
-                w.stack.set_visible_child_name("categories");
-                drop(w);
-                Self::populate_categories_page(&this_cat);
-            });
+        categories_button.connect_clicked(move |_| {
+            let w = this_cat.borrow();
+            w.stack.set_visible_child_name("categories");
+            drop(w);
+            Self::populate_categories_page(&this_cat);
+        });
+        nav_box.append(&categories_button);
 
         // Callback: botón "Ver todo" -> quita el filtro de categoría.
         let this_clear = this.clone();
