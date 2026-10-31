@@ -457,6 +457,17 @@ Crear la rama `feat/plan-ui-visual-pistas-escala-masiva` e iniciar el **Hito G.1
 - Validar que la eliminación sea irreversible o tener confirmación adecuada (modo --purge estilo uninstall.sh)
 - Mostrar indicador visual de carpetas indexadas y opción de "re-indexar" si el usuario mueve archivos
 
+**Estado: implementado.**
+
+- El indexado se ejecuta en un hilo en segundo plano con indicador de progreso; la UI
+  no se bloquea.
+- La selección de carpetas usa el selector nativo `GtkFileDialog` (GTK ≥ 4.10).
+- Añadir una carpeta persiste la configuración y lanza el indexado de inmediato;
+  eliminar una carpeta pide confirmación y borra de la biblioteca todos los medios
+  y archivos asociados sin tocar los vídeos del disco.
+- La barra superior muestra el número de medios y carpetas indexadas.
+- Reindexar conserva los metadatos ya sincronizados y es idempotente.
+
 ### 18.2. Series con temporadas en carpeta padre
 
 **Problema detectado:**

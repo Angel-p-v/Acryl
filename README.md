@@ -119,6 +119,10 @@ graph TD
 | `mpv` | Reproducción de vídeo (proceso externo) | Todas |
 | `libgdk-pixbuf2.0-dev` | Decodificación de imágenes (pósters) | Todas |
 
+> **GTK 4.10 o superior:** Acryl usa el selector nativo de carpetas `GtkFileDialog`,
+> disponible a partir de GTK 4.10. Las distribuciones con versiones anteriores
+> deberán actualizar GTK para poder compilar y usar la aplicación.
+
 ### Herramientas de desarrollo
 
 | Herramienta | Versión mínima |
@@ -247,6 +251,31 @@ Una vez iniciada la aplicación:
 5. **Reproducir**: Pulsa "▶ Reproducir" en la vista de detalles o en un episodio concreto; el archivo se abrirá en `mpv`.
 6. **Actualizar metadatos**: En Ajustes, pulsa "Actualizar todos los metadatos" para volver a consultar TVmaze y sobrescribir título, año, sinopsis, póster y banner de todos los medios indexados. La operación se ejecuta en segundo plano y pide confirmación.
 7. **Cambiar idioma**: Usa el selector de idioma en la parte superior de la aplicación.
+8. **Gestionar carpetas**: En Ajustes puedes añadir carpetas con el selector nativo
+   ("Examinar...") o escribiendo la ruta. Al añadir una carpeta se indexa en segundo
+   plano y la galería se actualiza al terminar. "Reindexar todas las carpetas" vuelve
+   a escanear las rutas configuradas. Al eliminar una carpeta se pide confirmación y
+   solo se borran sus entradas de la biblioteca: **los archivos de vídeo del disco no
+   se tocan**.
+
+### Estructura de carpetas e indexado
+
+Acryl detecta automáticamente películas, series y anime a partir de la estructura:
+
+- Los vídeos sueltos en la raíz de una carpeta configurada se indexan como películas.
+- Cada subcarpeta se indexa como una serie (o anime si algún componente de la ruta
+  se llama `Anime`/`Animes`).
+- Las carpetas con un único vídeo cuyo nombre no parece un episodio se indexan como
+  película.
+- Las carpetas de temporada (`Season 1`, `Temporada 2`, `S01`, `2`...) se indexan
+  como temporadas de la serie contenedora.
+- Las carpetas que solo contienen otras carpetas (`Peliculas/`, `Series/`) se
+  recorren como contenedores y no crean un medio propio.
+- Se omiten los archivos ocultos y los enlaces simbólicos, y se limita la
+  profundidad de escaneo para evitar recorridos infinitos.
+
+Reindexar es idempotente y conserva los metadatos ya sincronizados (título, año,
+sinopsis, póster y banner).
 
 ---
 
