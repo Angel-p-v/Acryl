@@ -12,7 +12,7 @@
 //!   `S01`, ...) se indexan como temporadas de la serie contenedora.
 
 use crate::db::file_repo::{FileRepository, MediaFileInput};
-use crate::db::media_repo::{MediaInput, NewMediaStream};
+use crate::db::media_repo::{MediaInput, MediaStream, NewMediaStream};
 use crate::db::{MediaRepository, close_db, open_db};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -1066,8 +1066,9 @@ fn file_size(path: &Path) -> Option<i64> {
 
 /// Extrae las pistas de audio y subtítulos de un archivo de vídeo mediante ffprobe.
 ///
-/// Devuelve los streams con `stream_index` relativo al tipo (audio o subtitle),
-/// listo para usarse con `--aid` / `--sid` de mpv.
+/// Devuelve los streams con `stream_index` relativo al tipo (audio o subtitle)
+/// y empezando en 0, en el orden en que `ffprobe` los encuentra. Para mpv hay
+/// que sumar 1, porque numera cada tipo de pista por separado desde 1.
 pub fn extract_media_streams(
     file_path: &str,
 ) -> Result<Vec<NewMediaStream>, Box<dyn std::error::Error>> {
@@ -1169,6 +1170,116 @@ pub fn index_media_streams_for_file(
     let mut media_repo = MediaRepository::new(&mut conn);
     media_repo.replace_streams_for_file(media_id, file_path, &streams)?;
     close_db(conn);
+
+    Ok(())
+}
+
+/// Extrae y guarda las pistas de los archivos de la biblioteca que todavía no
+/// se han analizado. Si se indica `folder_path`, se limita a esa carpeta.
+///
+/// Se ejecuta en segundo plano desde la indexación para no bloquear la UI. Un
+/// archivo que falla (por ejemplo, porque `ffprobe` no entiende el contenedor)
+/// no se marca como analizado y se reintentará en la siguiente indexación.
+pub fn index_missing_streams(
+    db_path: &str,
+    folder_path: Option<&str>,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    if Command::new("ffprobe")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| !status.success())
+        .unwrap_or(true)
+    {
+        return Err("ffprobe no está disponible".into());
+    }
+
+    let mut conn = open_db(db_path)?;
+    let pending = {
+        let mut repo = FileRepository::new(&mut conn);
+        repo.list_files_without_streams_index()?
+    };
+
+    let mut indexed = 0usize;
+    for file_path in pending {
+        if let Some(folder) = folder_path
+            && !Path::new(&file_path).starts_with(folder)
+        {
+            continue;
+        }
+        if !Path::new(&file_path).is_file() {
+            continue;
+        }
+
+        match index_streams_with_connection(&mut conn, &file_path) {
+            Ok(()) => indexed += 1,
+            Err(error) => eprintln!(
+                "No se pudieron extraer las pistas de '{}': {}",
+                file_path, error
+            ),
+        }
+    }
+
+    close_db(conn);
+    Ok(indexed)
+}
+
+/// Devuelve las pistas de un archivo, extrayéndolas con `ffprobe` si aún no
+/// están en la base de datos o si `force` es `true`. Pensado para abrir el
+/// selector de pistas de archivos indexados antes de que existiera la extracción
+/// automática.
+pub fn ensure_media_streams(
+    db_path: &str,
+    file_path: &str,
+    force: bool,
+) -> Result<Vec<MediaStream>, Box<dyn std::error::Error>> {
+    let mut conn = open_db(db_path)?;
+    let existing = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.list_streams_by_file(file_path)?
+    };
+    if !force && !existing.is_empty() {
+        close_db(conn);
+        return Ok(existing);
+    }
+
+    index_streams_with_connection(&mut conn, file_path)?;
+
+    let streams = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.list_streams_by_file(file_path)?
+    };
+    close_db(conn);
+    Ok(streams)
+}
+
+/// Extrae los streams de un archivo y los guarda usando una conexión ya
+/// abierta. Marca el archivo como analizado solo si la extracción tuvo éxito.
+fn index_streams_with_connection(
+    conn: &mut rusqlite::Connection,
+    file_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let media_id = {
+        let mut repo = FileRepository::new(conn);
+        repo.media_id_for_file(file_path)?
+    }
+    .ok_or_else(|| {
+        format!(
+            "el archivo no está indexado en la biblioteca: {}",
+            file_path
+        )
+    })?;
+
+    let streams = extract_media_streams(file_path)?;
+    {
+        let mut repo = MediaRepository::new(conn);
+        repo.replace_streams_for_file(media_id, file_path, &streams)?;
+    }
+    {
+        let mut repo = FileRepository::new(conn);
+        repo.mark_streams_indexed(file_path)?;
+    }
 
     Ok(())
 }
@@ -1754,5 +1865,89 @@ mod tests {
             streams.iter().any(|s| s.stream_type == "audio"),
             "debería guardar al menos una pista de audio"
         );
+    }
+
+    #[test]
+    fn index_missing_streams_procesa_pendientes_y_no_repite() {
+        if !disponible("ffmpeg") || !disponible("ffprobe") {
+            eprintln!("test salteado: se requiere ffmpeg y ffprobe");
+            return;
+        }
+
+        let (db_path, _db_dir) = temp_db();
+        let media_dir = TempDir::new().expect("crear directorio temporal");
+        let video = generar_video_prueba(media_dir.path());
+        let video_str = video.to_str().unwrap().to_string();
+
+        {
+            let conn = open_db(&db_path).expect("abrir BD");
+            conn.execute(
+                "INSERT INTO media (type, title, sort_title, folder_path)
+                 VALUES ('movie', 'Pelicula', 'pelicula', ?1)",
+                rusqlite::params![media_dir.path().to_str().unwrap()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO media_files (media_id, file_path) VALUES (1, ?1)",
+                rusqlite::params![&video_str],
+            )
+            .unwrap();
+        }
+
+        assert_eq!(
+            index_missing_streams(&db_path, None).expect("indexar pistas"),
+            1
+        );
+
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let streams = {
+            let mut repo = MediaRepository::new(&mut conn);
+            repo.list_streams_by_file(&video_str).expect("listar")
+        };
+        assert!(!streams.is_empty());
+        close_db(conn);
+
+        // El archivo ya está marcado como analizado: la segunda pasada no
+        // vuelve a ejecutar ffprobe.
+        assert_eq!(
+            index_missing_streams(&db_path, None).expect("segunda indexación"),
+            0
+        );
+    }
+
+    #[test]
+    fn ensure_media_streams_extrae_las_pistas_si_faltan() {
+        if !disponible("ffmpeg") || !disponible("ffprobe") {
+            eprintln!("test salteado: se requiere ffmpeg y ffprobe");
+            return;
+        }
+
+        let (db_path, _db_dir) = temp_db();
+        let media_dir = TempDir::new().expect("crear directorio temporal");
+        let video = generar_video_prueba(media_dir.path());
+        let video_str = video.to_str().unwrap().to_string();
+
+        {
+            let conn = open_db(&db_path).expect("abrir BD");
+            conn.execute(
+                "INSERT INTO media (type, title, sort_title, folder_path)
+                 VALUES ('movie', 'Pelicula', 'pelicula', ?1)",
+                rusqlite::params![media_dir.path().to_str().unwrap()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO media_files (media_id, file_path) VALUES (1, ?1)",
+                rusqlite::params![&video_str],
+            )
+            .unwrap();
+        }
+
+        let streams = ensure_media_streams(&db_path, &video_str, false).expect("detectar pistas");
+        assert!(streams.iter().any(|s| s.stream_type == "audio"));
+
+        // Una segunda llamada reutiliza las pistas guardadas sin invocar de
+        // nuevo a ffprobe.
+        let again = ensure_media_streams(&db_path, &video_str, false).expect("reutilizar pistas");
+        assert_eq!(again.len(), streams.len());
     }
 }

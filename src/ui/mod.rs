@@ -6,5 +6,6 @@ pub mod media_list;
 pub mod poster;
 pub mod search_bar;
 pub mod settings_window;
+pub mod track_dialog;
 
 pub use main_window::MainWindow;

@@ -4,12 +4,18 @@
 //! proceso externo mediante `std::process::Command`. El control (play, pausa,
 //! stop, seek, volumen) se envía a `mpv` a través de su socket IPC.
 
+use crate::db::file_repo::{FileRepository, TrackSelection};
 use crate::db::{MediaRepository, close_db, open_db};
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+
+/// Identificador incremental para que dos reproductores (o dos tests en
+/// paralelo) no compartan el mismo socket IPC.
+static NEXT_SOCKET_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Directorio donde se crean los sockets IPC de mpv.
 const MPV_SOCKET_DIR: &str = "/tmp";
@@ -22,21 +28,59 @@ const MPV_SOCKET_TIMEOUT_MS: u64 = 5000;
 
 /// Construye los argumentos de línea de comandos de mpv (puro, testeable).
 pub fn build_mpv_args(file_path: &str, socket_path: &str) -> Vec<String> {
-    vec![
+    build_mpv_args_with_tracks(file_path, socket_path, TrackSelection::default())
+}
+
+/// Construye los argumentos de mpv para el reproductor con IPC, aplicando la
+/// selección de pistas. Los índices guardados son 0-based, mientras que mpv
+/// numera las pistas de audio y subtítulos por separado empezando en 1.
+pub fn build_mpv_args_with_tracks(
+    file_path: &str,
+    socket_path: &str,
+    selection: TrackSelection,
+) -> Vec<String> {
+    let mut args = vec![
         "--force-window=immediate".to_string(),
         format!("--input-ipc-server={}", socket_path),
         "--idle=yes".to_string(),
-        file_path.to_string(),
-    ]
+    ];
+    append_track_args(&mut args, selection);
+    args.push(file_path.to_string());
+    args
 }
 
 /// Construye los argumentos para abrir mpv como reproductor independiente.
 pub fn build_mpv_launch_args(file_path: &str) -> Vec<String> {
-    vec![
-        "--force-window=immediate".to_string(),
-        "--".to_string(),
-        file_path.to_string(),
-    ]
+    build_mpv_launch_args_with_tracks(file_path, TrackSelection::default())
+}
+
+/// Construye los argumentos del reproductor independiente con selección de
+/// pistas. Las opciones deben ir antes de `--` para que mpv no las confunda
+/// con rutas de archivo.
+pub fn build_mpv_launch_args_with_tracks(
+    file_path: &str,
+    selection: TrackSelection,
+) -> Vec<String> {
+    let mut args = vec!["--force-window=immediate".to_string()];
+    append_track_args(&mut args, selection);
+    args.push("--".to_string());
+    args.push(file_path.to_string());
+    args
+}
+
+/// Añade `--aid` y `--sid` según la selección. `subtitles_disabled` tiene
+/// prioridad sobre una pista concreta para que «Ninguno» siempre desactive
+/// los subtítulos.
+fn append_track_args(args: &mut Vec<String>, selection: TrackSelection) {
+    if let Some(audio_index) = selection.audio_stream_index {
+        args.push(format!("--aid={}", audio_index + 1));
+    }
+
+    if selection.subtitles_disabled {
+        args.push("--sid=no".to_string());
+    } else if let Some(subtitle_index) = selection.subtitle_stream_index {
+        args.push(format!("--sid={}", subtitle_index + 1));
+    }
 }
 
 /// Lanza mpv en su propia ventana para reproducir un archivo.
@@ -44,13 +88,21 @@ pub fn build_mpv_launch_args(file_path: &str) -> Vec<String> {
 /// El proceso se espera en un hilo secundario para evitar dejar procesos
 /// zombie cuando mpv termina.
 pub fn launch_mpv(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    launch_mpv_with_tracks(file_path, TrackSelection::default())
+}
+
+/// Lanza mpv en su propia ventana aplicando la selección de pistas indicada.
+pub fn launch_mpv_with_tracks(
+    file_path: &str,
+    selection: TrackSelection,
+) -> Result<(), Box<dyn std::error::Error>> {
     let is_url = file_path.starts_with("http://") || file_path.starts_with("https://");
     if !is_url && file_path != "-" && !std::path::Path::new(file_path).exists() {
         return Err(format!("archivo no encontrado: {}", file_path).into());
     }
 
     let mut child = Command::new(MPV_COMMAND)
-        .args(build_mpv_launch_args(file_path))
+        .args(build_mpv_launch_args_with_tracks(file_path, selection))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .stdin(Stdio::null())
@@ -64,13 +116,28 @@ pub fn launch_mpv(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Lee la preferencia de pistas guardada para un archivo. Un fallo de la base
+/// de datos no debe impedir la reproducción: en ese caso se usa el
+/// comportamiento automático de mpv.
+fn saved_track_selection(db_path: &str, file_path: &str) -> TrackSelection {
+    let Ok(mut conn) = open_db(db_path) else {
+        return TrackSelection::default();
+    };
+    let selection = FileRepository::new(&mut conn)
+        .track_selection(file_path)
+        .unwrap_or_default();
+    close_db(conn);
+    selection
+}
+
 /// Lanza mpv y registra la reproducción en el historial si se conoce el medio.
 pub fn play_external(
     db_path: &str,
     media_id: Option<i64>,
     file_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    launch_mpv(file_path)?;
+    let selection = saved_track_selection(db_path, file_path);
+    launch_mpv_with_tracks(file_path, selection)?;
 
     if let Some(media_id) = media_id
         && let Err(error) = PlayerService::open(db_path, media_id, file_path)
@@ -169,6 +236,15 @@ impl MpvPlayer {
 
     /// Carga y comienza a reproducir un archivo de vídeo con mpv.
     pub fn load_file(&mut self, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        self.load_file_with_tracks(file_path, TrackSelection::default())
+    }
+
+    /// Carga un archivo aplicando una selección de pistas de audio/subtítulos.
+    pub fn load_file_with_tracks(
+        &mut self,
+        file_path: &str,
+        selection: TrackSelection,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         self.stop()?;
 
         // Valida que el archivo exista (mpv solo fallaría al abrirlo tras lanzar el proceso).
@@ -177,12 +253,21 @@ impl MpvPlayer {
             return Err(format!("archivo no encontrado: {}", file_path).into());
         }
 
-        let socket_path = format!("{}/acryl-mpv-{}.sock", MPV_SOCKET_DIR, std::process::id());
+        let socket_path = format!(
+            "{}/acryl-mpv-{}-{}.sock",
+            MPV_SOCKET_DIR,
+            std::process::id(),
+            NEXT_SOCKET_ID.fetch_add(1, Ordering::Relaxed)
+        );
         // Elimina socket viejo si quedó de una ejecución anterior.
         let _ = std::fs::remove_file(&socket_path);
 
         let mut child = Command::new(&self.mpv_command)
-            .args(build_mpv_args(file_path, &socket_path))
+            .args(build_mpv_args_with_tracks(
+                file_path,
+                &socket_path,
+                selection,
+            ))
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .stdin(Stdio::null())
@@ -264,6 +349,25 @@ impl MpvPlayer {
             .as_deref()
             .and_then(mpv_response_data)
             .unwrap_or(0.0))
+    }
+
+    /// Lee una propiedad de mpv a través del socket IPC.
+    fn property(&self, name: &str) -> Result<Value, Box<dyn std::error::Error>> {
+        let command = serde_json::json!({ "command": ["get_property", name] }).to_string();
+        let response = self.send(&command)?.ok_or("mpv no devolvió respuesta")?;
+        let value: Value = serde_json::from_str(&response)?;
+        Ok(value.get("data").cloned().unwrap_or(Value::Null))
+    }
+
+    /// Devuelve los identificadores de pista de audio y subtítulos que mpv
+    /// tiene seleccionados. `None` significa que la pista está desactivada
+    /// (o que no hay ninguna). Útil para verificar `--aid` / `--sid`.
+    pub fn selected_track_ids(
+        &self,
+    ) -> Result<(Option<i64>, Option<i64>), Box<dyn std::error::Error>> {
+        let audio = self.property("aid")?;
+        let subtitle = self.property("sid")?;
+        Ok((audio.as_i64(), subtitle.as_i64()))
     }
 
     /// Ajusta el volumen (0.0 = silencio, 1.0 = máximo).
@@ -383,6 +487,77 @@ mod tests {
                 "--",
                 "/ruta/con espacios/video.mkv",
             ]
+        );
+    }
+
+    #[test]
+    fn build_mpv_launch_args_con_pistas_convierte_a_ids_de_mpv() {
+        let selection = TrackSelection {
+            audio_stream_index: Some(1),
+            subtitle_stream_index: Some(0),
+            subtitles_disabled: false,
+        };
+        let args = build_mpv_launch_args_with_tracks("/ruta/video.mkv", selection);
+        assert_eq!(
+            args,
+            vec![
+                "--force-window=immediate",
+                "--aid=2",
+                "--sid=1",
+                "--",
+                "/ruta/video.mkv",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_mpv_launch_args_desactiva_subtitulos_con_sid_no() {
+        let selection = TrackSelection {
+            audio_stream_index: None,
+            subtitle_stream_index: Some(1),
+            subtitles_disabled: true,
+        };
+        let args = build_mpv_launch_args_with_tracks("/ruta/video.mkv", selection);
+        assert_eq!(
+            args,
+            vec![
+                "--force-window=immediate",
+                "--sid=no",
+                "--",
+                "/ruta/video.mkv",
+            ]
+        );
+    }
+
+    #[test]
+    fn build_mpv_args_with_tracks_incluye_pistas_antes_del_archivo() {
+        let selection = TrackSelection {
+            audio_stream_index: Some(0),
+            subtitle_stream_index: Some(1),
+            subtitles_disabled: false,
+        };
+        let args = build_mpv_args_with_tracks("/ruta/video.mkv", "/tmp/acryl.sock", selection);
+        assert_eq!(
+            args,
+            vec![
+                "--force-window=immediate",
+                "--input-ipc-server=/tmp/acryl.sock",
+                "--idle=yes",
+                "--aid=1",
+                "--sid=2",
+                "/ruta/video.mkv",
+            ]
+        );
+    }
+
+    #[test]
+    fn track_selection_automatica_no_anade_argumentos() {
+        let selection = TrackSelection::default();
+        assert!(selection.is_automatic());
+        let args = build_mpv_launch_args_with_tracks("/ruta/video.mkv", selection);
+        assert_eq!(
+            args,
+            vec!["--force-window=immediate", "--", "/ruta/video.mkv",]
         );
     }
 

@@ -274,6 +274,21 @@ impl MainWindow {
                 w.show_details(season_id);
             });
 
+        // Callback: abrir el selector de audio y subtítulos de un archivo.
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_edit_tracks(move |file_path| {
+                let w = this_clone.borrow();
+                crate::ui::track_dialog::show_track_dialog(
+                    &w.window,
+                    &w.db_path,
+                    &file_path,
+                    Rc::new(|| {}),
+                );
+            });
+
         // Completar metadatos y pósters que falten sin bloquear la UI.
         Self::start_metadata_sync(&this, db_path.clone());
 
