@@ -49,10 +49,13 @@ pub struct MediaDetails {
     banner: Banner,
     /// Póster grande a la izquierda (solo para películas, no para series).
     poster_box: Box,
+    /// URL del póster de la serie padre (fallback para portadas de episodios).
+    series_poster_url: Option<String>,
     synopsis_label: Label,
     favorite_button: Button,
     watched_button: Button,
     play_button: Button,
+    tracks_button: Button,
     back_button: Button,
     content_container: Box,
     on_back: Option<Rc<dyn Fn()>>,
@@ -61,6 +64,7 @@ pub struct MediaDetails {
     on_play: Option<Rc<dyn Fn()>>,
     on_play_episode: Option<Rc<dyn Fn(String)>>,
     on_edit_tracks: Option<Rc<dyn Fn(String)>>,
+    on_edit_all_tracks: Option<Rc<dyn Fn()>>,
     on_open_season: Option<Rc<dyn Fn(i64)>>,
 }
 
@@ -97,12 +101,11 @@ impl MediaDetails {
         synopsis_label.set_wrap(true);
         synopsis_label.add_css_class("synopsis-text");
 
-        // Cabecera: banner arriba, póster a la izquierda (películas) o solo
-        // información (series), y sinopsis a la derecha / debajo.
-        let header_box = Box::new(Orientation::Horizontal, 24);
+        // Cabecera: banner arriba, información y sinopsis debajo.
+        // En series no se muestra póster redundante; solo el banner ocupa todo el ancho.
+        let header_box = Box::new(Orientation::Horizontal, 0);
         header_box.set_hexpand(true);
         header_box.set_valign(gtk4::Align::Start);
-        header_box.append(&poster_box);
         header_box.append(&info_box);
 
         let details_header = Box::new(Orientation::Vertical, 0);
@@ -124,6 +127,14 @@ impl MediaDetails {
         play_button.add_css_class("play-button");
         play_button.set_halign(gtk4::Align::Start);
 
+        // Botón universal: elegir pistas de audio y subtítulos antes de reproducir.
+        let tracks_button = Button::with_label("🎵 Pistas");
+        tracks_button.add_css_class("flat-button");
+        tracks_button.set_halign(gtk4::Align::Start);
+        tracks_button.set_tooltip_text(Some(
+            "Elegir pista de audio y subtítulos antes de reproducir",
+        ));
+
         let back_button = Button::with_label("← Volver");
         back_button.add_css_class("flat-button");
         back_button.set_halign(gtk4::Align::Start);
@@ -138,6 +149,7 @@ impl MediaDetails {
         box_.append(&content_container);
         box_.append(&favorite_button);
         box_.append(&watched_button);
+        box_.append(&tracks_button);
         box_.append(&play_button);
 
         Self {
@@ -147,10 +159,12 @@ impl MediaDetails {
             parent_id: None,
             banner,
             poster_box,
+            series_poster_url: None,
             synopsis_label,
             favorite_button,
             watched_button,
             play_button,
+            tracks_button,
             back_button,
             content_container,
             on_back: None,
@@ -159,6 +173,7 @@ impl MediaDetails {
             on_play: None,
             on_play_episode: None,
             on_edit_tracks: None,
+            on_edit_all_tracks: None,
             on_open_season: None,
         }
     }
@@ -221,6 +236,23 @@ impl MediaDetails {
         if media.parent_id.is_some() || media.r#type != "series" {
             // Películas o temporadas: mostrar póster si existe en caché.
             self.update_poster(media.poster_path.as_deref());
+        }
+
+        // Guardar el póster de la serie padre como fallback para portadas de episodios.
+        // Si es una serie padre, usamos su propio póster. Si es una temporada,
+        // consultamos el póster de la serie padre.
+        if media.parent_id.is_none() {
+            self.series_poster_url = media.poster_path.clone();
+        } else {
+            // Temporada: obtener el póster de la serie padre desde la BD.
+            self.series_poster_url = if let Ok(mut conn) = open_db(&self.db_path) {
+                let mut repo = MediaRepository::new(&mut conn);
+                repo.get_poster_by_id(media.parent_id.unwrap())
+                    .ok()
+                    .flatten()
+            } else {
+                None
+            };
         }
 
         let fav_label = if media.is_favorite {
@@ -286,14 +318,16 @@ impl MediaDetails {
         card.set_vexpand(false);
         card.set_size_request(EPISODE_POSTER_WIDTH + 20, EPISODE_POSTER_HEIGHT + 80);
 
-        // Portada del episodio (usar póster de temporada si existe, si no un
-        // marcador simple).
+        // Portada del episodio (usar póster de temporada si existe,
+        // si no usar el póster de la serie padre, y si no un marcador).
+        let effective_poster_url = poster_url.or(self.series_poster_url.as_deref());
+
         let poster_box = Box::new(Orientation::Vertical, 0);
         poster_box.set_size_request(EPISODE_POSTER_WIDTH, EPISODE_POSTER_HEIGHT);
         poster_box.set_halign(gtk4::Align::Center);
         poster_box.set_valign(gtk4::Align::Start);
 
-        if let Some(pixbuf) = poster_url.and_then(cached_path).and_then(|path| {
+        if let Some(pixbuf) = effective_poster_url.and_then(cached_path).and_then(|path| {
             GtkPixbuf::from_file_at_scale(&path, EPISODE_POSTER_WIDTH, EPISODE_POSTER_HEIGHT, true)
                 .ok()
         }) {
@@ -661,6 +695,20 @@ impl MediaDetails {
         F: Fn(String) + 'static,
     {
         self.on_edit_tracks = Some(Rc::new(f));
+    }
+
+    /// Establece el callback para editar las pistas de audio y subtítulos de
+    /// todos los episodios del medio actual (sin argumentos).
+    pub fn on_edit_all_tracks<F>(&mut self, f: F)
+    where
+        F: Fn() + 'static,
+    {
+        let cb = Rc::new(f);
+        let cb_clone = cb.clone();
+        self.tracks_button.connect_clicked(move |_| {
+            cb_clone();
+        });
+        self.on_edit_all_tracks = Some(cb);
     }
 }
 

@@ -131,6 +131,37 @@ impl<'a> MediaRepository<'a> {
         }
     }
 
+    /// Obtiene el póster de un medio por su ID.
+    pub fn get_poster_by_id(&mut self, id: i64) -> RusqliteResult<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT poster_path FROM media WHERE id = ?1")?;
+        let row = stmt.query_row(params![id], |row| row.get::<_, Option<String>>(0));
+        match row {
+            Ok(poster) => Ok(poster),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Obtiene la ruta del primer archivo de un medio o de sus episodios
+    /// (para usarse como objetivo predeterminado al seleccionar pistas).
+    pub fn first_file_path_for_media(&mut self, media_id: i64) -> RusqliteResult<Option<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT mf.file_path FROM media_files mf
+             WHERE mf.media_id = ?1 OR mf.media_id IN (
+                 SELECT id FROM media WHERE parent_id = ?1
+             )
+             ORDER BY mf.id LIMIT 1",
+        )?;
+        let row = stmt.query_row(params![media_id], |row| row.get(0));
+        match row {
+            Ok(path) => Ok(Some(path)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     pub fn list(&mut self, options: ListMediaOptions) -> RusqliteResult<Vec<Media>> {
         let mut sql = String::from(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,

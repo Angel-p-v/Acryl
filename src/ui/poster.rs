@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::sync::Once;
 
 /// Altura del banner de la vista de detalles.
-const BANNER_HEIGHT: i32 = 400;
+const BANNER_HEIGHT: i32 = 450;
 
 /// Tamaño máximo con el que se carga la imagen del banner (se recorta con
 /// `ContentFit::Cover` al espacio disponible).
@@ -314,15 +314,16 @@ impl Banner {
         let overlay = Overlay::new();
         overlay.set_child(Some(&drawing));
         overlay.set_hexpand(true);
+        overlay.set_vexpand(false);
         overlay.set_valign(gtk4::Align::Start);
         overlay.set_size_request(-1, BANNER_HEIGHT);
         overlay.set_overflow(Overflow::Hidden);
         overlay.add_css_class("banner");
 
-        // La imagen se añade como capa sin influir en el tamaño del banner:
+        // La imagen se añade como overlay que se expande a todo el ancho del banner:
         // así la altura queda fijada en BANNER_HEIGHT y se recorta a lo ancho.
         overlay.add_overlay(&picture);
-        overlay.set_measure_overlay(&picture, false);
+        overlay.set_measure_overlay(&picture, true);
 
         let title_label = Label::new(None);
         title_label.set_halign(gtk4::Align::Start);

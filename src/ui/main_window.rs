@@ -331,6 +331,49 @@ impl MainWindow {
                 );
             });
 
+        // Callback: botón universal de pistas para todo el medio actual.
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_edit_all_tracks(move || {
+                let this = this_clone.clone();
+                let w = this.borrow();
+                let media_id = w.media_details.borrow().media_id();
+                let db_path = w.db_path.clone();
+                // Obtener el primer archivo del medio actual para abrir el diálogo de pistas.
+                let mut conn = match open_db(&db_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Error abriendo BD: {}", e);
+                        return;
+                    }
+                };
+                let mut repo = MediaRepository::new(&mut conn);
+                let first_file = repo.first_file_path_for_media(media_id).unwrap_or(None);
+                close_db(conn);
+
+                if let Some(file_path) = first_file {
+                    crate::ui::track_dialog::show_track_dialog(
+                        &w.window,
+                        &w.db_path,
+                        &file_path,
+                        Rc::new({
+                            let this_for_toast = this.clone();
+                            move || {
+                                let w2 = this_for_toast.borrow();
+                                w2.show_toast("Pistas guardadas");
+                            }
+                        }),
+                    );
+                } else {
+                    w.show_error(
+                        "No hay episodios",
+                        "Este medio no tiene ningún archivo para elegir pistas.",
+                    );
+                }
+            });
+
         // Completar metadatos y pósters que falten sin bloquear la UI.
         Self::start_metadata_sync(&this, db_path.clone());
 
