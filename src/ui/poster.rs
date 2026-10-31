@@ -42,8 +42,8 @@ pub fn install_poster_css() {
              .poster-placeholder {{ background-color: {}; border-radius: {}; }}\n\
              .poster-title {{ font-weight: 600; font-size: 0.95em; color: {}; }}\n\
              .poster-year {{ font-size: 0.85em; color: {}; }}\n\
-             .banner {{ border-radius: {}; overflow: hidden; }}\n\
-             .banner-title {{ font-size: 2.5em; font-weight: 800; color: {}; letter-spacing: -0.5px; }}\n\
+             .banner {{ border-radius: {}; }}\n\
+             .banner-title {{ font-size: 2.5em; font-weight: 800; color: {}; }}\n\
              .banner-subtitle {{ font-size: 1.1em; color: {}; }}\n\
              .episode-row {{ background-color: {}; border: 1px solid {}; border-radius: {}; padding: 8px 12px; margin: 4px 0; transition: all {}; }}\n\
              .episode-row:hover {{ background-color: {}; border-color: {}; }}\n\
@@ -58,7 +58,7 @@ pub fn install_poster_css() {
              .synopsis-text {{ color: {}; line-height: 1.6; }}\n\
              .media-type {{ font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: {}; font-weight: 700; }}\n\
              .episode-grid {{ margin-top: 8px; }}\n\
-             .episode-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; padding: 8px; margin: 6px; min-width: 170px; transition: all {}; overflow: hidden; }}\n\
+             .episode-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; padding: 8px; margin: 6px; min-width: 170px; transition: all {}; }}\n\
              .episode-card:hover {{ background-color: {}; border-color: {}; transform: scale(1.02); }}\n\
              .episode-card:selected {{ background-color: {}; border-color: {}; }}\n\
              .episode-poster {{ border-radius: {}; margin-bottom: 8px; }}\n\
@@ -68,7 +68,6 @@ pub fn install_poster_css() {
              .episode-play-btn:hover {{ background-color: {}; }}\n\
              .season-grid-section {{ margin-top: 28px; }}\n\
              .season-grid-title {{ font-weight: 700; font-size: 1.2em; color: {}; margin-bottom: 12px; margin-left: 6px; }}\n\
-             .hero-actions {{ spacing: 10px; }}\n\
              .hero-action-btn {{ min-height: 40px; padding: 0 16px; font-weight: 700; border-radius: {}; }}\n\
              .hero-action-btn.primary {{ background-color: {}; color: {}; border: none; }}\n\
              .hero-action-btn.primary:hover {{ background-color: {}; }}\n\

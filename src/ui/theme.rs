@@ -71,14 +71,12 @@ pub fn install_theme_css() {
     INSTALL_THEME_CSS.call_once(|| {
         let provider = CssProvider::new();
         let css = format!(
-            "*, *::before, *::after {{ text-shadow: none; }}\n\
-             window {{ background-color: {}; color: {}; font-family: 'Inter', 'Roboto', 'Helvetica', 'Arial', sans-serif; }}\n\
+            "window {{ background-color: {}; color: {}; font-family: 'Inter', 'Roboto', 'Helvetica', 'Arial', sans-serif; }}\n\
              box {{ background-color: transparent; }}\n\
              label {{ color: {}; }}\n\
              label.dim-label {{ color: {}; }}\n\
              entry {{ background-color: {}; color: {}; border: 1px solid {}; border-radius: {}; padding: 8px 12px; }}\n\
              entry:focus {{ border-color: {}; }}\n\
-             entry:placeholder {{ color: {}; }}\n\
              button {{ background-color: {}; color: {}; border: 1px solid {}; border-radius: {}; padding: 8px 16px; font-weight: 600; min-height: 36px; transition: all {}; }}\n\
              button:hover {{ background-color: {}; border-color: {}; }}\n\
              button:active {{ background-color: {}; border-color: {}; color: {}; }}\n\
@@ -96,7 +94,7 @@ pub fn install_theme_css() {
              overlay {{ background-color: transparent; }}\n\
              stack {{ background-color: transparent; }}\n\
              \n/* Tarjeta de medio en galería */\n\
-             .media-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; transition: all {}; overflow: hidden; }}\n\
+             .media-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; transition: all {}; }}\n\
              .media-card:hover {{ background-color: {}; border-color: {}; transform: scale(1.03); }}\n\
              \n/* Póster de medio */\n\
              .media-poster {{ border-radius: {}; }}\n\
@@ -111,9 +109,8 @@ pub fn install_theme_css() {
              .episode-play-btn {{ background-color: {}; color: {}; border: none; border-radius: {}; font-weight: 700; min-width: 72px; min-height: 30px; }}\n\
              .episode-play-btn:hover {{ background-color: {}; }}\n\
              \n/* Tarjeta de episodio en rejilla */\n\
-             .episode-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; transition: all {}; overflow: hidden; }}\n\
+             .episode-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; transition: all {}; }}\n\
              .episode-card:hover {{ background-color: {}; border-color: {}; transform: scale(1.02); }}\n\
-             .episode-card.watched {{ border-color: {}; }}\n\
              \n/* Portada de episodio */\n\
              .episode-poster-img {{ border-radius: {}; }}\n\
              \n/* Sobrelay de estado visto en episodio */\n\
@@ -128,7 +125,6 @@ pub fn install_theme_css() {
             colors::TEXT_MUTED,
             colors::CARD, colors::TEXT_PRIMARY, colors::BORDER, radius::MEDIUM,
             colors::ACCENT,
-            colors::TEXT_MUTED,
             colors::CARD, colors::TEXT_PRIMARY, colors::BORDER, radius::MEDIUM, transition::FAST,
             colors::SURFACE, colors::BORDER_HOVER,
             colors::ACCENT_ACTIVE, colors::ACCENT, colors::BTN_PRIMARY_TEXT,
@@ -154,7 +150,6 @@ pub fn install_theme_css() {
             radius::SMALL,
             radius::SMALL,
             colors::TEXT_MUTED,
-            colors::ACCENT,
             colors::ACCENT, colors::BTN_PRIMARY_TEXT, radius::SMALL,
         );
         let css = css + "\

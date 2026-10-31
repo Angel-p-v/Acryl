@@ -368,13 +368,20 @@ impl MainWindow {
             });
 
         // Callback: cambiar de temporada (navegar a los detalles de esa temporada).
+        // Se difiere con timeout_add_local para evitar reentrancy de RefCell
+        // (el notify del dropdown se dispara dentro de set_media, que ya tiene
+        // borrow_mut de media_details).
         let this_clone = this.clone();
         this.borrow_mut()
             .media_details
             .borrow_mut()
             .on_change_season(move |season_id| {
-                let w = this_clone.borrow();
-                w.show_details(season_id);
+                let this = this_clone.clone();
+                glib::timeout_add_local(std::time::Duration::from_millis(0), move || {
+                    let w = this.borrow();
+                    w.show_details(season_id);
+                    glib::ControlFlow::Break
+                });
             });
 
         // Completar metadatos y pósters que falten sin bloquear la UI.
