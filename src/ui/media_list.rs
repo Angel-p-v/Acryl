@@ -21,6 +21,10 @@ use std::rc::Rc;
 const CARD_POSTER_WIDTH: i32 = 200;
 const CARD_POSTER_HEIGHT: i32 = 300;
 
+/// Ancho y alto de la tarjeta completa (póster + padding + textos).
+const CARD_WIDTH: i32 = CARD_POSTER_WIDTH + 16;
+const CARD_HEIGHT: i32 = 404;
+
 /// Callback de selección compartido.
 type SelectCallback = Rc<dyn Fn(i64)>;
 type SharedSelectCallback = Rc<std::cell::RefCell<Option<SelectCallback>>>;
@@ -52,26 +56,41 @@ impl MediaList {
         let factory_for_view = factory.clone();
 
         let translations_clone = translations.clone();
-        let media_ref = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let media_ref = Rc::new(std::cell::RefCell::new(Vec::<Media>::new()));
         let on_select_ref = Rc::new(std::cell::RefCell::new(None as Option<SelectCallback>));
+
+        // connect_setup crea el widget vacío de cada fila y lo asigna al ListItem.
+        factory.connect_setup(move |_, list_item| {
+            let card = build_card_widget();
+            <glib::Object as glib::object::ObjectExt>::set_property(list_item, "child", &card);
+        });
+
         factory.connect_bind({
             let media_for_bind = Rc::clone(&media_ref);
             let translations_for_bind = translations_clone.clone();
             move |_, list_item| {
-                let list_item: &gtk4::ListItem = list_item
-                    .downcast_ref::<gtk4::ListItem>()
-                    .expect("el ítem debe ser un ListItem");
-                let position = list_item.position() as usize;
-                let media = media_for_bind.borrow();
-                let item = media.get(position).expect("medio en posición");
+                // Obtener el StringObject del modelo a través de la propiedad "item"
+                // del GtkListItem, y usarlo para encontrar el Media correspondiente.
+                let item_obj: glib::Object =
+                    <glib::Object as glib::object::ObjectExt>::property(list_item, "item");
+                let title: String =
+                    <glib::Object as glib::object::ObjectExt>::property(&item_obj, "string");
 
-                let child = list_item
-                    .child()
-                    .expect("el ListItem debe tener un child")
-                    .downcast::<Box>()
+                let media = media_for_bind.borrow();
+                let item = media
+                    .iter()
+                    .find(|m| m.title == title)
+                    .expect("medio no encontrado en la lista");
+
+                // Obtener el widget child (Box) del ListItem a través de la propiedad "child".
+                let child: Option<gtk4::Widget> =
+                    <glib::Object as glib::object::ObjectExt>::property(list_item, "child");
+                let widget = child.expect("el ListItem debe tener un child");
+                let box_child = widget
+                    .downcast_ref::<Box>()
                     .expect("el child debe ser un Box");
 
-                bind_card(&child, item, &translations_for_bind);
+                bind_card(box_child, item, &translations_for_bind);
             }
         });
 
@@ -207,5 +226,40 @@ fn bind_card(card: &Box, media: &Media, translations: &TranslationsRef) {
     }
 }
 
-#[cfg(test)]
-mod tests {}
+/// Crea una tarjeta vacía con la estructura base para ser rellenada en `bind_card`.
+fn build_card_widget() -> Box {
+    let card = Box::new(Orientation::Vertical, 6);
+    card.add_css_class("media-card");
+    card.set_halign(gtk4::Align::Start);
+    card.set_valign(gtk4::Align::Start);
+    card.set_size_request(CARD_WIDTH, CARD_HEIGHT);
+
+    let poster_stack = Box::new(Orientation::Vertical, 0);
+    poster_stack.set_halign(gtk4::Align::Start);
+    poster_stack.set_valign(gtk4::Align::Start);
+    poster_stack.set_size_request(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
+    card.append(&poster_stack);
+
+    let type_label = Label::new(None);
+    type_label.set_halign(gtk4::Align::Start);
+    type_label.add_css_class("card-type-label");
+    card.append(&type_label);
+
+    let title_label = Label::new(None);
+    title_label.set_wrap(true);
+    title_label.set_max_width_chars(20);
+    title_label.set_justify(gtk4::Justification::Left);
+    title_label.set_halign(gtk4::Align::Start);
+    title_label.set_xalign(0.0);
+    title_label.set_lines(2);
+    title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    title_label.add_css_class("poster-title");
+    card.append(&title_label);
+
+    let year_label = Label::new(None);
+    year_label.add_css_class("poster-year");
+    year_label.set_halign(gtk4::Align::Start);
+    card.append(&year_label);
+
+    card
+}
