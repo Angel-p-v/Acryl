@@ -27,6 +27,10 @@ fn ensure_cache_dir() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync
 }
 
 /// Ruta de caché para un póster dado su URL o identificador.
+///
+/// Busca primero en el directorio principal (`XDG_DATA_HOME/acryl/cache/posters/`)
+/// y, si no existe, en una ubicación alternativa (`XDG_DATA_HOME/cache/posters/`)
+/// para mantener compatibilidad con cachés creados en versiones anteriores.
 pub fn poster_cache_path(poster_url: &str) -> PathBuf {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -41,7 +45,24 @@ pub fn poster_cache_path(poster_url: &str) -> PathBuf {
         .filter(|ext| ext.chars().all(|c| c.is_ascii_alphanumeric()))
         .unwrap_or("jpg");
 
-    poster_cache_dir().join(format!("{}.{}", hash, ext))
+    let filename = format!("{}.{}", hash, ext);
+
+    // Ruta principal: XDG_DATA_HOME/acryl/cache/posters/
+    let primary = poster_cache_dir().join(&filename);
+    if primary.exists() {
+        return primary;
+    }
+
+    // Ruta alternativa: XDG_DATA_HOME/cache/posters/ (sin el directorio acryl/)
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        let alt = PathBuf::from(xdg).join("cache/posters").join(&filename);
+        if alt.exists() {
+            return alt;
+        }
+    }
+
+    // Por defecto, devolver la ruta principal (se creará al descargar)
+    primary
 }
 
 /// Comprueba si un póster ya está en caché.
