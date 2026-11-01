@@ -179,6 +179,7 @@ pub struct MediaList {
     on_media_select: SharedSelectCallback,
     translations: TranslationsRef,
     columns: Rc<Cell<u32>>,
+    scrolled: ScrolledWindow,
 }
 
 impl MediaList {
@@ -243,7 +244,14 @@ impl MediaList {
             on_media_select: Rc::new(RefCell::new(None)),
             translations,
             columns,
+            scrolled,
         }
+    }
+
+    /// Devuelve el `ScrolledWindow` que contiene la galería. Útil para conectar
+    /// el ajuste de desplazamiento y ocultar/mostrar la barra superior al hacer scroll.
+    pub fn scrolled_window(&self) -> &ScrolledWindow {
+        &self.scrolled
     }
 
     pub fn widget(&self) -> &Box {
