@@ -8,7 +8,7 @@ version = "0.2.0"
 dependencies = [
  "env_logger",
  "gdk-pixbuf 0.20.10",
- "glib 0.20.12",
+ "glib 0.22.10",
  "gtk4",
  "libadwaita",
  "log",
