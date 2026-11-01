@@ -3,6 +3,7 @@
 use crate::core::metadata::RefreshMetadataResult;
 use crate::db::media_repo::ListMediaOptions;
 use crate::db::{MediaRepository, close_db, open_db};
+use crate::ui::i18n::{Translations, TranslationsRef, load_translations};
 use crate::ui::media_details::MediaDetails;
 use crate::ui::media_list::MediaList;
 use crate::ui::search_bar::SearchBar;
@@ -32,6 +33,7 @@ pub struct MainWindow {
     db_path: String,
     metadata_sync_running: Rc<Cell<bool>>,
     toast_overlay: ToastOverlay,
+    translations: TranslationsRef,
     /// Lista de categorías de la página de filtro.
     categories_list: Box,
     /// Botón "Ver todo" para limpiar el filtro de categoría.
@@ -53,6 +55,14 @@ impl MainWindow {
 
         let db_path = config.inner().db_path.clone();
         let config_path = config.path().to_path_buf();
+
+        let language = config.inner().language.clone();
+        let translations = load_translations(&language)
+            .unwrap_or_else(|_| Rc::new(RefCell::new(Translations::default())));
+        let t = {
+            let t_ref = translations.clone();
+            move |key: &str| -> String { t_ref.borrow().t(key) }
+        };
 
         let window = AdwApplicationWindow::builder()
             .application(app)
@@ -133,7 +143,7 @@ impl MainWindow {
         right_section.append(&library_status);
 
         // Botón de ajustes.
-        let settings_button = Button::with_label("⚙ Ajustes");
+        let settings_button = Button::with_label(&t("button.settings"));
         settings_button.set_halign(gtk4::Align::End);
         settings_button.set_hexpand(false);
         settings_button.set_valign(gtk4::Align::Center);
@@ -168,10 +178,8 @@ impl MainWindow {
 
         // Página vacía: AdwStatusPage cuando no hay medios indexados.
         let empty_page = StatusPage::new();
-        empty_page.set_title("Sin medios indexados");
-        empty_page.set_description(Some(
-            "Agrega una carpeta de videos en Ajustes para comenzar a indexar tu biblioteca.",
-        ));
+        empty_page.set_title(&t("empty.title"));
+        empty_page.set_description(Some(&t("empty.description")));
         empty_page.set_icon_name(Some("media-library-symbolic"));
         empty_page.set_vexpand(true);
         empty_page.set_hexpand(true);
@@ -182,7 +190,7 @@ impl MainWindow {
         categories_page.set_hexpand(true);
         categories_page.set_vexpand(true);
 
-        let categories_title = Label::new(Some("Categorías"));
+        let categories_title = Label::new(Some(&t("stack.categories")));
         categories_title.set_halign(gtk4::Align::Start);
         categories_title.set_margin_top(20);
         categories_title.set_margin_start(24);
@@ -204,7 +212,7 @@ impl MainWindow {
         categories_page.append(&categories_scrolled);
 
         // Botón para limpiar el filtro y mostrar todos los medios.
-        let clear_category_button = Button::with_label("Ver todo");
+        let clear_category_button = Button::with_label(&t("button.clear_category"));
         clear_category_button.add_css_class("flat-button");
         clear_category_button.set_halign(gtk4::Align::Start);
         clear_category_button.set_margin_start(24);
@@ -214,7 +222,11 @@ impl MainWindow {
 
         stack.add_titled(&categories_page, Some("categories"), "Categorías");
 
-        let media_details = Rc::new(RefCell::new(MediaDetails::new(&db_path, 0)));
+        let media_details = Rc::new(RefCell::new(MediaDetails::new(
+            &db_path,
+            0,
+            translations.clone(),
+        )));
         media_details.borrow_mut().set_db_path(&db_path);
 
         // La vista de detalles puede crecer con la sinopsis y los episodios:
@@ -249,6 +261,7 @@ impl MainWindow {
             db_path: db_path.clone(),
             metadata_sync_running: Rc::new(Cell::new(false)),
             toast_overlay,
+            translations,
             categories_list,
             clear_category_button,
             previous_page: Rc::new(Cell::new(None)),
@@ -271,7 +284,7 @@ impl MainWindow {
         logo_label.add_controller(logo_click);
 
         // Botón "Categorías": abre el selector de categorías para filtrar.
-        let categories_button = Button::with_label("Categorías");
+        let categories_button = Button::with_label(&t("button.categories"));
         categories_button.add_css_class("nav-button");
         categories_button.set_valign(gtk4::Align::Center);
         let this_cat = this.clone();
@@ -323,22 +336,31 @@ impl MainWindow {
             w.stack.set_visible_child_name("settings");
         });
 
-        // Callback: Guardar ajustes -> guarda en disco, limpia medios huérfanos y vuelve a la lista.
+        // Callback: Guardar ajustes -> guarda en disco, limpia medios huérfanos
+        // y vuelve a la lista. Aplica el idioma en caliente sin reiniciar.
         let config_rc_save = config_rc.clone();
         let config_path_save = config_path.clone();
         let db_path_save = db_path.clone();
+        let this_save = this.clone();
         this.borrow_mut().settings_view.on_save(move |new_config| {
             let folders = new_config.media_folders.clone();
+            let language = new_config.language.clone();
             let config_path_clone = config_path_save.clone();
             let _ = crate::config::Config {
                 path: config_path_clone,
                 inner: new_config.clone(),
             }
             .save();
-            *config_rc_save.borrow_mut() = new_config;
+            {
+                let mut config = config_rc_save.borrow_mut();
+                *config = new_config;
+            }
 
             // Eliminar medios de carpetas que ya no están en el config
             let _ = crate::core::library::cleanup_media_not_in_folders(&db_path_save, &folders);
+
+            // Aplicar el idioma en caliente y refrescar las vistas visibles.
+            let _ = Self::set_language(&this_save, &language);
         });
 
         // Callback: cambios inmediatos de carpetas (ya persistidos por la vista).
@@ -519,6 +541,30 @@ impl MainWindow {
         let toast = Toast::new(message);
         toast.set_timeout(3000);
         self.toast_overlay.add_toast(toast);
+    }
+
+    /// Traduce una clave de i18n al idioma actual.
+    fn t(&self, key: &str) -> String {
+        self.translations.borrow().t(key)
+    }
+
+    /// Recarga el diccionario de traducciones para `language` y refresca las
+    /// vistas visibles para que el cambio de idioma se aplique sin reiniciar.
+    ///
+    /// El borrow de `this` se acota y se libera antes de llamar a
+    /// `refresh_views` (que necesita `borrow_mut`), evitando
+    /// `RefCell already borrowed`.
+    fn set_language(
+        this: &MainWindowRef,
+        language: &str,
+    ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
+        {
+            let w = this.borrow();
+            w.translations.borrow_mut().set_language(language)?;
+            w.show_toast(&w.t("status.language_applied"));
+        }
+        Self::refresh_views(this);
+        Ok(())
     }
 
     /// Actualiza el indicador de carpetas y medios de la barra superior.
