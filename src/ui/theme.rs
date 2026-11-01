@@ -243,6 +243,11 @@ pub fn install_theme_css() {
             ".media-card:hover {{ background-color: {}; border-color: {}; transform: scale(1.03); }}\n",
             colors::SURFACE, colors::BORDER_HOVER,
         ));
+        /* Tarjeta de medio seleccionada: se usa el color del tema (nunca el azul por defecto del sistema). */
+        css.push_str(&format!(
+            ".media-card:selected {{ background-color: {}; border-color: {}; }}\n",
+            colors::SURFACE, colors::ACCENT,
+        ));
 
         /* Póster de medio */
         css.push_str(&format!(

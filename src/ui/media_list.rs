@@ -41,6 +41,7 @@ pub struct MediaList {
     /// Medios completos, indexados por la misma posición que el `store`.
     media: Rc<std::cell::RefCell<Vec<Media>>>,
     selection: SingleSelection,
+    grid_view: GridView,
     on_media_select: SharedSelectCallback,
     scrolled: ScrolledWindow,
 }
@@ -139,6 +140,7 @@ impl MediaList {
             store,
             media: media_ref,
             selection,
+            grid_view: grid_view.clone(),
             on_media_select: on_select_ref,
             scrolled,
         }
@@ -157,6 +159,10 @@ impl MediaList {
     /// quede con el tono de fondo de "seleccionada" al volver a esta vista.
     pub fn clear_selection(&self) {
         self.selection.set_selected(gtk4::INVALID_LIST_POSITION);
+        // Forzar el redraw de la rejilla para que los widgets de las tarjetas
+        // actualicen su estado CSS (:selected) inmediatamente y no quede
+        // residualmente el fondo de selección al cambiar de vista.
+        self.grid_view.queue_draw();
     }
 
     /// Reemplaza el contenido de la galería con la lista de medios dada.

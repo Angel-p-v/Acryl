@@ -1300,14 +1300,16 @@ impl MainWindow {
 
     /// Muestra la biblioteca (o la página vacía si no hay medios ni filtro).
     fn show_list(&self) {
+        // Limpiar la selección ANTES de mostrar la lista, para que ninguna
+        // tarjeta renderice con el estado :selected (fondo azul del sistema)
+        // al volver de los detalles u otra vista.
+        self.media_list.clear_selection();
+
         let filtered = self.current_category.borrow().is_some();
         if self.media_count == 0 && !filtered {
             self.stack.set_visible_child_name("empty");
         } else {
             self.stack.set_visible_child_name("list");
-            // Limpiar la selección para que ninguna tarjeta quede resaltada
-            // con tono azul al volver de los detalles u otra vista.
-            self.media_list.clear_selection();
         }
     }
 
