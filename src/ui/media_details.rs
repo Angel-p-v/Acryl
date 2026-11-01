@@ -21,7 +21,7 @@ use crate::ui::i18n::TranslationsRef;
 use crate::ui::poster::{Banner, placeholder_widget, poster_picture};
 use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
-use gtk4::{Box, Button, DropDown, FlowBox, GestureClick, Label, Orientation};
+use gtk4::{Box, Button, DropDown, FlowBox, Label, Orientation};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -685,13 +685,6 @@ fn build_episode_card(
         play_btn.connect_clicked(move |_| callback(file_path.clone()));
     }
     card.append(&play_btn);
-
-    let click = GestureClick::new();
-    let callback = on_play_episode.borrow().clone();
-    if let Some(callback) = callback {
-        click.connect_pressed(move |_, _, _, _| callback(file_path.clone()));
-    }
-    card.add_controller(click);
 
     card
 }
