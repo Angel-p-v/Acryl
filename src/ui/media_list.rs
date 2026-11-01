@@ -167,6 +167,9 @@ impl MediaList {
             let obj = StringObject::new(&m.title);
             self.store.append(&obj);
         }
+        // Limpiar la selección: al recargar el contenido, la selección
+        // anterior ya no es válida y podría dejar una tarjeta resaltada.
+        self.clear_selection();
     }
 
     /// Registra el callback invocado cuando el usuario selecciona un medio.
