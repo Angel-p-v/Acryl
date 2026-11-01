@@ -298,7 +298,8 @@ src/                      ← Nueva carpeta Rust pura (db, library, player, conf
 src-tauri/Cargo.toml      ← Se reescribe como Cargo.toml de proyecto Rust puro
 Cargo.toml (raíz)         ← Se actualiza (workspace o proyecto único)
 Cargo.lock                ← Se regenera
-scripts/                  ← Se mantienen (install.sh, uninstall.sh, update.sh, acryl-check)
+scripts/                  ← Se mantienen (install.sh, uninstall.sh, update.sh)
+diagnostic/               ← Se mantiene (acryl-check.sh)
 docs/                     ← Se mantienen (ADRs, etc.)
 README.md                 ← Se reescribe completamente
 PLAN_DESKTOP.md           ← Se actualiza (este documento)
