@@ -243,7 +243,11 @@ pub fn install_theme_css() {
             ".media-card:hover {{ background-color: {}; border-color: {}; transform: scale(1.03); }}\n",
             colors::SURFACE, colors::BORDER_HOVER,
         ));
-        /* Tarjeta de medio seleccionada: se usa el color del tema (nunca el azul por defecto del sistema). */
+        /* En GtkGridView el estado :selected está en el ListItem (fila), no en el
+         * child .media-card. Sobreescribimos el fondo de listitem:selected para que
+         * nunca aparezca el azul por defecto del tema del sistema. */
+        css.push_str("listitem:selected { background-color: transparent; border-color: transparent; }\n");
+        /* También por si acaso el estado :selected cae en el child. */
         css.push_str(&format!(
             ".media-card:selected {{ background-color: {}; border-color: {}; }}\n",
             colors::SURFACE, colors::ACCENT,

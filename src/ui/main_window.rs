@@ -1301,9 +1301,10 @@ impl MainWindow {
 
     /// Muestra la biblioteca (o la página vacía si no hay medios ni filtro).
     fn show_list(&self) {
-        // Limpiar la selección ANTES de mostrar la lista, para que ninguna
-        // tarjeta renderice con el estado :selected (fondo azul del sistema)
-        // al volver de los detalles u otra vista.
+        // Limpiar la selección ANTES de mostrar la lista y DESPUÉS también,
+        // por si GTK no procesa el cambio de selección mientras la página
+        // está oculta. Así ninguna tarjeta queda con el fondo azul del
+        // sistema al volver de los detalles u otra vista.
         self.media_list.clear_selection();
 
         let filtered = self.current_category.borrow().is_some();
@@ -1311,6 +1312,7 @@ impl MainWindow {
             self.stack.set_visible_child_name("empty");
         } else {
             self.stack.set_visible_child_name("list");
+            self.media_list.clear_selection();
         }
     }
 
