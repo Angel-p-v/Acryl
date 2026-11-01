@@ -2,6 +2,7 @@
 
 use crate::db::media_repo::{MediaRepository, SearchMediaOptions};
 use crate::db::{close_db, open_db};
+use crate::ui::i18n::TranslationsRef;
 use gtk4::prelude::*;
 use gtk4::{Box, Entry, Label, Orientation};
 use std::cell::RefCell;
@@ -15,10 +16,11 @@ pub struct SearchBar {
     results_label: Label,
     db_path: String,
     on_media_select: Rc<RefCell<Option<MediaSelectCallback>>>,
+    translations: TranslationsRef,
 }
 
 impl SearchBar {
-    pub fn new(db_path: &str) -> Self {
+    pub fn new(db_path: &str, translations: TranslationsRef) -> Self {
         let box_ = Box::new(Orientation::Vertical, 5);
         box_.set_margin_top(10);
         box_.set_margin_bottom(10);
@@ -26,7 +28,7 @@ impl SearchBar {
         box_.set_margin_end(10);
 
         let entry = Entry::new();
-        entry.set_placeholder_text(Some("Buscar por título..."));
+        entry.set_placeholder_text(Some(&translations.borrow().t("search.placeholder")));
         entry.set_hexpand(true);
         box_.append(&entry);
 
@@ -41,6 +43,7 @@ impl SearchBar {
             results_label,
             db_path: db_path.to_string(),
             on_media_select: Rc::new(RefCell::new(None)),
+            translations,
         }
     }
 
@@ -52,6 +55,12 @@ impl SearchBar {
     pub fn clear_query(&self) {
         self.entry.set_text("");
         self.results_label.set_label("");
+    }
+
+    /// Actualiza el placeholder del campo de búsqueda al idioma actual.
+    pub fn set_placeholder(&self, translations: &TranslationsRef) {
+        self.entry
+            .set_placeholder_text(Some(&translations.borrow().t("search.placeholder")));
     }
 
     pub fn on_select<F>(&mut self, f: F)
@@ -67,6 +76,7 @@ impl SearchBar {
         let results_label = self.results_label.clone();
         let db_path = self.db_path.clone();
         let on_select = self.on_media_select.clone();
+        let translations = self.translations.clone();
 
         entry.connect_activate(move |e| {
             let query = e.text();
@@ -77,6 +87,7 @@ impl SearchBar {
 
             let db_path = db_path.clone();
             let on_select = on_select.clone();
+            let translations = translations.clone();
 
             // Búsqueda en hilo principal: SQLite local es rápido, no bloquea perceptiblemente.
             let mut conn = match open_db(&db_path) {
@@ -102,7 +113,9 @@ impl SearchBar {
             close_db(conn);
 
             let count = results.len();
-            results_label.set_label(&format!("{} resultados", count));
+            let results_format = translations.borrow().t("search.results");
+            let results_text = results_format.replace("{}", &count.to_string());
+            results_label.set_label(&results_text);
 
             for m in results.iter() {
                 println!("Resultado: {} (id={})", m.title, m.id);

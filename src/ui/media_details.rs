@@ -14,6 +14,7 @@
 use crate::core::poster_service::cached_path;
 use crate::db::media_repo::Media;
 use crate::db::{MediaRepository, close_db, open_db};
+use crate::ui::i18n::TranslationsRef;
 use crate::ui::poster::{Banner, poster_picture};
 use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
@@ -64,10 +65,11 @@ pub struct MediaDetails {
     on_play_episode: Option<Rc<dyn Fn(String)>>,
     on_edit_tracks: Option<Rc<dyn Fn(String)>>,
     on_change_season: Option<Rc<dyn Fn(i64)>>,
+    translations: TranslationsRef,
 }
 
 impl MediaDetails {
-    pub fn new(db_path: &str, media_id: i64) -> Self {
+    pub fn new(db_path: &str, media_id: i64, translations: TranslationsRef) -> Self {
         let box_ = Box::new(Orientation::Vertical, 0);
         box_.set_margin_top(0);
         box_.set_margin_bottom(0);
@@ -78,6 +80,8 @@ impl MediaDetails {
         box_.set_vexpand(true);
 
         let banner = Banner::new();
+
+        let t = |key: &str| -> String { translations.borrow().t(key) };
 
         let synopsis_label = Label::new(None);
         synopsis_label.set_halign(gtk4::Align::Start);
@@ -103,16 +107,16 @@ impl MediaDetails {
         buttons_box.set_margin_start(16);
         buttons_box.add_css_class("hero-actions");
 
-        let back_button = Button::with_label("← Volver");
+        let back_button = Button::with_label(&t("back.list"));
         back_button.add_css_class("flat-button");
         buttons_box.append(&back_button);
 
-        let tracks_button = Button::with_label("🎵 Pistas");
+        let tracks_button = Button::with_label(&t("button.tracks"));
         tracks_button.add_css_class("flat-button");
-        tracks_button.set_tooltip_text(Some("Elegir pista de audio y subtítulos"));
+        tracks_button.set_tooltip_text(Some(&t("tooltip.tracks")));
         buttons_box.append(&tracks_button);
 
-        let play_button = Button::with_label("▶ Reproducir");
+        let play_button = Button::with_label(&t("button.play"));
         play_button.add_css_class("hero-action-btn");
         play_button.add_css_class("primary");
         buttons_box.append(&play_button);
@@ -159,7 +163,7 @@ impl MediaDetails {
             parent_id: None,
             banner,
             main_button_file_path,
-            main_button_label: "▶ Reproducir".to_string(),
+            main_button_label: t("button.play"),
             synopsis_label,
             tracks_button,
             play_button,
@@ -174,7 +178,13 @@ impl MediaDetails {
             on_play_episode: None,
             on_edit_tracks: None,
             on_change_season: None,
+            translations,
         }
+    }
+
+    /// Traduce una clave de i18n al idioma actual.
+    fn t(&self, key: &str) -> String {
+        self.translations.borrow().t(key)
     }
 
     pub fn set_db_path(&mut self, db_path: &str) {
@@ -202,18 +212,18 @@ impl MediaDetails {
         self.media_id = media.id;
         self.parent_id = media.parent_id;
 
-        self.back_button
-            .set_label(match back_target(media.parent_id) {
-                BackTarget::Parent(_) if media.r#type == "anime" => "← Volver al anime",
-                BackTarget::Parent(_) => "← Volver a la serie",
-                BackTarget::List => "← Volver a la lista",
-            });
+        let back_label = match back_target(media.parent_id) {
+            BackTarget::Parent(_) if media.r#type == "anime" => self.t("back.anime"),
+            BackTarget::Parent(_) => self.t("back.series"),
+            BackTarget::List => self.t("back.list"),
+        };
+        self.back_button.set_label(&back_label);
 
         let type_label = match media.r#type.as_str() {
-            "series" => "Serie",
-            "anime" => "Anime",
-            "movie" => "Película",
-            other => other,
+            "series" => self.t("media.type.series"),
+            "anime" => self.t("media.type.anime"),
+            "movie" => self.t("media.type.movie"),
+            other => other.to_string(),
         };
         let info_label = match media.year {
             Some(year) => format!("{} · {}", type_label, year),
@@ -238,30 +248,33 @@ impl MediaDetails {
                 let mut repo = MediaRepository::new(&mut conn);
                 if let Ok(Some((_id, path, ep_label))) = repo.get_next_episode_to_watch(media.id) {
                     *self.main_button_file_path.borrow_mut() = Some(path.clone());
-                    (format!("▶ Continuar {}", ep_label), Some(path))
+                    (
+                        format!("{} {}", self.t("button.continue_prefix"), ep_label),
+                        Some(path),
+                    )
                 } else if let Ok(Some(path)) = repo.first_file_path_for_media(media.id) {
                     *self.main_button_file_path.borrow_mut() = Some(path.clone());
-                    ("▶ Reproducir".to_string(), Some(path))
+                    (self.t("button.play"), Some(path))
                 } else {
                     *self.main_button_file_path.borrow_mut() = None;
-                    ("▶ Reproducir".to_string(), None)
+                    (self.t("button.play"), None)
                 }
             } else {
                 *self.main_button_file_path.borrow_mut() = None;
-                ("▶ Reproducir".to_string(), None)
+                (self.t("button.play"), None)
             }
         } else if let Ok(mut conn) = open_db(&self.db_path) {
             let mut repo = MediaRepository::new(&mut conn);
             if let Ok(Some(path)) = repo.first_file_path_for_media(media.id) {
                 *self.main_button_file_path.borrow_mut() = Some(path.clone());
-                ("▶ Reproducir".to_string(), Some(path))
+                (self.t("button.play"), Some(path))
             } else {
                 *self.main_button_file_path.borrow_mut() = None;
-                ("▶ Reproducir".to_string(), None)
+                (self.t("button.play"), None)
             }
         } else {
             *self.main_button_file_path.borrow_mut() = None;
-            ("▶ Reproducir".to_string(), None)
+            (self.t("button.play"), None)
         };
 
         self.main_button_label = label;
@@ -280,7 +293,8 @@ impl MediaDetails {
         } else if media.parent_id.is_some() {
             self.load_episodes(media.id);
         } else {
-            let no_content_label = Label::new(Some("Este medio no tiene episodios disponibles."));
+            let text = self.t("content.no_episodes");
+            let no_content_label = Label::new(Some(&text));
             no_content_label.set_halign(gtk4::Align::Start);
             no_content_label.set_valign(gtk4::Align::Start);
             no_content_label.set_margin_top(24);
@@ -350,7 +364,11 @@ impl MediaDetails {
         let play_btn = Button::with_label("▶");
         play_btn.add_css_class("episode-play-btn");
         play_btn.set_halign(gtk4::Align::Center);
-        play_btn.set_tooltip_text(Some(&format!("Reproducir {}", episode_label)));
+        play_btn.set_tooltip_text(Some(&format!(
+            "{} {}",
+            self.t("button.play_episode"),
+            episode_label
+        )));
         let file_path_clone = file_path.clone();
         let on_play_episode_btn = self.on_play_episode.clone();
         play_btn.connect_clicked(move |_| {
@@ -439,7 +457,8 @@ impl MediaDetails {
         }
 
         if seasons.is_empty() && direct_files.is_empty() {
-            let no_content_label = Label::new(Some("Sin temporadas ni episodios disponibles"));
+            let text = self.t("content.no_seasons");
+            let no_content_label = Label::new(Some(&text));
             no_content_label.set_halign(gtk4::Align::Start);
             no_content_label.set_valign(gtk4::Align::Start);
             no_content_label.set_margin_top(24);
@@ -495,7 +514,8 @@ impl MediaDetails {
         }
 
         if files.is_empty() {
-            let no_files_label = Label::new(Some("Sin episodios en esta temporada"));
+            let text = self.t("content.no_episodes_season");
+            let no_files_label = Label::new(Some(&text));
             no_files_label.set_halign(gtk4::Align::Start);
             no_files_label.set_valign(gtk4::Align::Start);
             no_files_label.set_margin_top(24);
@@ -511,17 +531,27 @@ impl MediaDetails {
                     format!("S{}E{} - {}", s, e, f.title.clone().unwrap_or_default())
                 }
                 (None, Some(e)) => {
-                    format!("Episodio {} - {}", e, f.title.clone().unwrap_or_default())
+                    format!(
+                        "{} {} - {}",
+                        self.t("episode.ep_word"),
+                        e,
+                        f.title.clone().unwrap_or_default()
+                    )
                 }
                 (Some(s), None) => {
-                    format!("Temporada {} - {}", s, f.title.clone().unwrap_or_default())
+                    format!(
+                        "{} {} - {}",
+                        self.t("episode.season_word"),
+                        s,
+                        f.title.clone().unwrap_or_default()
+                    )
                 }
                 (None, None) => f.title.clone().unwrap_or_default(),
             };
             let episode_number = match (f.season, f.episode) {
                 (Some(s), Some(e)) => format!("S{:02}E{:02}", s, e),
                 (None, Some(e)) => format!("E{:02}", e),
-                (Some(s), None) => format!("T{:02}", s),
+                (Some(s), None) => format!("{}{:02}", self.t("episode.season_abbr"), s),
                 (None, None) => String::new(),
             };
 
@@ -554,7 +584,8 @@ impl MediaDetails {
         };
 
         if files.is_empty() {
-            let no_files_label = Label::new(Some("Sin archivos disponibles"));
+            let text = self.t("content.no_files");
+            let no_files_label = Label::new(Some(&text));
             no_files_label.set_halign(gtk4::Align::Start);
             no_files_label.set_valign(gtk4::Align::Start);
             no_files_label.set_margin_top(24);
@@ -570,17 +601,27 @@ impl MediaDetails {
                     format!("S{}E{} - {}", s, e, f.title.clone().unwrap_or_default())
                 }
                 (None, Some(e)) => {
-                    format!("Episodio {} - {}", e, f.title.clone().unwrap_or_default())
+                    format!(
+                        "{} {} - {}",
+                        self.t("episode.ep_word"),
+                        e,
+                        f.title.clone().unwrap_or_default()
+                    )
                 }
                 (Some(s), None) => {
-                    format!("Temporada {} - {}", s, f.title.clone().unwrap_or_default())
+                    format!(
+                        "{} {} - {}",
+                        self.t("episode.season_word"),
+                        s,
+                        f.title.clone().unwrap_or_default()
+                    )
                 }
                 (None, None) => f.title.clone().unwrap_or_default(),
             };
             let episode_number = match (f.season, f.episode) {
                 (Some(s), Some(e)) => format!("S{:02}E{:02}", s, e),
                 (None, Some(e)) => format!("E{:02}", e),
-                (Some(s), None) => format!("T{:02}", s),
+                (Some(s), None) => format!("{}{:02}", self.t("episode.season_abbr"), s),
                 (None, None) => String::new(),
             };
 
@@ -597,7 +638,7 @@ impl MediaDetails {
     /// cambiar de temporada).
     fn load_episodes_for_files(&self, files: &[crate::db::file_repo::MediaFile]) {
         if files.is_empty() {
-            let no_files_label = Label::new(Some("Sin episodios disponibles"));
+            let no_files_label = Label::new(Some(&self.t("content.no_episodes")));
             no_files_label.set_halign(gtk4::Align::Start);
             no_files_label.set_valign(gtk4::Align::Start);
             no_files_label.set_margin_top(24);
@@ -613,17 +654,27 @@ impl MediaDetails {
                     format!("S{}E{} - {}", s, e, f.title.clone().unwrap_or_default())
                 }
                 (None, Some(e)) => {
-                    format!("Episodio {} - {}", e, f.title.clone().unwrap_or_default())
+                    format!(
+                        "{} {} - {}",
+                        self.t("episode.ep_word"),
+                        e,
+                        f.title.clone().unwrap_or_default()
+                    )
                 }
                 (Some(s), None) => {
-                    format!("Temporada {} - {}", s, f.title.clone().unwrap_or_default())
+                    format!(
+                        "{} {} - {}",
+                        self.t("episode.season_word"),
+                        s,
+                        f.title.clone().unwrap_or_default()
+                    )
                 }
                 (None, None) => f.title.clone().unwrap_or_default(),
             };
             let episode_number = match (f.season, f.episode) {
                 (Some(s), Some(e)) => format!("S{:02}E{:02}", s, e),
                 (None, Some(e)) => format!("E{:02}", e),
-                (Some(s), None) => format!("T{:02}", s),
+                (Some(s), None) => format!("{}{:02}", self.t("episode.season_abbr"), s),
                 (None, None) => String::new(),
             };
 

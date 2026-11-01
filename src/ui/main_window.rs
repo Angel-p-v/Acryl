@@ -3,6 +3,7 @@
 use crate::core::metadata::RefreshMetadataResult;
 use crate::db::media_repo::ListMediaOptions;
 use crate::db::{MediaRepository, close_db, open_db};
+use crate::ui::i18n::{Translations, TranslationsRef, load_translations};
 use crate::ui::media_details::MediaDetails;
 use crate::ui::media_list::MediaList;
 use crate::ui::search_bar::SearchBar;
@@ -23,17 +24,22 @@ pub struct MainWindow {
     stack: Stack,
     search_bar: SearchBar,
     settings_button: Button,
+    categories_button: Button,
     media_list: MediaList,
     media_details: Rc<RefCell<MediaDetails>>,
     settings_view: SettingsView,
     library_status: Label,
+    empty_page: StatusPage,
     config: Rc<RefCell<crate::config::AppConfig>>,
     media_count: usize,
     db_path: String,
     metadata_sync_running: Rc<Cell<bool>>,
     toast_overlay: ToastOverlay,
+    translations: TranslationsRef,
     /// Lista de categorías de la página de filtro.
     categories_list: Box,
+    /// Título de la página de categorías.
+    categories_title: Label,
     /// Botón "Ver todo" para limpiar el filtro de categoría.
     clear_category_button: Button,
     /// Página de la que se abrió Ajustes, para volver a ella (no siempre al
@@ -53,6 +59,14 @@ impl MainWindow {
 
         let db_path = config.inner().db_path.clone();
         let config_path = config.path().to_path_buf();
+
+        let language = config.inner().language.clone();
+        let translations = load_translations(&language)
+            .unwrap_or_else(|_| Rc::new(RefCell::new(Translations::default())));
+        let t = {
+            let t_ref = translations.clone();
+            move |key: &str| -> String { t_ref.borrow().t(key) }
+        };
 
         let window = AdwApplicationWindow::builder()
             .application(app)
@@ -117,7 +131,7 @@ impl MainWindow {
         right_section.set_margin_end(16);
 
         // Barra de búsqueda.
-        let search_bar = SearchBar::new(&db_path);
+        let search_bar = SearchBar::new(&db_path, translations.clone());
         search_bar.widget().set_hexpand(false);
         search_bar.widget().set_width_request(300);
         search_bar.widget().set_halign(gtk4::Align::Center);
@@ -133,7 +147,7 @@ impl MainWindow {
         right_section.append(&library_status);
 
         // Botón de ajustes.
-        let settings_button = Button::with_label("⚙ Ajustes");
+        let settings_button = Button::with_label(&t("button.settings"));
         settings_button.set_halign(gtk4::Align::End);
         settings_button.set_hexpand(false);
         settings_button.set_valign(gtk4::Align::Center);
@@ -149,7 +163,7 @@ impl MainWindow {
         stack.set_vexpand(true);
         content.append(&stack);
 
-        let media_list = MediaList::new();
+        let media_list = MediaList::new(translations.clone());
 
         // AdwClamp limita el ancho del contenido en pantallas anchas para que
         // las listas y pósters no se estiren desproporcionadamente.
@@ -159,7 +173,7 @@ impl MainWindow {
         list_clamp.set_child(Some(media_list.widget()));
 
         // Página principal: lista de medios (envuelta en Clamp).
-        stack.add_titled(&list_clamp, Some("list"), "Lista");
+        stack.add_titled(&list_clamp, Some("list"), &t("stack.list"));
 
         // Configurar columnas responsivas para la galería según el ancho
         // inicial de la ventana. Se calcula restando los márgenes del
@@ -168,21 +182,18 @@ impl MainWindow {
 
         // Página vacía: AdwStatusPage cuando no hay medios indexados.
         let empty_page = StatusPage::new();
-        empty_page.set_title("Sin medios indexados");
-        empty_page.set_description(Some(
-            "Agrega una carpeta de videos en Ajustes para comenzar a indexar tu biblioteca.",
-        ));
+        empty_page.set_title(&t("empty.title"));
+        empty_page.set_description(Some(&t("empty.description")));
         empty_page.set_icon_name(Some("media-library-symbolic"));
         empty_page.set_vexpand(true);
         empty_page.set_hexpand(true);
-        stack.add_titled(&empty_page, Some("empty"), "Vacía");
-
+        stack.add_titled(&empty_page, Some("empty"), &t("stack.empty"));
         // --- Página de categorías: selección y filtrado de la biblioteca ---
         let categories_page = Box::new(Orientation::Vertical, 0);
         categories_page.set_hexpand(true);
         categories_page.set_vexpand(true);
 
-        let categories_title = Label::new(Some("Categorías"));
+        let categories_title = Label::new(Some(&t("stack.categories")));
         categories_title.set_halign(gtk4::Align::Start);
         categories_title.set_margin_top(20);
         categories_title.set_margin_start(24);
@@ -204,7 +215,7 @@ impl MainWindow {
         categories_page.append(&categories_scrolled);
 
         // Botón para limpiar el filtro y mostrar todos los medios.
-        let clear_category_button = Button::with_label("Ver todo");
+        let clear_category_button = Button::with_label(&t("button.clear_category"));
         clear_category_button.add_css_class("flat-button");
         clear_category_button.set_halign(gtk4::Align::Start);
         clear_category_button.set_margin_start(24);
@@ -212,9 +223,13 @@ impl MainWindow {
         clear_category_button.set_visible(false);
         categories_page.append(&clear_category_button);
 
-        stack.add_titled(&categories_page, Some("categories"), "Categorías");
+        stack.add_titled(&categories_page, Some("categories"), &t("stack.categories"));
 
-        let media_details = Rc::new(RefCell::new(MediaDetails::new(&db_path, 0)));
+        let media_details = Rc::new(RefCell::new(MediaDetails::new(
+            &db_path,
+            0,
+            translations.clone(),
+        )));
         media_details.borrow_mut().set_db_path(&db_path);
 
         // La vista de detalles puede crecer con la sinopsis y los episodios:
@@ -225,13 +240,22 @@ impl MainWindow {
         details_scrolled.set_vexpand(true);
         details_scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
         details_scrolled.set_child(Some(media_details.borrow().widget()));
-        stack.add_titled(&details_scrolled, Some("details"), "Detalles");
+        stack.add_titled(&details_scrolled, Some("details"), &t("stack.details"));
 
         let config_rc = Rc::new(RefCell::new(config.inner().clone()));
 
-        let settings_view =
-            SettingsView::new(config.inner(), &db_path, config_path.as_path(), &window);
-        stack.add_titled(settings_view.widget(), Some("settings"), "Ajustes");
+        let settings_view = SettingsView::new(
+            config.inner(),
+            &db_path,
+            config_path.as_path(),
+            &window,
+            translations.clone(),
+        );
+        stack.add_titled(
+            settings_view.widget(),
+            Some("settings"),
+            &t("stack.settings"),
+        );
 
         stack.set_visible_child_name("list");
 
@@ -240,16 +264,20 @@ impl MainWindow {
             stack,
             search_bar,
             settings_button,
+            categories_button: Button::new(),
             media_list,
             media_details,
             settings_view,
             library_status,
+            empty_page,
             config: config_rc.clone(),
             media_count: 0,
             db_path: db_path.clone(),
             metadata_sync_running: Rc::new(Cell::new(false)),
             toast_overlay,
+            translations,
             categories_list,
+            categories_title,
             clear_category_button,
             previous_page: Rc::new(Cell::new(None)),
             current_category: Rc::new(RefCell::new(None)),
@@ -271,7 +299,7 @@ impl MainWindow {
         logo_label.add_controller(logo_click);
 
         // Botón "Categorías": abre el selector de categorías para filtrar.
-        let categories_button = Button::with_label("Categorías");
+        let categories_button = Button::with_label(&t("button.categories"));
         categories_button.add_css_class("nav-button");
         categories_button.set_valign(gtk4::Align::Center);
         let this_cat = this.clone();
@@ -282,6 +310,10 @@ impl MainWindow {
             Self::populate_categories_page(&this_cat);
         });
         nav_box.append(&categories_button);
+        {
+            let mut w = this.borrow_mut();
+            w.categories_button = categories_button;
+        }
 
         // Callback: botón "Ver todo" -> quita el filtro de categoría.
         let this_clear = this.clone();
@@ -323,22 +355,35 @@ impl MainWindow {
             w.stack.set_visible_child_name("settings");
         });
 
-        // Callback: Guardar ajustes -> guarda en disco, limpia medios huérfanos y vuelve a la lista.
+        // Callback: Guardar ajustes -> guarda en disco, limpia medios huérfanos
+        // y vuelve a la lista. Aplica el idioma en caliente sin reiniciar.
         let config_rc_save = config_rc.clone();
         let config_path_save = config_path.clone();
         let db_path_save = db_path.clone();
+        let this_save = this.clone();
         this.borrow_mut().settings_view.on_save(move |new_config| {
             let folders = new_config.media_folders.clone();
+            let language = new_config.language.clone();
             let config_path_clone = config_path_save.clone();
             let _ = crate::config::Config {
                 path: config_path_clone,
                 inner: new_config.clone(),
             }
             .save();
-            *config_rc_save.borrow_mut() = new_config;
+            {
+                let mut config = config_rc_save.borrow_mut();
+                *config = new_config;
+            }
 
             // Eliminar medios de carpetas que ya no están en el config
             let _ = crate::core::library::cleanup_media_not_in_folders(&db_path_save, &folders);
+
+            // Aplicar el idioma en caliente y refrescar las vistas visibles.
+            {
+                let mut w = this_save.borrow_mut();
+                let _ = w.set_language(&language);
+            }
+            Self::refresh_views(&this_save);
         });
 
         // Callback: cambios inmediatos de carpetas (ya persistidos por la vista).
@@ -359,7 +404,7 @@ impl MainWindow {
             let this = this_clone.clone();
             glib::timeout_add_local(Duration::from_millis(500), move || {
                 let w = this.borrow();
-                w.show_toast("Indexación completada");
+                w.show_toast(&w.t("toast.indexing_completed"));
                 glib::ControlFlow::Break
             });
         });
@@ -427,7 +472,7 @@ impl MainWindow {
                 let w = this_clone.borrow();
                 if let Err(error) = w.play_episode(&file_path) {
                     eprintln!("No se pudo reproducir '{}': {}", file_path, error);
-                    w.show_error("No se pudo reproducir el episodio", &error.to_string());
+                    w.show_error(&w.t("error.play_episode"), &error.to_string());
                 }
             });
 
@@ -443,11 +488,12 @@ impl MainWindow {
                     &w.window,
                     &w.db_path,
                     &file_path,
+                    w.translations.clone(),
                     Rc::new({
                         let this_for_toast = this.clone();
                         move || {
                             let w2 = this_for_toast.borrow();
-                            w2.show_toast("Pistas guardadas");
+                            w2.show_toast(&w2.t("toast.tracks_saved"));
                         }
                     }),
                 );
@@ -517,8 +563,61 @@ impl MainWindow {
     /// ventana. Se usa para confirmar acciones al usuario sin bloquear la UI.
     fn show_toast(&self, message: &str) {
         let toast = Toast::new(message);
-        toast.set_timeout(3000);
+        // `AdwToast::set_timeout` se expresa en segundos (no en milisegundos).
+        toast.set_timeout(3);
         self.toast_overlay.add_toast(toast);
+    }
+
+    /// Traduce una clave de i18n al idioma actual.
+    fn t(&self, key: &str) -> String {
+        self.translations.borrow().t(key)
+    }
+
+    /// Recarga el diccionario de traducciones para `language` y refresca las
+    /// vistas visibles para que el cambio de idioma se aplique sin reiniciar.
+    fn set_language(
+        &mut self,
+        language: &str,
+    ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
+        self.translations.borrow_mut().set_language(language)?;
+        self.show_toast(&self.t("status.language_applied"));
+        self.refresh_ui_texts();
+        Ok(())
+    }
+
+    /// Reescribe el texto de todos los widgets ya creados con el idioma actual.
+    /// Se llama después de cambiar el idioma para que los cambios se vean
+    /// sin reiniciar la aplicación.
+    fn refresh_ui_texts(&mut self) {
+        // Barra superior
+        self.settings_button.set_label(&self.t("button.settings"));
+        self.categories_button
+            .set_label(&self.t("button.categories"));
+        self.clear_category_button
+            .set_label(&self.t("button.clear_category"));
+
+        // Página vacía
+        self.empty_page.set_title(&self.t("empty.title"));
+        self.empty_page
+            .set_description(Some(&self.t("empty.description")));
+
+        // Indicador de biblioteca
+        Self::update_library_status(self);
+
+        // Placeholder del buscador
+        self.search_bar.set_placeholder(&self.translations);
+
+        // Página de categorías: título y botón "Todas las categorías" (los
+        // nombres de categoría provienen de la BD y no se traducen).
+        self.categories_title.set_label(&self.t("stack.categories"));
+        if let Some(first) = self.categories_list.first_child()
+            && let Ok(button) = first.downcast::<Button>()
+        {
+            button.set_label(&self.t("button.all_categories"));
+        }
+
+        // Vista de ajustes (título, secciones, botones, filas de carpetas)
+        self.settings_view.refresh_texts();
     }
 
     /// Actualiza el indicador de carpetas y medios de la barra superior.
@@ -527,9 +626,19 @@ impl MainWindow {
         let folder_count = config.media_folders.len();
 
         let text = match folder_count {
-            0 => "Sin carpetas indexadas".to_string(),
-            1 => format!("{} medios · 1 carpeta", w.media_count),
-            total => format!("{} medios · {} carpetas", w.media_count, total),
+            0 => w.t("status.no_folders"),
+            1 => {
+                let one = w.t("status.one_folder");
+                one.replacen("{}", &w.media_count.to_string(), 1)
+            }
+            total => {
+                let many = w.t("status.many_folders");
+                many.replacen("{}", &w.media_count.to_string(), 1).replacen(
+                    "{}",
+                    &total.to_string(),
+                    1,
+                )
+            }
         };
         w.library_status.set_label(&text);
 
@@ -626,7 +735,7 @@ impl MainWindow {
         }
 
         // Botón "Todas" para quitar el filtro.
-        let all_button = Button::with_label("Todas las categorías");
+        let all_button = Button::with_label(&w.t("button.all_categories"));
         all_button.add_css_class("nav-button");
         all_button.set_hexpand(false);
         all_button.set_valign(gtk4::Align::Center);
@@ -781,25 +890,33 @@ impl MainWindow {
     /// Pide confirmación antes de sobrescribir todos los metadatos indexados.
     fn confirm_metadata_refresh(this: &MainWindowRef) {
         if this.borrow().metadata_sync_running.get() {
-            this.borrow()
-                .settings_view
-                .set_metadata_status("Ya hay una sincronización de metadatos en curso.");
+            let w = this.borrow();
+            let text = w.t("status.metadata.already_running");
+            w.settings_view.set_metadata_status(&text);
             return;
         }
 
+        let (window, message, detail, cancel, update) = {
+            let w = this.borrow();
+            (
+                w.window.clone(),
+                w.t("metadata.refresh.title"),
+                w.t("metadata.refresh.detail"),
+                w.t("metadata.refresh.cancel"),
+                w.t("metadata.refresh.update"),
+            )
+        };
+
         let dialog = gtk4::AlertDialog::builder()
             .modal(true)
-            .message("¿Actualizar todos los metadatos?")
-            .detail(
-                "Se consultará TVmaze (y AniList para anime) y se sobrescribirán el título, el año, la sinopsis, el póster y el banner de todos los medios indexados. Esta acción no se puede deshacer.",
-            )
-            .buttons(["Cancelar", "Actualizar"])
+            .message(&message)
+            .detail(&detail)
+            .buttons([cancel.as_str(), update.as_str()])
             .cancel_button(0)
             .default_button(0)
             .build();
 
         let this = this.clone();
-        let window = this.borrow().window.clone();
         dialog.choose(Some(&window), None::<&gio::Cancellable>, move |response| {
             if matches!(response, Ok(1)) {
                 Self::start_metadata_refresh(&this);
@@ -811,9 +928,9 @@ impl MainWindow {
     /// progreso en Ajustes sin bloquear la UI.
     fn start_metadata_refresh(this: &MainWindowRef) {
         if this.borrow().metadata_sync_running.get() {
-            this.borrow()
-                .settings_view
-                .set_metadata_status("Ya hay una sincronización de metadatos en curso.");
+            let w = this.borrow();
+            let text = w.t("status.metadata.already_running");
+            w.settings_view.set_metadata_status(&text);
             return;
         }
 
@@ -822,8 +939,8 @@ impl MainWindow {
         {
             let w = this.borrow();
             w.settings_view.set_metadata_refreshing(true);
-            w.settings_view
-                .set_metadata_status("Consultando TVmaze y actualizando metadatos...");
+            let text = w.t("status.metadata.refreshing");
+            w.settings_view.set_metadata_status(&text);
         }
 
         let (sender, receiver) = mpsc::channel();
@@ -840,8 +957,8 @@ impl MainWindow {
                         let w = this.borrow();
                         w.metadata_sync_running.set(false);
                         w.settings_view.set_metadata_refreshing(false);
-                        w.settings_view
-                            .set_metadata_status(&metadata_refresh_summary(&result));
+                        let summary = metadata_refresh_summary(&result, &w.translations);
+                        w.settings_view.set_metadata_status(&summary);
                     }
                     if result.updated > 0 {
                         Self::refresh_views(&this);
@@ -853,12 +970,10 @@ impl MainWindow {
                         let w = this.borrow();
                         w.metadata_sync_running.set(false);
                         w.settings_view.set_metadata_refreshing(false);
-                        w.settings_view
-                            .set_metadata_status("No se pudieron actualizar los metadatos.");
-                        w.show_error(
-                            "No se pudieron actualizar los metadatos",
-                            &error.to_string(),
-                        );
+                        let status = w.t("status.metadata.error_detail");
+                        w.settings_view.set_metadata_status(&status);
+                        let title = w.t("status.metadata.error_title");
+                        w.show_error(&title, &error.to_string());
                     }
                     glib::ControlFlow::Break
                 }
@@ -867,8 +982,8 @@ impl MainWindow {
                     let w = this.borrow();
                     w.metadata_sync_running.set(false);
                     w.settings_view.set_metadata_refreshing(false);
-                    w.settings_view
-                        .set_metadata_status("La actualización se interrumpió inesperadamente.");
+                    let status = w.t("status.metadata.interrupted");
+                    w.settings_view.set_metadata_status(&status);
                     glib::ControlFlow::Break
                 }
             }
@@ -907,31 +1022,34 @@ impl MainWindow {
 }
 
 /// Resumen legible del resultado de una actualización forzada de metadatos.
-fn metadata_refresh_summary(result: &RefreshMetadataResult) -> String {
+fn metadata_refresh_summary(
+    result: &RefreshMetadataResult,
+    translations: &TranslationsRef,
+) -> String {
+    let t = |key: &str| translations.borrow().t(key);
+
     if result.total == 0 {
-        return "No hay medios indexados que actualizar.".to_string();
+        return t("metadata.sync.no_media");
     }
 
-    let mut summary = format!(
-        "Metadatos actualizados en {} de {} medios.",
-        result.updated, result.total
-    );
+    let mut summary = t("metadata.sync.success")
+        .replacen("{}", &result.updated.to_string(), 1)
+        .replacen("{}", &result.total.to_string(), 1);
     if result.failed > 0 {
-        summary.push_str(&format!(
-            " {} no se pudieron actualizar (sin resultados en TVmaze o error de red).",
-            result.failed
-        ));
+        summary.push_str(&t("metadata.sync.failed").replacen("{}", &result.failed.to_string(), 1));
     }
     if result.poster_failed > 0 {
-        summary.push_str(&format!(
-            " {} pósters no se pudieron descargar; se conservó el anterior.",
-            result.poster_failed
+        summary.push_str(&t("metadata.sync.poster_failed").replacen(
+            "{}",
+            &result.poster_failed.to_string(),
+            1,
         ));
     }
     if result.banner_failed > 0 {
-        summary.push_str(&format!(
-            " {} banners no se pudieron descargar; se conservó el anterior.",
-            result.banner_failed
+        summary.push_str(&t("metadata.sync.banner_failed").replacen(
+            "{}",
+            &result.banner_failed.to_string(),
+            1,
         ));
     }
     summary

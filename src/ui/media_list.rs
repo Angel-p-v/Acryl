@@ -13,6 +13,7 @@
 
 use crate::core::poster_service::cached_path;
 use crate::db::media_repo::Media;
+use crate::ui::i18n::TranslationsRef;
 use crate::ui::poster::{placeholder_widget, poster_picture};
 use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
@@ -47,7 +48,7 @@ struct MediaCard {
 }
 
 impl MediaCard {
-    fn new(media: &Media, on_select: Rc<dyn Fn(i64)>) -> Self {
+    fn new(media: &Media, on_select: Rc<dyn Fn(i64)>, translations: TranslationsRef) -> Self {
         let card = Box::new(Orientation::Vertical, 8);
         card.add_css_class("media-card");
         // Alineación al inicio: las tarjetas se colocan consecutivamente desde
@@ -99,12 +100,12 @@ impl MediaCard {
 
         // Etiqueta de tipo (Anime / Serie / Película) debajo del póster.
         let type_label_text = match media.r#type.as_str() {
-            "anime" => "Anime",
-            "series" => "Serie",
-            "movie" => "Película",
-            other => other,
+            "anime" => translations.borrow().t("media.type.anime"),
+            "series" => translations.borrow().t("media.type.series"),
+            "movie" => translations.borrow().t("media.type.movie"),
+            other => other.to_string(),
         };
-        let type_label = Label::new(Some(type_label_text));
+        let type_label = Label::new(Some(&type_label_text));
         type_label.set_halign(gtk4::Align::Start);
         type_label.set_valign(gtk4::Align::Start);
         type_label.add_css_class("card-type-label");
@@ -148,10 +149,11 @@ pub struct MediaList {
     flowbox: FlowBox,
     media: Rc<RefCell<Vec<Media>>>,
     on_media_select: Option<Rc<dyn Fn(i64)>>,
+    translations: TranslationsRef,
 }
 
 impl MediaList {
-    pub fn new() -> Self {
+    pub fn new(translations: TranslationsRef) -> Self {
         crate::ui::poster::install_poster_css();
 
         let content = Box::new(Orientation::Vertical, 0);
@@ -192,6 +194,7 @@ impl MediaList {
             flowbox,
             media: Rc::new(RefCell::new(Vec::new())),
             on_media_select: None,
+            translations,
         }
     }
 
@@ -227,7 +230,7 @@ impl MediaList {
         let media = self.media.borrow();
         if let Some(on_select) = &self.on_media_select {
             for m in media.iter() {
-                let card = MediaCard::new(m, on_select.clone());
+                let card = MediaCard::new(m, on_select.clone(), self.translations.clone());
                 self.flowbox.insert(&card.widget, -1);
             }
         }
@@ -239,11 +242,5 @@ impl MediaList {
     {
         self.on_media_select = Some(Rc::new(f));
         self.refresh();
-    }
-}
-
-impl Default for MediaList {
-    fn default() -> Self {
-        Self::new()
     }
 }
