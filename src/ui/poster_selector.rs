@@ -25,7 +25,7 @@ use std::rc::Rc;
 use std::sync::mpsc;
 
 /// Tamaño de las miniaturas en el selector.
-const THUMB_SIZE: i32 = 100;
+const THUMB_SIZE: i32 = 120;
 
 /// Resultado de la selección del usuario.
 pub struct SelectorResult {
@@ -72,8 +72,8 @@ impl PosterSelector {
         dialog.set_modal(true);
         dialog.set_transient_for(Some(parent.upcast_ref::<Window>()));
         // Tamaño compacto: suficiente para 3-4 miniaturas por fila.
-        dialog.set_default_size(560, 420);
-        dialog.set_resizable(false);
+        dialog.set_default_size(720, 520);
+        dialog.set_resizable(true);
 
         let selected_poster = Rc::new(RefCell::new(None));
         let selected_banner = Rc::new(RefCell::new(None));
@@ -344,12 +344,14 @@ fn thumbnail_flow() -> FlowBox {
 }
 
 /// Crea un botón con un marcador neutro para una opción de imagen.
-/// La imagen real se cargará en segundo plano y se actualizará más tarde.
+/// Crea un botón con la miniatura de una opción de imagen.
+/// Si la imagen ya está en caché, se muestra de inmediato; si no, se muestra
+/// un marcador neutro y se descarga en segundo plano.
 fn thumbnail_button_placeholder(opt: &ImageOption) -> Button {
     let btn = Button::new();
     btn.set_hexpand(false);
     btn.set_vexpand(false);
-    btn.set_size_request(THUMB_SIZE + 16, THUMB_SIZE + 56);
+    btn.set_size_request(THUMB_SIZE + 20, THUMB_SIZE + 60);
     btn.add_css_class("thumbnail-btn");
     btn.set_tooltip_text(Some(&opt.url));
 
@@ -357,7 +359,21 @@ fn thumbnail_button_placeholder(opt: &ImageOption) -> Button {
     box_.set_halign(Align::Center);
     box_.set_valign(Align::Center);
 
-    placeholder_thumbnail(&box_, &opt.url);
+    // Si la imagen ya está en caché, mostrarla de inmediato.
+    if let Some(cache_path) = cached_path(&opt.url) {
+        if let Ok(pixbuf) =
+            GtkPixbuf::from_file_at_scale(&cache_path, THUMB_SIZE, THUMB_SIZE, true)
+        {
+            let picture = poster_picture(&pixbuf, THUMB_SIZE, THUMB_SIZE);
+            picture.set_hexpand(true);
+            picture.set_vexpand(true);
+            box_.append(&picture);
+        } else {
+            placeholder_thumbnail(&box_);
+        }
+    } else {
+        placeholder_thumbnail(&box_);
+    }
 
     let lbl = Label::new(Some(&format!("{}\n{}", opt.image_type, opt.resolution)));
     lbl.set_halign(Align::Center);
@@ -376,7 +392,7 @@ fn thumbnail_button_remove(text: &str) -> Button {
     let btn = Button::new();
     btn.set_hexpand(false);
     btn.set_vexpand(false);
-    btn.set_size_request(THUMB_SIZE + 16, THUMB_SIZE + 56);
+    btn.set_size_request(THUMB_SIZE + 20, THUMB_SIZE + 60);
     btn.add_css_class("thumbnail-btn");
 
     let box_ = Box::new(Orientation::Vertical, 4);
@@ -384,7 +400,7 @@ fn thumbnail_button_remove(text: &str) -> Button {
     box_.set_valign(Align::Center);
 
     let icon = Image::from_icon_name("user-trash-symbolic");
-    icon.set_pixel_size(36);
+    icon.set_pixel_size(40);
     icon.set_halign(Align::Center);
     box_.append(&icon);
 
@@ -401,8 +417,9 @@ fn thumbnail_button_remove(text: &str) -> Button {
 }
 
 /// Añade un placeholder neutro (sin icono de interrogación) cuando no se
-/// puede mostrar la imagen. Solo muestra un rectángulo con el texto.
-fn placeholder_thumbnail(container: &Box, _text: &str) {
+/// puede mostrar la imagen. Muestra un rectángulo con borde para que se
+/// vea claramente el espacio de la miniatura.
+fn placeholder_thumbnail(container: &Box) {
     let rect = Box::new(Orientation::Vertical, 0);
     rect.set_size_request(THUMB_SIZE, THUMB_SIZE);
     rect.set_halign(Align::Center);
