@@ -116,5 +116,6 @@
   "status.no_streams": "No se han detectado pistas de audio ni subtítulos en este archivo.",
   "status.detect_error_format": "No se pudieron detectar las pistas: {}",
   "status.disconnected": "No se pudieron detectar las pistas del archivo.",
+  "status.language_applied": "Idioma aplicado",
   "status.save_error_format": "No se pudo guardar la selección: {}"
 }

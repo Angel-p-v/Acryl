@@ -115,5 +115,6 @@
   "status.detecting": "Detecting tracks with ffprobe…",
   "status.no_streams": "No audio or subtitle tracks detected in this file.",
   "status.detect_error_format": "Could not detect tracks: {}",
+  "status.language_applied": "Language applied",
   "status.save_error_format": "Could not save selection: {}"
 }

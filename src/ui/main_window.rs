@@ -3,7 +3,7 @@
 use crate::core::metadata::RefreshMetadataResult;
 use crate::db::media_repo::ListMediaOptions;
 use crate::db::{MediaRepository, close_db, open_db};
-use crate::ui::i18n::{Translations, load_translations};
+use crate::ui::i18n::{Translations, TranslationsRef, load_translations};
 use crate::ui::media_details::MediaDetails;
 use crate::ui::media_list::MediaList;
 use crate::ui::search_bar::SearchBar;
@@ -33,6 +33,7 @@ pub struct MainWindow {
     db_path: String,
     metadata_sync_running: Rc<Cell<bool>>,
     toast_overlay: ToastOverlay,
+    translations: TranslationsRef,
     /// Lista de categorías de la página de filtro.
     categories_list: Box,
     /// Botón "Ver todo" para limpiar el filtro de categoría.
@@ -260,6 +261,7 @@ impl MainWindow {
             db_path: db_path.clone(),
             metadata_sync_running: Rc::new(Cell::new(false)),
             toast_overlay,
+            translations,
             categories_list,
             clear_category_button,
             previous_page: Rc::new(Cell::new(None)),
@@ -334,22 +336,31 @@ impl MainWindow {
             w.stack.set_visible_child_name("settings");
         });
 
-        // Callback: Guardar ajustes -> guarda en disco, limpia medios huérfanos y vuelve a la lista.
+        // Callback: Guardar ajustes -> guarda en disco, limpia medios huérfanos
+        // y vuelve a la lista. Aplica el idioma en caliente sin reiniciar.
         let config_rc_save = config_rc.clone();
         let config_path_save = config_path.clone();
         let db_path_save = db_path.clone();
+        let this_save = this.clone();
         this.borrow_mut().settings_view.on_save(move |new_config| {
             let folders = new_config.media_folders.clone();
+            let language = new_config.language.clone();
             let config_path_clone = config_path_save.clone();
             let _ = crate::config::Config {
                 path: config_path_clone,
                 inner: new_config.clone(),
             }
             .save();
-            *config_rc_save.borrow_mut() = new_config;
+            {
+                let mut config = config_rc_save.borrow_mut();
+                *config = new_config;
+            }
 
             // Eliminar medios de carpetas que ya no están en el config
             let _ = crate::core::library::cleanup_media_not_in_folders(&db_path_save, &folders);
+
+            // Aplicar el idioma en caliente y refrescar las vistas visibles.
+            let _ = Self::set_language(&this_save, &language);
         });
 
         // Callback: cambios inmediatos de carpetas (ya persistidos por la vista).
@@ -530,6 +541,30 @@ impl MainWindow {
         let toast = Toast::new(message);
         toast.set_timeout(3000);
         self.toast_overlay.add_toast(toast);
+    }
+
+    /// Traduce una clave de i18n al idioma actual.
+    fn t(&self, key: &str) -> String {
+        self.translations.borrow().t(key)
+    }
+
+    /// Recarga el diccionario de traducciones para `language` y refresca las
+    /// vistas visibles para que el cambio de idioma se aplique sin reiniciar.
+    ///
+    /// El borrow de `this` se acota y se libera antes de llamar a
+    /// `refresh_views` (que necesita `borrow_mut`), evitando
+    /// `RefCell already borrowed`.
+    fn set_language(
+        this: &MainWindowRef,
+        language: &str,
+    ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
+        {
+            let w = this.borrow();
+            w.translations.borrow_mut().set_language(language)?;
+            w.show_toast(&w.t("status.language_applied"));
+        }
+        Self::refresh_views(this);
+        Ok(())
     }
 
     /// Actualiza el indicador de carpetas y medios de la barra superior.
