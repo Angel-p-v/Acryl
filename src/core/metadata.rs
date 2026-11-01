@@ -714,28 +714,29 @@ pub async fn fetch_tvmaze_images(show_id: u64, client: &TvmazeClient) -> Vec<Ima
             None => continue,
         };
 
-        for resolution in ["original", "medium"] {
-            let url = match resolutions
-                .get(resolution)
-                .and_then(|res| res.get("url"))
-                .and_then(Value::as_str)
-                .filter(|u| !u.is_empty())
-            {
-                Some(u) => u.to_string(),
-                None => continue,
-            };
+        // Solo tomamos la resolución "original" (mejor calidad) para evitar
+        // mostrar la misma imagen dos veces (original y medium son URLs
+        // diferentes aunque sean la misma imagen).
+        let url = match resolutions
+            .get("original")
+            .and_then(|res| res.get("url"))
+            .and_then(Value::as_str)
+            .filter(|u| !u.is_empty())
+        {
+            Some(u) => u.to_string(),
+            None => continue,
+        };
 
-            // Evitar duplicados: si ya vimos esta URL, no la añadimos de nuevo.
-            if !seen_urls.insert(url.clone()) {
-                continue;
-            }
-
-            options.push(ImageOption {
-                image_type: image_type.clone(),
-                resolution: resolution.to_string(),
-                url,
-            });
+        // Evitar duplicados: si ya vimos esta URL, no la añadimos de nuevo.
+        if !seen_urls.insert(url.clone()) {
+            continue;
         }
+
+        options.push(ImageOption {
+            image_type: image_type.clone(),
+            resolution: "original".to_string(),
+            url,
+        });
     }
 
     options

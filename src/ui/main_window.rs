@@ -963,6 +963,10 @@ impl MainWindow {
                             }
                         }
                     }
+                    // Deduplicar por URL para no mostrar la misma imagen dos veces
+                    // (puede repetirse entre TVmaze y Fanart.tv).
+                    poster_options.dedup_by(|a, b| a.url == b.url);
+                    banner_options.dedup_by(|a, b| a.url == b.url);
 
                     let _ = tx.send((poster_options, banner_options));
                 });
