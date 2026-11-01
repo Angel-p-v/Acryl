@@ -711,12 +711,14 @@ impl<'a> MediaRepository<'a> {
     pub fn record_playback(
         &mut self,
         media_id: i64,
+        file_path: &str,
         position: f64,
         duration: f64,
     ) -> RusqliteResult<()> {
         self.conn.execute(
-            "INSERT INTO playback_history (media_id, position, duration) VALUES (?1, ?2, ?3)",
-            params![media_id, position, duration],
+            "INSERT INTO playback_history (media_id, file_path, position, duration)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![media_id, file_path, position, duration],
         )?;
         Ok(())
     }
@@ -806,6 +808,72 @@ impl<'a> MediaRepository<'a> {
             .collect();
         Ok(rows)
     }
+
+    /// Lista el historial de reproducción ordenado por fecha descendente.
+    /// Hace JOIN con `media` y `media_files` para traer título, tipo, año,
+    /// póster, temporada y episodio de cada reproducción.
+    pub fn list_playback_history(
+        &mut self,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> RusqliteResult<Vec<PlaybackHistoryEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT ph.id, ph.media_id, m.title, m.type, m.year, m.poster_path,
+                    mf.season, mf.episode, mf.title,
+                    ph.played_at, ph.position, ph.duration
+             FROM playback_history ph
+             JOIN media m ON m.id = ph.media_id
+             LEFT JOIN media_files mf ON mf.file_path = ph.file_path
+             ORDER BY ph.played_at DESC
+             LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows: Vec<PlaybackHistoryEntry> = stmt
+            .query_map(params![limit.unwrap_or(100), offset.unwrap_or(0)], |row| {
+                Ok(PlaybackHistoryEntry {
+                    id: row.get(0)?,
+                    media_id: row.get(1)?,
+                    title: row.get(2)?,
+                    r#type: row.get(3)?,
+                    year: row.get(4)?,
+                    poster_path: row.get(5)?,
+                    season: row.get(6)?,
+                    episode: row.get(7)?,
+                    episode_title: row.get(8)?,
+                    played_at: row.get(9)?,
+                    position: row.get(10)?,
+                    duration: row.get(11)?,
+                })
+            })?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
+    }
+
+    /// Borra todo el historial de reproducción.
+    pub fn clear_playback_history(&mut self) -> RusqliteResult<()> {
+        self.conn.execute("DELETE FROM playback_history", [])?;
+        Ok(())
+    }
+}
+
+/// Entrada del historial de reproducción con los datos del medio asociado.
+#[derive(Debug, Clone)]
+pub struct PlaybackHistoryEntry {
+    pub id: i64,
+    pub media_id: i64,
+    pub title: String,
+    pub r#type: String,
+    pub year: Option<i32>,
+    pub poster_path: Option<String>,
+    /// Temporada del episodio reproducido, si corresponde.
+    pub season: Option<i32>,
+    /// Número de episodio reproducido, si corresponde.
+    pub episode: Option<i32>,
+    /// Título del episodio reproducido, si corresponde.
+    pub episode_title: Option<String>,
+    pub played_at: String,
+    pub position: f64,
+    pub duration: f64,
 }
 
 /// Datos para insertar un stream de audio o subtítulo de un archivo.

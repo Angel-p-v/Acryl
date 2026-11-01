@@ -279,7 +279,7 @@ fn record_playback_inserta_historial() {
 
     {
         let mut repo = MediaRepository::new(&mut conn);
-        repo.record_playback(media.id, 120.5, 3600.0)
+        repo.record_playback(media.id, "/media/test/video.mp4", 120.5, 3600.0)
             .expect("record playback");
     }
 

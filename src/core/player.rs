@@ -418,7 +418,7 @@ impl PlayerService {
         let mut media_repo = MediaRepository::new(&mut conn);
 
         // Registrar reproducción
-        media_repo.record_playback(media_id, 0.0, 0.0)?;
+        media_repo.record_playback(media_id, file_path, 0.0, 0.0)?;
 
         close_db(conn);
 
