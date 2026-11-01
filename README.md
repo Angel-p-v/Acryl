@@ -324,7 +324,78 @@ app-media-manager/
 ├── LICENSE                   Licencia MIT
 ├── README.md                 Este archivo
 └── Cargo.toml                Proyecto Rust único (edición 2024, rust 1.90)
+├── docker-compose.yml        Sonarr + Radarr (contenedores Docker)
+└── config.example.yaml       Configuración de ejemplo de Acryl
 ```
+
+---
+
+## 📺 Gestión de descargas con Sonarr y Radarr
+
+El repositorio incluye un [`docker-compose.yml`](./docker-compose.yml) que levanta
+Sonarr (series/anime) y Radarr (películas) en contenedores Docker. Ambos comparten
+la misma carpeta de descargas y escriben **hardlinks** a la biblioteca organizada
+de Acryl.
+
+### Estructura de carpetas en el host
+
+```
+/home/coronel/Videos/
+├── downloads/   ← Descargas entrantes (nombres sucios, ej. "Serie.S01E01.1080p")
+└── media/       ← Biblioteca organizada para Acryl (hardlinks desde downloads)
+```
+
+> ⚠️ **Importante:** `downloads` y `media` deben estar en el mismo filesystem para
+> que los hardlinks funcionen. En este entorno ambos están bajo `/home/coronel/Videos/`
+> (btrfs).
+
+### Puertos
+
+| Servicio | Puerto | URL |
+|----------|--------|-----|
+| Sonarr   | 8989   | http://localhost:8989 |
+| Radarr   | 7878   | http://localhost:7878 |
+
+### Levantar los contenedores
+
+```bash
+docker compose up -d
+```
+
+### Configuración en Sonarr y Radarr (UI web)
+
+En cada aplicación, tras el primer arranque:
+
+1. **Root folders (biblioteca):**
+   - Sonarr → `/tv` (mapeado a `/home/coronel/Videos/media`)
+   - Radarr → `/movies` (mapeado a `/home/coronel/Videos/media`)
+2. **Carpeta de descargas:** `/downloads` (mapeado a `/home/coronel/Videos/downloads`)
+3. **Hardlinks:** Habilita la opción de hardlinks en la configuración de descargas
+   de cada aplicación para que no duplique espacio en disco.
+
+Cuando Sonarr/Radarr importe un archivo desde `/downloads`, creará un hardlink en
+`/media` con el nombre limpio y la estructura organizada (serie/temporada/episodio
+o película). Acryl indexará desde `/media` y verá los nombres correctos.
+
+### Configurar Acryl para usar la biblioteca de media
+
+Copia el archivo de ejemplo y adapta las rutas si es necesario:
+
+```bash
+cp config.example.yaml ~/.config/acryl/config.yaml
+```
+
+O ejecuta Acryl directamente señalando el archivo de ejemplo:
+
+```bash
+ACRYL_CONFIG=./config.example.yaml \
+XDG_DATA_HOME=/home/coronel/.local/share/acryl \
+./target/release/acryl
+```
+
+En la clave `media_folders` del YAML está configurada la ruta
+`/home/coronel/Videos/media`. Desde Ajustes en Acryl puedes añadir o quitar
+carpetas de indexado en cualquier momento.
 
 ---
 

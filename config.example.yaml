@@ -1,0 +1,16 @@
+# Archivo de configuración de ejemplo para Acryl
+#
+# Copia este archivo a ~/.config/acryl/config.yaml (o pasa la ruta con
+# ACRYL_CONFIG) y edita las rutas según tu entorno.
+#
+# Ejemplo de uso:
+#   ACRYL_CONFIG=/home/coronel/Projects/Acryl/config.example.yaml \
+#   XDG_DATA_HOME=/home/coronel/.local/share/acryl \
+#   ./target/release/acryl
+
+db_path: /home/coronel/.local/share/acryl/acryl.db
+media_folders:
+  - /home/coronel/Videos/media
+language: es
+auto_sync_metadata: true
+default_player: mpv

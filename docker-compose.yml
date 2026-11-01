@@ -1,0 +1,54 @@
+# Docker Compose para Sonarr y Radarr junto a Acryl
+#
+# Sonarr gestiona series y anime; Radarr gestiona películas.
+# Ambos comparten la misma carpeta de descargas (/downloads) y escriben
+# hardlinks organizados en la biblioteca de Acryl (/media).
+#
+# Requisitos previos en el host:
+#   - /home/coronel/Videos/downloads  ← descargas entrantes (mal nombradas)
+#   - /home/coronel/Videos/media      ← biblioteca organizada para Acryl
+#   - Ambos directorios deben estar en el mismo filesystem para que los
+#     hardlinks funcionen (btrfs, ext4, xfs, etc.).
+#
+# Uso:
+#   docker compose up -d
+#
+# Después, accede a:
+#   - Sonarr:  http://localhost:8989
+#   - Radarr:  http://localhost:7878
+#
+# En cada aplicación configura:
+#   1. Root folders → /media (Sonarr) / /movies (Radarr)
+#   2. Download client / carpeta de descargas → /downloads
+#   3. Habilita "Hardlinks" en la configuración de descargas.
+
+services:
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Madrid
+    volumes:
+      - /home/coronel/.config/sonarr:/config
+      - /home/coronel/Videos/downloads:/downloads
+      - /home/coronel/Videos/media:/tv
+    ports:
+      - "8989:8989"
+    restart: unless-stopped
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Madrid
+    volumes:
+      - /home/coronel/.config/radarr:/config
+      - /home/coronel/Videos/downloads:/downloads
+      - /home/coronel/Videos/media:/movies
+    ports:
+      - "7878:7878"
+    restart: unless-stopped
