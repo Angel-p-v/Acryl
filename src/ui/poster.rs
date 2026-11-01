@@ -4,7 +4,7 @@
 //! - Ancho completo, altura fija (450px).
 //! - Degradado oscuro en la parte inferior para que el texto sea legible.
 //! - Título y subtítulo superpuestos a la imagen.
-//! - Si no hay banner, se dibuja un degradado con los colores dominantes del póster.
+//! - Si no hay banner, se muestra un color de fondo del tema.
 
 use crate::core::poster_service::cached_path;
 use crate::ui::theme;
@@ -25,9 +25,6 @@ const BANNER_IMAGE_MAX_HEIGHT: i32 = 1080;
 
 /// Radio de las esquinas del banner.
 const BANNER_RADIUS: f64 = 0.0; // Crunchyroll usa esquinas cuadradas en el banner hero
-
-/// Resolución para muestrar la paleta del póster.
-const PALETTE_SAMPLE_SIZE: i32 = 24;
 
 static INSTALL_POSTER_CSS: Once = Once::new();
 
@@ -191,8 +188,8 @@ impl Default for BannerPalette {
 /// Banner hero al estilo Crunchyroll.
 ///
 /// Muestra la imagen ancha (`banner_path`) a todo el ancho con un degradado
-/// oscuro en la parte inferior. Si no hay banner, dibuja un degradado a partir
-/// de los colores del póster. El título y el subtítulo se superponen.
+/// oscuro en la parte inferior. Si no hay banner, muestra un color de fondo
+/// del tema. El título y el subtítulo se superponen.
 ///
 /// En las vistas de detalle se muestra exclusivamente el banner como imagen
 /// principal; el póster vertical ya no se duplica junto al banner.
@@ -287,7 +284,7 @@ impl Banner {
         self.subtitle_label.set_visible(!subtitle.is_empty());
     }
 
-    pub fn set_images(&mut self, banner_url: Option<&str>, poster_url: Option<&str>) {
+    pub fn set_images(&mut self, banner_url: Option<&str>) {
         let banner = banner_url
             .filter(|url| !url.is_empty())
             .and_then(cached_path)
@@ -308,9 +305,13 @@ impl Banner {
                 self.picture.set_visible(true);
             }
             None => {
+                // No hay banner propio: mostrar color de fondo del tema en lugar
+                // de un degradado vacío. El póster y el banner son formatos
+                // diferentes (vertical vs horizontal) y nunca se usan como
+                // sustituto del otro.
                 self.picture.set_paintable(gtk4::gdk::Texture::NONE);
                 self.picture.set_visible(false);
-                *self.palette.borrow_mut() = poster_palette(poster_url);
+                *self.palette.borrow_mut() = BannerPalette::default();
                 self.drawing.queue_draw();
             }
         }
@@ -378,81 +379,6 @@ fn rounded_rectangle(
     cr.arc(x + radius, y + height - radius, radius, FRAC_PI_2, PI);
     cr.arc(x + radius, y + radius, radius, PI, 3.0 * FRAC_PI_2);
     cr.close_path();
-}
-
-fn poster_palette(poster_url: Option<&str>) -> BannerPalette {
-    let Some(url) = poster_url.filter(|url| !url.is_empty()) else {
-        return BannerPalette::default();
-    };
-    let Some(cache_path) = cached_path(url) else {
-        return BannerPalette::default();
-    };
-    let Ok(pixbuf) =
-        GtkPixbuf::from_file_at_scale(&cache_path, PALETTE_SAMPLE_SIZE, PALETTE_SAMPLE_SIZE, false)
-    else {
-        return BannerPalette::default();
-    };
-    let Some(base) = dominant_color(&pixbuf) else {
-        return BannerPalette::default();
-    };
-
-    BannerPalette {
-        start: mix(base, Rgb::new(1.0, 1.0, 1.0), 0.15),
-        end: mix(base, Rgb::new(0.0, 0.0, 0.0), 0.78),
-    }
-}
-
-fn dominant_color(pixbuf: &GtkPixbuf) -> Option<Rgb> {
-    let width = pixbuf.width() as usize;
-    let height = pixbuf.height() as usize;
-    let channels = pixbuf.n_channels() as usize;
-    let rowstride = pixbuf.rowstride() as usize;
-    let pixels = pixbuf.pixel_bytes()?;
-
-    let mut samples: Vec<(f64, Rgb)> = Vec::with_capacity(width * height);
-    for y in 0..height {
-        for x in 0..width {
-            let offset = y * rowstride + x * channels;
-            let Some(pixel) = pixels.get(offset..offset + 3) else {
-                continue;
-            };
-            let color = Rgb::new(
-                f64::from(pixel[0]) / 255.0,
-                f64::from(pixel[1]) / 255.0,
-                f64::from(pixel[2]) / 255.0,
-            );
-            let max = color.r.max(color.g).max(color.b);
-            let min = color.r.min(color.g).min(color.b);
-            if max < 0.08 {
-                continue;
-            }
-            let saturation = (max - min) / max;
-            let score = saturation * 0.75 + max * 0.25;
-            samples.push((score, color));
-        }
-    }
-
-    if samples.is_empty() {
-        return None;
-    }
-
-    samples.sort_by(|a, b| b.0.total_cmp(&a.0));
-    let top = &samples[..samples.len().min(16)];
-    let count = top.len() as f64;
-
-    Some(Rgb::new(
-        top.iter().map(|(_, color)| color.r).sum::<f64>() / count,
-        top.iter().map(|(_, color)| color.g).sum::<f64>() / count,
-        top.iter().map(|(_, color)| color.b).sum::<f64>() / count,
-    ))
-}
-
-fn mix(a: Rgb, b: Rgb, t: f64) -> Rgb {
-    Rgb::new(
-        a.r + (b.r - a.r) * t,
-        a.g + (b.g - a.g) * t,
-        a.b + (b.b - a.b) * t,
-    )
 }
 
 fn escape_markup(text: &str) -> String {
