@@ -1,13 +1,22 @@
 #!/usr/bin/env bash
 #
-# scripts/acryl-doctor-gfx — Diagnóstico gráfico de Acryl (Wayland / Hyprland / X11)
+# scripts/acryl-display — Comprobación de gráficos y pantalla de Acryl
 #
-# Prueba el binario de Acryl con diferentes configuraciones de entorno gráfico
-# para identificar problemas de renderizado en Wayland, Hyprland o X11.
+# Responde a: "¿Por qué Acryl no se ve / muestra pantalla en blanco?"
+# Comprueba de forma completa:
+#   1. El entorno gráfico detectado (Wayland / Hyprland / X11)
+#   2. El ejecutable con diferentes backends GTK
+#   3. Diferentes configuraciones de WebKit/GPU
+#   4. Variables de entorno relevantes para gráficos
+#   5. Recomendaciones concretas para cada caso
+#
+# Úsalo cuando Acryl se abre pero no muestra nada, la ventana está en blanco,
+# o hay problemas de renderizado en Wayland / Hyprland.
 #
 # Uso:
-#   ./scripts/acryl-doctor-gfx                 # usa el binario por defecto
-#   ./scripts/acryl-doctor-gfx --bin /ruta/a/acryl
+#   ./scripts/acryl-display                 # rutas por defecto (usuario)
+#   ./scripts/acryl-display --bin /ruta/a/acryl
+#   ./scripts/acryl-display --help
 #
 set -euo pipefail
 
@@ -20,6 +29,7 @@ BIN_PATHS=(
   "/usr/local/bin/$APP_NAME"
   "/usr/bin/$APP_NAME"
 )
+
 BIN_ARG=""
 
 info()  { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
@@ -32,6 +42,8 @@ have() { command -v "$1" >/dev/null 2>&1; }
 usage() {
     cat <<EOF
 Uso: $0 [opciones]
+
+Comprueba el entorno gráfico y de renderizado de Acryl.
 
 Opciones:
   --bin RUTA   Ruta al ejecutable de Acryl (por defecto: busca en rutas habituales)
@@ -58,10 +70,13 @@ done
 # Cabecera
 ###############################################################################
 echo "============================================================"
-echo "  Acryl Doctor GFX — Diagnóstico gráfico (Wayland/Hyprland/X11)"
+echo "  Acryl Display — Diagnóstico de gráficos y pantalla"
 echo "============================================================"
 echo
 
+###############################################################################
+# 1. Entorno gráfico
+###############################################################################
 info "1. Entorno gráfico detectado"
 echo "  DISPLAY=${DISPLAY:-no definida}"
 echo "  WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-no definida}"
@@ -75,7 +90,7 @@ echo
 ###############################################################################
 # 2. Ejecutable
 ###############################################################################
-info "2. Buscando el ejecutable de Acryl..."
+info "2. Buscando el ejecutable de Acryl"
 FOUND_BIN=""
 if [[ -n "$BIN_ARG" ]]; then
     if [[ -f "$BIN_ARG" && -x "$BIN_ARG" ]]; then
@@ -99,15 +114,17 @@ else
         for path in "${BIN_PATHS[@]}"; do
             echo "    - $path"
         done
+        echo
+        echo "  Solución: instala Acryl con ./scripts/install.sh"
         exit 1
     fi
 fi
 echo
 
 ###############################################################################
-# 3. Pruebas de ejecución con diferentes backends
+# 3. Pruebas de ejecución con diferentes configuraciones gráficas
 ###############################################################################
-info "3. Probando ejecución con diferentes configuraciones..."
+info "3. Probando ejecución con diferentes configuraciones gráficas"
 
 run_test() {
     local label="$1"
@@ -121,10 +138,10 @@ run_test() {
     echo
 }
 
-run_test "Prueba 1: GDK_BACKEND=x11 (forzar X11)" GDK_BACKEND=x11
-run_test "Prueba 2: WebKit sin DMABUF renderer" GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1
-run_test "Prueba 3: Renderizado de software OpenGL" LIBGL_ALWAYS_SOFTWARE=1 GDK_BACKEND=x11
-run_test "Prueba 4: Combinación completa (X11 + software + sin DMABUF)" GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1
+run_test "Prueba 1: GDK_BACKEND=x11 (forzar X11 sobre Wayland)" GDK_BACKEND=x11
+run_test "Prueba 2: WebKit sin renderizado DMABUF" GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1
+run_test "Prueba 3: Renderizado OpenGL por software" LIBGL_ALWAYS_SOFTWARE=1 GDK_BACKEND=x11
+run_test "Prueba 4: Combinación completa (X11 + software + sin DMABUF + sin composición)" GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1
 
 ###############################################################################
 # 4. Recomendaciones
@@ -135,22 +152,22 @@ echo "============================================================"
 echo
 echo "Si ninguna prueba mostró la ventana de Acryl, prueba en este orden:"
 echo
-echo "1. Instalar XWayland (permite ejecutar apps X11 sobre Wayland):"
-echo "   sudo pacman -S xorg-xwayland        # Arch"
-echo "   sudo apt install xserver-xorg-core  # Debian/Ubuntu"
+echo "1. Instalar XWayland (ejecutar apps X11 sobre Wayland):"
+echo "   Arch:       sudo pacman -S xorg-xwayland"
+echo "   Debian/Ub:  sudo apt install xserver-xorg-core"
 echo
 echo "2. Usar sesión X11 en lugar de Wayland:"
 echo "   Cierra sesión y selecciona 'X11' o 'Xorg' en el gestor de inicio"
 echo "   (GDM, SDDM, LightDM), luego ejecuta:"
 echo "       GDK_BACKEND=x11 ~/.local/bin/acryl"
 echo
-echo "3. Variables de entorno adicionales (exportar antes de lanzar):"
+echo "3. Variables de entorno (exportar antes de lanzar):"
+echo "   export GDK_BACKEND=x11"
 echo "   export WEBKIT_DISABLE_DMABUF_RENDERER=1"
 echo "   export WEBKIT_DISABLE_COMPOSITING_MODE=1"
 echo "   export LIBGL_ALWAYS_SOFTWARE=1"
-echo "   export GDK_BACKEND=x11"
 echo "   ~/.local/bin/acryl"
 echo
-echo "El problema suele ser el entorno gráfico (Wayland), no la aplicación."
-echo "No es necesario reinstalar nada."
+echo "El problema suele ser el entorno gráfico (Wayland / Hyprland), no la"
+echo "aplicación. No es necesario reinstalar nada."
 echo
