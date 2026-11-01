@@ -72,7 +72,8 @@ pub fn install_poster_css() {
              .hero-action-btn.secondary:hover {{ border-color: {}; background-color: {}; }}\n\
              .season-dropdown {{ min-width: 180px; }}\n\
              .rating-stars {{ color: {}; }}\n\
-             .rating-stars .filled {{ color: {}; }}\n",
+             .rating-stars .filled {{ color: {}; }}\n\
+             .thumbnail-placeholder {{ background-color: {}; border: 1px dashed {}; border-radius: {}; }}\n",
             theme::colors::CARD, theme::colors::BORDER, theme::radius::LARGE, theme::transition::NORMAL,
             theme::colors::SURFACE, theme::colors::BORDER_HOVER,
             theme::colors::SURFACE, theme::colors::ACCENT,
@@ -109,6 +110,7 @@ pub fn install_poster_css() {
             theme::colors::BORDER_HOVER, theme::colors::CARD,
             theme::colors::TEXT_MUTED,
             theme::colors::ACCENT,
+            theme::colors::SURFACE, theme::colors::BORDER, theme::radius::SMALL,
         );
         provider.load_from_data(&css);
 

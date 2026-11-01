@@ -8,7 +8,7 @@
 #![allow(deprecated)]
 
 use crate::core::metadata::ImageOption;
-use crate::core::poster_service::cached_path;
+use crate::core::poster_service::{PosterService, cached_path};
 use crate::ui::poster::poster_picture;
 use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
@@ -43,6 +43,10 @@ pub struct PosterSelector {
 impl PosterSelector {
     /// Crea el diálogo con las opciones de póster y banner disponibles.
     ///
+    /// Antes de construir las miniaturas, intenta descargar las imágenes que
+    /// aún no están en caché para que el usuario vea una vista previa real en
+    /// lugar de un marcador genérico.
+    ///
     /// - `poster_options`: opciones de póster desde la API (puede estar vacío).
     /// - `banner_options`: opciones de banner desde la API (puede estar vacío).
     /// - `current_poster`: URL del póster actualmente asignado (si existe).
@@ -64,6 +68,25 @@ impl PosterSelector {
         let selected_banner = Rc::new(RefCell::new(None));
         let remove_poster = Rc::new(Cell::new(false));
         let remove_banner = Rc::new(Cell::new(false));
+
+        // ---------- Descargar imágenes faltantes para poder mostrarlas ----------
+        // Se descargan todas las opciones que no están en caché para que el
+        // usuario vea la vista previa real de cada una al abrir el diálogo.
+        let runtime = tokio::runtime::Runtime::new().ok();
+
+        if let Some(rt) = &runtime {
+            let service = PosterService::new();
+            let all_urls: Vec<String> = poster_options
+                .iter()
+                .chain(banner_options.iter())
+                .map(|o| o.url.clone())
+                .collect();
+            for url in all_urls {
+                if cached_path(&url).is_none() {
+                    let _ = rt.block_on(service.download_async(&url));
+                }
+            }
+        }
 
         let content = dialog.content_area();
         content.set_orientation(Orientation::Vertical);
@@ -269,7 +292,7 @@ fn thumbnail_button_image(opt: &ImageOption) -> Button {
     box_.set_halign(Align::Center);
     box_.set_valign(Align::Center);
 
-    // Intentar mostrar la miniatura descargada o un placeholder.
+    // Mostrar la miniatura descargada o un placeholder neutro.
     if let Some(cache_path) = cached_path(&opt.url) {
         if let Ok(pixbuf) = GtkPixbuf::from_file_at_scale(&cache_path, THUMB_SIZE, THUMB_SIZE, true)
         {
@@ -323,12 +346,15 @@ fn thumbnail_button_remove(text: &str) -> Button {
     btn
 }
 
-/// Añade un placeholder con un icono genérico a un contenedor existente.
+/// Añade un placeholder neutro (sin icono de interrogación) cuando no se
+/// puede mostrar la imagen. Solo muestra un rectángulo con el texto.
 fn placeholder_thumbnail(container: &Box, text: &str) {
-    let icon = Image::from_icon_name("image-missing-symbolic");
-    icon.set_pixel_size(48);
-    icon.set_halign(Align::Center);
-    container.append(&icon);
+    let rect = Box::new(Orientation::Vertical, 0);
+    rect.set_size_request(THUMB_SIZE, THUMB_SIZE);
+    rect.set_halign(Align::Center);
+    rect.set_valign(Align::Center);
+    rect.add_css_class("thumbnail-placeholder");
+    container.append(&rect);
 
     let lbl = Label::new(Some(text));
     lbl.set_halign(Align::Center);

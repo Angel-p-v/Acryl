@@ -122,11 +122,6 @@ impl MediaDetails {
         tracks_button.set_tooltip_text(Some(&t("tooltip.tracks")));
         buttons_box.append(&tracks_button);
 
-        let choose_images_button = Button::with_label(&t("button.choose_images"));
-        choose_images_button.add_css_class("flat-button");
-        choose_images_button.set_tooltip_text(Some(&t("tooltip.choose_images")));
-        buttons_box.append(&choose_images_button);
-
         let play_button = Button::with_label(&t("button.play"));
         play_button.add_css_class("hero-action-btn");
         play_button.add_css_class("primary");
@@ -138,6 +133,16 @@ impl MediaDetails {
         vote_label.set_margin_start(16);
         vote_label.add_css_class("vote-average");
         buttons_box.append(&vote_label);
+
+        // Spacer para empujar el botón de elegir imágenes a la derecha del todo.
+        let spacer = Box::new(Orientation::Horizontal, 0);
+        spacer.set_hexpand(true);
+        buttons_box.append(&spacer);
+
+        let choose_images_button = Button::with_label(&t("button.choose_images"));
+        choose_images_button.add_css_class("flat-button");
+        choose_images_button.set_tooltip_text(Some(&t("tooltip.choose_images")));
+        buttons_box.append(&choose_images_button);
 
         let season_dropdown_model = gtk4::StringList::new(&[]);
         let season_dropdown = gtk4::DropDown::builder()
