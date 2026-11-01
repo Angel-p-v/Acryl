@@ -19,6 +19,9 @@ pub struct MediaFile {
     pub streams_indexed_at: Option<String>,
     /// Ruta de la imagen específica de este episodio (thumbnail), si existe.
     pub episode_image_path: Option<String>,
+    /// Momento en que se intentó obtener el thumbnail del episodio. Evita
+    /// repetir peticiones cuando la fuente no ofrece imagen.
+    pub episode_image_checked_at: Option<String>,
 }
 
 /// Preferencia de pistas de audio y subtítulos de un archivo.
@@ -84,7 +87,21 @@ impl<'a> FileRepository<'a> {
                    file_path = excluded.file_path,
                    size_bytes = excluded.size_bytes,
                    mtime_ms = excluded.mtime_ms,
-                   indexed_at = datetime('now')",
+                   indexed_at = datetime('now'),
+                   episode_image_path = CASE
+                     WHEN media_files.media_id = excluded.media_id
+                      AND media_files.season IS excluded.season
+                      AND media_files.episode IS excluded.episode
+                     THEN media_files.episode_image_path
+                     ELSE NULL
+                   END,
+                   episode_image_checked_at = CASE
+                     WHEN media_files.media_id = excluded.media_id
+                      AND media_files.season IS excluded.season
+                      AND media_files.episode IS excluded.episode
+                     THEN media_files.episode_image_checked_at
+                     ELSE NULL
+                   END",
                 params![
                     file.media_id,
                     file.season,
@@ -104,7 +121,7 @@ impl<'a> FileRepository<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT id, media_id, season, episode, title, file_path, size_bytes, mtime_ms,
                     indexed_at, audio_stream_index, subtitle_stream_index, subtitles_disabled,
-                    streams_indexed_at, episode_image_path
+                    streams_indexed_at, episode_image_path, episode_image_checked_at
              FROM media_files WHERE media_id = ?1 ORDER BY season, episode, file_path",
         )?;
         let rows: Vec<MediaFile> = stmt
@@ -189,6 +206,51 @@ impl<'a> FileRepository<'a> {
             .collect();
         Ok(rows)
     }
+
+    /// Lista todos los archivos de un show, incluidos los de sus temporadas
+    /// hijas. Se usa para asociar thumbnails de episodios sin mezclar medios.
+    pub fn list_by_show(&mut self, root_media_id: i64) -> RusqliteResult<Vec<MediaFile>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, media_id, season, episode, title, file_path, size_bytes, mtime_ms,
+                    indexed_at, audio_stream_index, subtitle_stream_index, subtitles_disabled,
+                    streams_indexed_at, episode_image_path, episode_image_checked_at
+             FROM media_files
+             WHERE media_id = ?1 OR media_id IN (
+                 SELECT id FROM media WHERE parent_id = ?1
+             )
+             ORDER BY season, episode, file_path",
+        )?;
+        let rows: Vec<MediaFile> = stmt
+            .query_map(params![root_media_id], map_file_row)?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
+    }
+
+    /// Guarda la URL de la imagen de un episodio y marca la comprobación como
+    /// realizada. La UI resuelve la URL a la caché local con `cached_path`.
+    pub fn set_episode_image(
+        &mut self,
+        file_path: &str,
+        episode_image_url: &str,
+    ) -> RusqliteResult<usize> {
+        self.conn.execute(
+            "UPDATE media_files
+             SET episode_image_path = ?2, episode_image_checked_at = datetime('now')
+             WHERE file_path = ?1",
+            params![file_path, episode_image_url],
+        )
+    }
+
+    /// Marca que ya se intentó obtener el thumbnail de un episodio aunque la
+    /// fuente no ofreciera ninguna imagen.
+    pub fn mark_episode_image_checked(&mut self, file_path: &str) -> RusqliteResult<usize> {
+        self.conn.execute(
+            "UPDATE media_files SET episode_image_checked_at = datetime('now')
+             WHERE file_path = ?1",
+            params![file_path],
+        )
+    }
 }
 
 fn map_file_row(row: &rusqlite::Row<'_>) -> RusqliteResult<MediaFile> {
@@ -207,6 +269,7 @@ fn map_file_row(row: &rusqlite::Row<'_>) -> RusqliteResult<MediaFile> {
         subtitles_disabled: row.get::<_, i64>(11)? != 0,
         streams_indexed_at: row.get(12)?,
         episode_image_path: row.get(13)?,
+        episode_image_checked_at: row.get(14)?,
     })
 }
 

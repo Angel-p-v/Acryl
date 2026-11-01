@@ -5,10 +5,12 @@
 //! se delega en `PosterService`, que mantiene una caché local.
 
 use crate::core::poster_service::{PosterService, is_cached};
+use crate::db::file_repo::{FileRepository, MediaFile};
 use crate::db::media_repo::ListMediaOptions;
 use crate::db::{MediaRepository, close_db, open_db};
 use reqwest::Client;
 use serde_json::Value;
+use std::path::Path;
 use std::time::Duration;
 
 const TVMAZE_TIMEOUT_SECS: u64 = 20;
@@ -43,6 +45,14 @@ struct SyncOutcome {
     metadata: SyncMetadataResult,
     poster_failed: bool,
     banner_failed: bool,
+}
+
+/// Episodio tal y como lo devuelve TVmaze, con su imagen individual.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TvmazeEpisode {
+    pub season: Option<i32>,
+    pub number: Option<i32>,
+    pub image_url: Option<String>,
 }
 
 /// Servicio de metadatos: sincroniza con TVmaze.
@@ -208,12 +218,24 @@ impl MetadataService {
                 );
             }
 
+            // Guardar el identificador del show para pedir sus episodios sin
+            // repetir la búsqueda por título.
+            if let Some(show_id) = fetched.show_id
+                && let Err(error) =
+                    media_repo.set_metadata_source_id(media_id, Some(show_id as i64))
+            {
+                eprintln!(
+                    "No se pudo guardar el origen de metadatos de '{}': {}",
+                    media.title, error
+                );
+            }
+
             // Extraer, normalizar y asociar categorías (géneros) al medio,
             // evitando duplicados. Un medio sin categorías es válido.
             if !fetched.genres.is_empty() {
                 let mut category_ids = Vec::new();
                 for genre in &fetched.genres {
-                    if let Ok(category_id) = media_repo.get_or_create_category(genre) {
+                    if let Ok(Some(category_id)) = media_repo.get_or_create_category(genre) {
                         category_ids.push(category_id);
                     }
                 }
@@ -223,6 +245,15 @@ impl MetadataService {
                         media.title, error
                     );
                 }
+            }
+
+            // Marcar la comprobación de categorías aunque la fuente no las
+            // ofrezca, para no repetir la petición en cada arranque.
+            if let Err(error) = media_repo.mark_categories_fetched(media_id) {
+                eprintln!(
+                    "No se pudo marcar la extracción de categorías de '{}': {}",
+                    media.title, error
+                );
             }
             close_db(conn);
         }
@@ -246,10 +277,17 @@ impl MetadataService {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
+        let client = TvmazeClient::new();
 
         let mut changed = 0usize;
         for item in media {
-            if item.metadata_fetched_at.is_none() {
+            let needs_metadata = item.metadata_fetched_at.is_none();
+            let needs_categories = item.categories_fetched_at.is_none();
+
+            // Se consulta la fuente si faltan metadatos o si la biblioteca es
+            // anterior a las categorías. Así se rellenan géneros existentes
+            // sin repetir la petición en cada arranque.
+            if needs_metadata || needs_categories {
                 match runtime.block_on(Self::sync_metadata(db_path, item.id)) {
                     Ok(_) => changed += 1,
                     Err(error) => eprintln!(
@@ -257,7 +295,6 @@ impl MetadataService {
                         item.title, error
                     ),
                 }
-                continue;
             }
 
             if let Some(poster_url) = item.poster_path.as_deref().filter(|url| !url.is_empty())
@@ -283,9 +320,92 @@ impl MetadataService {
                     ),
                 }
             }
+
+            match runtime.block_on(Self::sync_episode_images(db_path, item.id, &client)) {
+                Ok(updated) => changed += updated,
+                Err(error) => eprintln!(
+                    "No se pudieron obtener imágenes de episodios de '{}': {}",
+                    item.title, error
+                ),
+            }
         }
 
         Ok(changed)
+    }
+
+    /// Obtiene y cachea la imagen individual de cada episodio del show.
+    ///
+    /// Solo consulta la fuente si hay archivos pendientes. Un episodio sin
+    /// imagen en TVmaze se marca como comprobado y la UI usa el fallback.
+    async fn sync_episode_images(
+        db_path: &str,
+        media_id: i64,
+        client: &TvmazeClient,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        let (show_id, files) = {
+            let mut conn = open_db(db_path)?;
+            let mut media_repo = MediaRepository::new(&mut conn);
+            let media = media_repo
+                .find_by_id(media_id)?
+                .ok_or_else(|| format!("medio no encontrado: id={}", media_id))?;
+            let files = media_repo.list_files_for_show(media_id)?;
+            close_db(conn);
+            (media.metadata_source_id, files)
+        };
+
+        let Some(show_id) = show_id else {
+            return Ok(0);
+        };
+        let pending: Vec<_> = files
+            .iter()
+            .filter(|file| file.episode_image_checked_at.is_none())
+            .collect();
+        if pending.is_empty() {
+            return Ok(0);
+        }
+
+        let Some(episodes) = fetch_tvmaze_episodes(show_id as u64, client).await else {
+            return Ok(0);
+        };
+
+        let poster_service = PosterService::new();
+        let mut updated = 0usize;
+
+        for file in pending {
+            let Some((season, episode)) = episode_position(file) else {
+                mark_episode_checked(db_path, &file.file_path)?;
+                continue;
+            };
+            let Some(image_url) = find_episode_image(&episodes, season, episode) else {
+                mark_episode_checked(db_path, &file.file_path)?;
+                continue;
+            };
+
+            match poster_service.download_async(&image_url).await {
+                Ok(_) => {
+                    let mut conn = open_db(db_path)?;
+                    let mut media_repo = MediaRepository::new(&mut conn);
+                    if let Err(error) = media_repo.set_episode_image(&file.file_path, &image_url) {
+                        eprintln!(
+                            "No se pudo guardar la imagen de '{}': {}",
+                            file.file_path, error
+                        );
+                    } else {
+                        updated += 1;
+                    }
+                    close_db(conn);
+                }
+                Err(error) => {
+                    // Sin marcar: se reintenta en la próxima sincronización.
+                    eprintln!(
+                        "No se pudo descargar la imagen del episodio '{}': {}",
+                        file.file_path, error
+                    );
+                }
+            }
+        }
+
+        Ok(updated)
     }
 
     /// Vuelve a consultar TVmaze y sobrescribe título, año, sinopsis y póster
@@ -299,6 +419,7 @@ impl MetadataService {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
+        let client = TvmazeClient::new();
 
         let mut result = RefreshMetadataResult {
             total: media.len(),
@@ -323,6 +444,15 @@ impl MetadataService {
                         item.title, error
                     );
                 }
+            }
+
+            if let Err(error) =
+                runtime.block_on(Self::sync_episode_images(db_path, item.id, &client))
+            {
+                eprintln!(
+                    "No se pudieron actualizar las imágenes de episodios de '{}': {}",
+                    item.title, error
+                );
             }
         }
 
@@ -376,22 +506,68 @@ pub async fn sync_metadata(
     title: &str,
     client: &TvmazeClient,
 ) -> Result<SyncMetadataResult, Box<dyn std::error::Error>> {
-    let url = format!(
-        "https://api.tvmaze.com/search/shows?q={}",
-        urlencoding::encode(title)
-    );
-    let response: Value = client
-        .client
-        .get(&url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let mut metadata = SyncMetadataResult::default();
 
-    let mut metadata = parse_search_response(&response);
+    for candidate in search_candidates(media_type, title) {
+        let url = format!(
+            "https://api.tvmaze.com/search/shows?q={}",
+            urlencoding::encode(&candidate)
+        );
+        let response: Value = client
+            .client
+            .get(&url)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let parsed = parse_search_response(&response);
+        if parsed.title.is_some() {
+            metadata = parsed;
+            break;
+        }
+    }
+
     metadata.banner_path = fetch_banner_url(media_type, title, metadata.show_id, client).await;
     Ok(metadata)
+}
+
+/// Genera variantes de búsqueda razonables para títulos de películas que
+/// incluyen sufijos comerciales (`The Movie`, `Movie`, `Film`, ...). TVmaze no
+/// indexa esos sufijos como parte del título del show.
+fn search_candidates(media_type: &str, title: &str) -> Vec<String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Vec::new();
+    }
+
+    let mut candidates = vec![title.to_string()];
+    if media_type != "movie" {
+        return candidates;
+    }
+
+    let lower = title.to_lowercase();
+    for suffix in [
+        " the movie",
+        " movie",
+        " film",
+        " la pelicula",
+        " la película",
+        " pelicula",
+        " película",
+    ] {
+        if let Some(stripped) = lower.strip_suffix(suffix)
+            && let Some(original) = title.get(..stripped.len())
+        {
+            let candidate = original.trim().to_string();
+            if !candidate.is_empty() && !candidates.contains(&candidate) {
+                candidates.push(candidate);
+            }
+        }
+    }
+
+    candidates
 }
 
 /// Busca una imagen ancha para el banner del medio.
@@ -479,6 +655,102 @@ async fn fetch_tvmaze_banner(show_id: u64, client: &TvmazeClient) -> Option<Stri
         .ok()?;
 
     parse_tvmaze_banner(&response)
+}
+
+/// Obtiene la lista de episodios de un show con sus imágenes individuales.
+async fn fetch_tvmaze_episodes(show_id: u64, client: &TvmazeClient) -> Option<Vec<TvmazeEpisode>> {
+    let url = format!("https://api.tvmaze.com/shows/{}/episodes", show_id);
+
+    let response = client
+        .client
+        .get(&url)
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json::<Value>()
+        .await
+        .ok()?;
+
+    Some(parse_tvmaze_episodes(&response))
+}
+
+fn parse_tvmaze_episodes(response: &Value) -> Vec<TvmazeEpisode> {
+    let Some(episodes) = response.as_array() else {
+        return Vec::new();
+    };
+
+    episodes
+        .iter()
+        .map(|episode| {
+            let season = episode
+                .get("season")
+                .and_then(Value::as_i64)
+                .and_then(|value| i32::try_from(value).ok());
+            let number = episode
+                .get("number")
+                .and_then(Value::as_i64)
+                .and_then(|value| i32::try_from(value).ok());
+            let image_url = episode
+                .get("image")
+                .and_then(|image| image.get("medium").or_else(|| image.get("original")))
+                .and_then(Value::as_str)
+                .filter(|url| !url.is_empty())
+                .map(str::to_string);
+
+            TvmazeEpisode {
+                season,
+                number,
+                image_url,
+            }
+        })
+        .collect()
+}
+
+/// Devuelve la imagen del episodio que coincide exactamente en temporada y
+/// número. No se reutiliza el póster de la serie ni se inventa una imagen.
+fn find_episode_image(episodes: &[TvmazeEpisode], season: i32, episode: i32) -> Option<String> {
+    episodes
+        .iter()
+        .find(|candidate| candidate.season == Some(season) && candidate.number == Some(episode))
+        .and_then(|candidate| candidate.image_url.clone())
+}
+
+/// Deduce la temporada y el episodio de un archivo a partir de su título o de
+/// su ruta. Si no hay marca reconocible, usa los valores guardados al indexar.
+fn episode_position(file: &MediaFile) -> Option<(i32, i32)> {
+    let from_title = file
+        .title
+        .as_deref()
+        .and_then(crate::core::library::parse_season_episode);
+    if from_title.is_some() {
+        return from_title;
+    }
+
+    let from_path = Path::new(&file.file_path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .and_then(crate::core::library::parse_season_episode);
+    if from_path.is_some() {
+        return from_path;
+    }
+
+    match (file.season, file.episode) {
+        (Some(season), Some(episode)) => Some((season, episode)),
+        _ => None,
+    }
+}
+
+fn mark_episode_checked(
+    db_path: &str,
+    file_path: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut conn = open_db(db_path)?;
+    let mut repo = FileRepository::new(&mut conn);
+    repo.mark_episode_image_checked(file_path)?;
+    close_db(conn);
+    Ok(())
 }
 
 fn parse_search_response(response: &Value) -> SyncMetadataResult {
@@ -734,6 +1006,97 @@ mod tests {
             parse_search_response(&json!({"error": "sin resultados"})),
             SyncMetadataResult::default()
         );
+    }
+
+    fn media_file(
+        season: Option<i32>,
+        episode: Option<i32>,
+        title: Option<&str>,
+        file_path: &str,
+    ) -> MediaFile {
+        MediaFile {
+            id: 1,
+            media_id: 1,
+            season,
+            episode,
+            title: title.map(str::to_string),
+            file_path: file_path.to_string(),
+            size_bytes: None,
+            mtime_ms: None,
+            indexed_at: String::new(),
+            audio_stream_index: None,
+            subtitle_stream_index: None,
+            subtitles_disabled: false,
+            streams_indexed_at: None,
+            episode_image_path: None,
+            episode_image_checked_at: None,
+        }
+    }
+
+    #[test]
+    fn parse_tvmaze_episodes_extrae_temporada_numero_e_imagen() {
+        let response = json!([
+            {
+                "season": 1,
+                "number": 2,
+                "image": {"medium": "https://example.com/ep1x2.jpg"}
+            },
+            {
+                "season": 2,
+                "number": 1,
+                "image": {"original": "https://example.com/ep2x1.jpg"}
+            },
+            {"season": 2, "number": 2, "image": null}
+        ]);
+
+        let episodes = parse_tvmaze_episodes(&response);
+        assert_eq!(episodes.len(), 3);
+        assert_eq!(
+            episodes[0].image_url.as_deref(),
+            Some("https://example.com/ep1x2.jpg")
+        );
+        assert_eq!(episodes[1].season, Some(2));
+        assert_eq!(
+            episodes[1].image_url.as_deref(),
+            Some("https://example.com/ep2x1.jpg")
+        );
+        assert!(episodes[2].image_url.is_none());
+        assert!(parse_tvmaze_episodes(&json!({"error": "x"})).is_empty());
+    }
+
+    #[test]
+    fn find_episode_image_exige_temporada_y_episodio_exactos() {
+        let episodes = parse_tvmaze_episodes(&json!([
+            {
+                "season": 1,
+                "number": 2,
+                "image": {"medium": "https://example.com/ep1x2.jpg"}
+            },
+            {"season": 1, "number": 3, "image": null}
+        ]));
+
+        assert_eq!(
+            find_episode_image(&episodes, 1, 2).as_deref(),
+            Some("https://example.com/ep1x2.jpg")
+        );
+        assert_eq!(find_episode_image(&episodes, 1, 3), None);
+        assert_eq!(find_episode_image(&episodes, 2, 2), None);
+        assert_eq!(find_episode_image(&episodes, 1, 99), None);
+    }
+
+    #[test]
+    fn episode_position_prioriza_titulo_y_ruta_sobre_los_campos() {
+        let from_title = media_file(Some(9), Some(9), Some("Show.S01E02"), "/tmp/Show.mkv");
+        assert_eq!(episode_position(&from_title), Some((1, 2)));
+
+        let from_path = media_file(None, None, None, "/tmp/Show.2x05.mkv");
+        assert_eq!(episode_position(&from_path), Some((2, 5)));
+
+        let from_fields = media_file(Some(3), Some(7), Some("Sin marca"), "/tmp/otro.mkv");
+        assert_eq!(episode_position(&from_fields), Some((3, 7)));
+
+        let unknown = media_file(None, None, Some("Especial"), "/tmp/especial.mkv");
+        assert_eq!(episode_position(&unknown), None);
     }
 
     #[test]

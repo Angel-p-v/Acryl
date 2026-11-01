@@ -23,6 +23,10 @@ pub struct Media {
     pub rating: i32,
     /// Puntuación obtenida de los metadatos (vote_average de TVmaze, 0-10).
     pub vote_average: Option<f64>,
+    /// Identificador del show en TVmaze, usado para pedir episodios e imágenes.
+    pub metadata_source_id: Option<i64>,
+    /// Momento en que se intentó extraer categorías de los metadatos.
+    pub categories_fetched_at: Option<String>,
     /// Categorías asociadas al medio (cargadas por separado con `load_categories`).
     #[serde(skip)]
     pub categories: Vec<String>,
@@ -126,7 +130,8 @@ impl<'a> MediaRepository<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
-                    metadata_fetched_at, parent_id, rating, vote_average
+                    metadata_fetched_at, parent_id, rating, vote_average,
+                    metadata_source_id, categories_fetched_at
              FROM media WHERE id = ?1",
         )?;
         let row = stmt.query_row(params![id], map_media_row);
@@ -234,7 +239,8 @@ impl<'a> MediaRepository<'a> {
         let mut sql = String::from(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
-                    metadata_fetched_at, parent_id, rating, vote_average
+                    metadata_fetched_at, parent_id, rating, vote_average,
+                    metadata_source_id, categories_fetched_at
              FROM media",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -292,7 +298,8 @@ impl<'a> MediaRepository<'a> {
                 "SELECT m.id, m.type, m.title, m.sort_title, m.year, m.folder_path,
                         m.created_at, m.updated_at,
                         m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
-                        m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average
+                        m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average,
+                        m.metadata_source_id, m.categories_fetched_at
                  FROM media m
                  JOIN media_fts f ON f.rowid = m.id
                  WHERE media_fts MATCH ?1 AND m.parent_id IS NULL",
@@ -323,7 +330,8 @@ impl<'a> MediaRepository<'a> {
                 "SELECT m.id, m.type, m.title, m.sort_title, m.year, m.folder_path,
                         m.created_at, m.updated_at,
                         m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
-                        m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average
+                        m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average,
+                        m.metadata_source_id, m.categories_fetched_at
                  FROM media m
                  WHERE m.sort_title LIKE ?1 ESCAPE '\\' AND m.parent_id IS NULL",
             );
@@ -381,7 +389,8 @@ impl<'a> MediaRepository<'a> {
         let sql = String::from(
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
-                    metadata_fetched_at, parent_id, rating, vote_average
+                    metadata_fetched_at, parent_id, rating, vote_average,
+                    metadata_source_id, categories_fetched_at
              FROM media WHERE parent_id = ?1 ORDER BY sort_title ASC",
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -403,20 +412,28 @@ pub struct Category {
     pub id: i64,
     pub name: String,
     pub slug: String,
+    /// Número de medios asociados; se rellena en `list_categories`.
+    pub media_count: i64,
 }
 
 impl<'a> MediaRepository<'a> {
-    /// Lista todas las categorías disponibles ordenadas por nombre.
+    /// Lista todas las categorías disponibles ordenadas por nombre, con el
+    /// número de medios asociados a cada una.
     pub fn list_categories(&mut self) -> RusqliteResult<Vec<Category>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, name, slug FROM categories ORDER BY name ASC")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id, c.name, c.slug, COUNT(mc.media_id)
+             FROM categories c
+             LEFT JOIN media_categories mc ON mc.category_id = c.id
+             GROUP BY c.id, c.name, c.slug
+             ORDER BY c.name ASC",
+        )?;
         let rows: Vec<Category> = stmt
             .query_map([], |row| {
                 Ok(Category {
                     id: row.get(0)?,
                     name: row.get(1)?,
                     slug: row.get(2)?,
+                    media_count: row.get(3)?,
                 })
             })?
             .filter_map(Result::ok)
@@ -426,23 +443,37 @@ impl<'a> MediaRepository<'a> {
 
     /// Crea (si no existe) y devuelve el identificador de una categoría,
     /// normalizando el nombre y generando un slug único.
-    pub fn get_or_create_category(&mut self, name: &str) -> RusqliteResult<i64> {
-        let slug = slugify(name);
-        // Intenta insertar; si el slug ya existe, devuelve su id.
-        let insert = self.conn.execute(
+    ///
+    /// Devuelve `None` cuando el nombre está vacío después de normalizarlo:
+    /// no se inventan categorías para metadatos ausentes.
+    pub fn get_or_create_category(&mut self, name: &str) -> RusqliteResult<Option<i64>> {
+        let Some(name) = normalize_category_name(name) else {
+            return Ok(None);
+        };
+        let slug = slugify(&name);
+
+        // Si el slug ya existe se reutiliza la categoría, aunque el nombre
+        // difiera en mayúsculas, tildes o separadores.
+        let existing = {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT id FROM categories WHERE slug = ?1")?;
+            let row = stmt.query_row(params![slug], |row| row.get::<_, i64>(0));
+            match row {
+                Ok(id) => Some(id),
+                Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                Err(error) => return Err(error),
+            }
+        };
+        if let Some(id) = existing {
+            return Ok(Some(id));
+        }
+
+        self.conn.execute(
             "INSERT INTO categories (name, slug) VALUES (?1, ?2)",
             params![name, slug],
-        );
-        match insert {
-            Ok(_) => Ok(self.conn.last_insert_rowid()),
-            Err(rusqlite::Error::SqliteFailure(_, _)) => {
-                let mut stmt = self
-                    .conn
-                    .prepare("SELECT id FROM categories WHERE slug = ?1")?;
-                stmt.query_row(params![slug], |row| row.get(0))
-            }
-            Err(e) => Err(e),
-        }
+        )?;
+        Ok(Some(self.conn.last_insert_rowid()))
     }
 
     /// Asocia un medio con un conjunto de categorías, reemplazando las
@@ -491,7 +522,8 @@ impl<'a> MediaRepository<'a> {
             "SELECT m.id, m.type, m.title, m.sort_title, m.year, m.folder_path,
                         m.created_at, m.updated_at,
                         m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
-                        m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average
+                        m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average,
+                        m.metadata_source_id, m.categories_fetched_at
              FROM media m
              JOIN media_categories mc ON mc.media_id = m.id
              WHERE mc.category_id = ?1 AND m.parent_id IS NULL",
@@ -544,6 +576,23 @@ impl<'a> MediaRepository<'a> {
         file_repo.list_by_media(media_id)
     }
 
+    pub fn list_files_for_show(
+        &mut self,
+        media_id: i64,
+    ) -> RusqliteResult<Vec<crate::db::file_repo::MediaFile>> {
+        let mut file_repo = FileRepository::new(self.conn);
+        file_repo.list_by_show(media_id)
+    }
+
+    pub fn set_episode_image(
+        &mut self,
+        file_path: &str,
+        episode_image_url: &str,
+    ) -> RusqliteResult<usize> {
+        let mut file_repo = FileRepository::new(self.conn);
+        file_repo.set_episode_image(file_path, episode_image_url)
+    }
+
     pub fn update_metadata(
         &mut self,
         media_id: i64,
@@ -573,6 +622,49 @@ impl<'a> MediaRepository<'a> {
             params![vote_average, media_id],
         )?;
         Ok(())
+    }
+
+    /// Guarda el identificador del show en TVmaze para no repetir búsquedas
+    /// por título al pedir episodios e imágenes.
+    pub fn set_metadata_source_id(
+        &mut self,
+        media_id: i64,
+        source_id: Option<i64>,
+    ) -> RusqliteResult<()> {
+        self.conn.execute(
+            "UPDATE media SET metadata_source_id = ?1, updated_at = datetime('now') WHERE id = ?2",
+            params![source_id, media_id],
+        )?;
+        Ok(())
+    }
+
+    /// Marca que ya se intentó extraer categorías de los metadatos.
+    pub fn mark_categories_fetched(&mut self, media_id: i64) -> RusqliteResult<()> {
+        self.conn.execute(
+            "UPDATE media SET categories_fetched_at = datetime('now'),
+             updated_at = datetime('now') WHERE id = ?1",
+            params![media_id],
+        )?;
+        Ok(())
+    }
+
+    /// Devuelve los medios padre a los que todavía no se les intentó extraer
+    /// categorías, para rellenar bibliotecas antiguas.
+    pub fn list_media_pending_categories(&mut self) -> RusqliteResult<Vec<Media>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
+                    is_favorite, is_watched, poster_path, banner_path, synopsis,
+                    metadata_fetched_at, parent_id, rating, vote_average,
+                    metadata_source_id, categories_fetched_at
+             FROM media
+             WHERE parent_id IS NULL AND categories_fetched_at IS NULL
+             ORDER BY sort_title ASC",
+        )?;
+        let rows: Vec<Media> = stmt
+            .query_map([], map_media_row)?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
     }
 
     /// Obtiene la puntuación de metadatos de un medio (vote_average, 0-10).
@@ -778,27 +870,67 @@ fn map_media_row(row: &rusqlite::Row<'_>) -> RusqliteResult<Media> {
         parent_id: row.get(14)?,
         rating: row.get::<_, i32>(15).unwrap_or(0),
         vote_average: row.get::<_, f64>(16).ok(),
+        metadata_source_id: row.get(17)?,
+        categories_fetched_at: row.get(18)?,
         categories: Vec::new(),
     })
 }
 
-/// Normaliza un nombre de categoría en un slug seguro para consultas y URLs.
+/// Normaliza un nombre de categoría: recorta extremos y colapsa espacios.
+/// Devuelve `None` si no queda ningún carácter visible.
+pub(crate) fn normalize_category_name(name: &str) -> Option<String> {
+    let normalized = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+/// Convierte un nombre de categoría en un slug ASCII seguro para consultas.
+///
+/// Pliega las tildes y caracteres latinos habituales (`Acción` → `accion`,
+/// `Animación` → `animacion`, `Ñ` → `n`) para que dos categorías que solo
+/// difieren en acentos compartan slug y no se dupliquen.
 fn slugify(name: &str) -> String {
     let mut slug = String::new();
-    for c in name.to_lowercase().chars() {
-        if c.is_ascii_alphanumeric() {
-            slug.push(c);
-        } else if (c.is_whitespace() || c == '-' || c == '_')
+    for character in name.to_lowercase().chars() {
+        let folded = fold_latin(character);
+        if folded.is_ascii_alphanumeric() {
+            slug.push(folded);
+        } else if (folded.is_whitespace() || folded == '-' || folded == '_')
             && !slug.ends_with('-')
             && !slug.is_empty()
         {
             slug.push('-');
         }
     }
+    let slug = slug.trim_matches('-').to_string();
     if slug.is_empty() {
-        slug = "categoria".to_string();
+        "categoria".to_string()
+    } else {
+        slug
     }
-    slug
+}
+
+/// Pliega los caracteres latinos acentuados más habituales a ASCII.
+fn fold_latin(character: char) -> char {
+    match character {
+        'á' | 'à' | 'ä' | 'â' | 'ã' | 'å' | 'ā' | 'ă' | 'ą' => 'a',
+        'é' | 'è' | 'ë' | 'ê' | 'ē' | 'ĕ' | 'ė' | 'ę' => 'e',
+        'í' | 'ì' | 'ï' | 'î' | 'ī' | 'į' => 'i',
+        'ó' | 'ò' | 'ö' | 'ô' | 'õ' | 'ø' | 'ō' | 'ő' => 'o',
+        'ú' | 'ù' | 'ü' | 'û' | 'ū' | 'ů' | 'ű' | 'ų' => 'u',
+        'ñ' | 'ń' | 'ň' => 'n',
+        'ç' | 'ć' | 'č' => 'c',
+        'ý' | 'ÿ' => 'y',
+        'š' => 's',
+        'ž' => 'z',
+        'ł' => 'l',
+        'đ' => 'd',
+        'ß' => 's',
+        _ => character,
+    }
 }
 
 fn to_fts_query(query: &str) -> String {

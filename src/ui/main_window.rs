@@ -4,20 +4,30 @@ use crate::core::metadata::RefreshMetadataResult;
 use crate::db::media_repo::ListMediaOptions;
 use crate::db::{MediaRepository, close_db, open_db};
 use crate::ui::i18n::{Translations, TranslationsRef, load_translations};
-use crate::ui::media_details::MediaDetails;
+use crate::ui::media_details::{MediaDetails, SeasonSelection};
 use crate::ui::media_list::MediaList;
 use crate::ui::search_bar::SearchBar;
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
-use gtk4::{Box, Button, Label, Orientation, ScrolledWindow, Stack, gio, glib};
+use gtk4::{Box, Button, CenterBox, FlowBox, Label, Orientation, ScrolledWindow, Stack, gio, glib};
 use libadwaita::prelude::*;
-use libadwaita::{
-    ApplicationWindow as AdwApplicationWindow, Clamp, StatusPage, Toast, ToastOverlay,
-};
+use libadwaita::{ApplicationWindow as AdwApplicationWindow, StatusPage, Toast, ToastOverlay};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::Duration;
+
+/// Vista recordada en la pila de navegación. Permite que «Volver» y la salida
+/// de Ajustes restauren exactamente la pantalla anterior, incluida la
+/// temporada seleccionada de una serie.
+#[derive(Debug, Clone, PartialEq)]
+enum View {
+    Page(String),
+    Details {
+        media_id: i64,
+        season: Option<SeasonSelection>,
+    },
+}
 
 pub struct MainWindow {
     window: AdwApplicationWindow,
@@ -36,15 +46,22 @@ pub struct MainWindow {
     metadata_sync_running: Rc<Cell<bool>>,
     toast_overlay: ToastOverlay,
     translations: TranslationsRef,
-    /// Lista de categorías de la página de filtro.
-    categories_list: Box,
-    /// Título de la página de categorías.
+    /// Chips de categorías de la página de filtro.
+    categories_flow: FlowBox,
+    /// Mensaje mostrado cuando todavía no hay categorías extraídas.
+    categories_empty: Label,
+    /// Título y subtítulo de la página de categorías.
     categories_title: Label,
+    categories_subtitle: Label,
     /// Botón "Ver todo" para limpiar el filtro de categoría.
     clear_category_button: Button,
-    /// Página de la que se abrió Ajustes, para volver a ella (no siempre al
-    /// inicio) al pulsar Volver.
-    previous_page: Rc<Cell<Option<String>>>,
+    /// Barra superior de la biblioteca que indica el filtro activo.
+    filter_bar: Box,
+    filter_label: Label,
+    filter_clear_button: Button,
+    /// Pila de vistas visitadas. El último elemento es la pantalla a la que
+    /// debe volver el botón «Volver» o la salida de Ajustes.
+    history: RefCell<Vec<View>>,
     /// Categoría activa como filtro de la biblioteca (`None` = sin filtro).
     current_category: Rc<RefCell<Option<i64>>>,
     /// Nombre de la categoría activa, para mostrarlo en la interfaz.
@@ -87,11 +104,11 @@ impl MainWindow {
 
         // Barra superior al estilo Crunchyroll: logo a la izquierda,
         // navegación en el centro, acciones y búsqueda a la derecha.
-        let top_bar = Box::new(Orientation::Horizontal, 0);
+        // GtkCenterBox reparte las tres zonas sin márgenes manuales por
+        // elemento: el centro queda centrado respecto a la ventana.
+        let top_bar = CenterBox::new();
         top_bar.set_hexpand(true);
         top_bar.set_vexpand(false);
-        top_bar.set_halign(gtk4::Align::Fill);
-        top_bar.set_valign(gtk4::Align::Center);
         top_bar.add_css_class("top-bar");
 
         // Sección izquierda: logo / nombre de la app (navega al inicio al
@@ -99,41 +116,37 @@ impl MainWindow {
         let left_section = Box::new(Orientation::Horizontal, 0);
         left_section.set_halign(gtk4::Align::Start);
         left_section.set_valign(gtk4::Align::Center);
-        left_section.set_hexpand(false);
 
-        let logo_label = Label::new(Some("Acryl"));
+        let logo_label = Label::new(None);
         logo_label.set_halign(gtk4::Align::Start);
         logo_label.set_valign(gtk4::Align::Center);
-        logo_label.set_margin_start(16);
-        logo_label.set_margin_end(24);
-        logo_label.set_xalign(0.0);
-        logo_label.set_hexpand(false);
         logo_label.set_markup("<b><span size='x-large' foreground='#f75c03'>A</span>cryl</b>");
-        left_section.append(&logo_label);
 
-        top_bar.append(&left_section);
+        let logo_button = Button::new();
+        logo_button.add_css_class("logo-button");
+        logo_button.set_valign(gtk4::Align::Center);
+        logo_button.set_tooltip_text(Some(&t("tooltip.home")));
+        logo_button.set_child(Some(&logo_label));
+        left_section.append(&logo_button);
+        top_bar.set_start_widget(Some(&left_section));
 
-        // Sección centro: navegación horizontal (se expande para centrar
-        // los elementos sin dejar huecos entre ellos).
-        let nav_box = Box::new(Orientation::Horizontal, 8);
+        // Sección centro: navegación principal. Solo Categorías; Novedades,
+        // Popular y Simulcasts se retiraron al no tener datos reales.
+        let nav_box = Box::new(Orientation::Horizontal, 0);
         nav_box.set_halign(gtk4::Align::Center);
         nav_box.set_valign(gtk4::Align::Center);
-        nav_box.set_hexpand(true);
-        nav_box.add_css_class("nav-box");
 
-        top_bar.append(&nav_box);
+        top_bar.set_center_widget(Some(&nav_box));
 
         // Sección derecha: búsqueda y acciones.
-        let right_section = Box::new(Orientation::Horizontal, 0);
+        let right_section = Box::new(Orientation::Horizontal, 12);
         right_section.set_halign(gtk4::Align::End);
         right_section.set_valign(gtk4::Align::Center);
-        right_section.set_hexpand(false);
-        right_section.set_margin_end(16);
 
         // Barra de búsqueda.
         let search_bar = SearchBar::new(&db_path, translations.clone());
         search_bar.widget().set_hexpand(false);
-        search_bar.widget().set_width_request(300);
+        search_bar.widget().set_width_request(280);
         search_bar.widget().set_halign(gtk4::Align::Center);
         search_bar.widget().set_valign(gtk4::Align::Center);
         right_section.append(search_bar.widget());
@@ -142,8 +155,6 @@ impl MainWindow {
         let library_status = Label::new(None);
         library_status.add_css_class("dim-label");
         library_status.set_valign(gtk4::Align::Center);
-        library_status.set_margin_start(16);
-        library_status.set_margin_end(16);
         right_section.append(&library_status);
 
         // Botón de ajustes.
@@ -154,7 +165,7 @@ impl MainWindow {
         settings_button.add_css_class("flat-button");
         right_section.append(&settings_button);
 
-        top_bar.append(&right_section);
+        top_bar.set_end_widget(Some(&right_section));
 
         content.append(&top_bar);
 
@@ -165,20 +176,33 @@ impl MainWindow {
 
         let media_list = MediaList::new(translations.clone());
 
-        // AdwClamp limita el ancho del contenido en pantallas anchas para que
-        // las listas y pósters no se estiren desproporcionadamente.
-        let list_clamp = Clamp::new();
-        list_clamp.set_maximum_size(1600);
-        list_clamp.set_tightening_threshold(1200);
-        list_clamp.set_child(Some(media_list.widget()));
+        // Página principal: barra de filtro activo + galería responsive.
+        let list_page = Box::new(Orientation::Vertical, 0);
+        list_page.set_hexpand(true);
+        list_page.set_vexpand(true);
 
-        // Página principal: lista de medios (envuelta en Clamp).
-        stack.add_titled(&list_clamp, Some("list"), &t("stack.list"));
+        let filter_bar = Box::new(Orientation::Horizontal, 8);
+        filter_bar.add_css_class("filter-bar");
+        filter_bar.set_halign(gtk4::Align::Fill);
+        filter_bar.set_valign(gtk4::Align::Center);
+        filter_bar.set_visible(false);
 
-        // Configurar columnas responsivas para la galería según el ancho
-        // inicial de la ventana. Se calcula restando los márgenes del
-        // FlowBox y del Clamp.
-        media_list.set_responsive_columns(1160);
+        let filter_label = Label::new(None);
+        filter_label.set_halign(gtk4::Align::Start);
+        filter_label.set_valign(gtk4::Align::Center);
+        filter_label.set_hexpand(true);
+        filter_label.set_xalign(0.0);
+        filter_label.add_css_class("filter-label");
+        filter_bar.append(&filter_label);
+
+        let filter_clear_button = Button::with_label(&t("button.clear_category"));
+        filter_clear_button.add_css_class("flat-button");
+        filter_clear_button.set_valign(gtk4::Align::Center);
+        filter_bar.append(&filter_clear_button);
+
+        list_page.append(&filter_bar);
+        list_page.append(media_list.widget());
+        stack.add_titled(&list_page, Some("list"), &t("stack.list"));
 
         // Página vacía: AdwStatusPage cuando no hay medios indexados.
         let empty_page = StatusPage::new();
@@ -193,13 +217,48 @@ impl MainWindow {
         categories_page.set_hexpand(true);
         categories_page.set_vexpand(true);
 
+        let categories_header = Box::new(Orientation::Horizontal, 12);
+        categories_header.set_halign(gtk4::Align::Fill);
+        categories_header.set_valign(gtk4::Align::Center);
+        categories_header.set_margin_top(24);
+        categories_header.set_margin_start(24);
+        categories_header.set_margin_end(24);
+
         let categories_title = Label::new(Some(&t("stack.categories")));
         categories_title.set_halign(gtk4::Align::Start);
-        categories_title.set_margin_top(20);
-        categories_title.set_margin_start(24);
-        categories_title.set_margin_bottom(12);
-        categories_title.add_css_class("heading");
-        categories_page.append(&categories_title);
+        categories_title.set_hexpand(true);
+        categories_title.set_xalign(0.0);
+        categories_title.add_css_class("page-title");
+        categories_header.append(&categories_title);
+
+        // Botón para limpiar el filtro y mostrar todos los medios.
+        let clear_category_button = Button::with_label(&t("button.clear_category"));
+        clear_category_button.add_css_class("flat-button");
+        clear_category_button.set_halign(gtk4::Align::End);
+        clear_category_button.set_valign(gtk4::Align::Center);
+        clear_category_button.set_visible(false);
+        categories_header.append(&clear_category_button);
+        categories_page.append(&categories_header);
+
+        let categories_subtitle = Label::new(Some(&t("categories.subtitle")));
+        categories_subtitle.set_halign(gtk4::Align::Start);
+        categories_subtitle.set_xalign(0.0);
+        categories_subtitle.set_wrap(true);
+        categories_subtitle.set_margin_start(24);
+        categories_subtitle.set_margin_end(24);
+        categories_subtitle.set_margin_bottom(18);
+        categories_subtitle.add_css_class("dim-label");
+        categories_page.append(&categories_subtitle);
+
+        let categories_empty = Label::new(Some(&t("categories.empty")));
+        categories_empty.set_halign(gtk4::Align::Start);
+        categories_empty.set_xalign(0.0);
+        categories_empty.set_wrap(true);
+        categories_empty.set_margin_start(24);
+        categories_empty.set_margin_end(24);
+        categories_empty.set_visible(false);
+        categories_empty.add_css_class("synopsis-text");
+        categories_page.append(&categories_empty);
 
         let categories_scrolled = ScrolledWindow::new();
         categories_scrolled.set_hexpand(true);
@@ -207,21 +266,22 @@ impl MainWindow {
         categories_scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
         categories_scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
 
-        let categories_list = Box::new(Orientation::Vertical, 6);
-        categories_list.set_hexpand(true);
-        categories_list.set_margin_start(24);
-        categories_list.set_margin_end(24);
-        categories_scrolled.set_child(Some(&categories_list));
+        let categories_flow = FlowBox::new();
+        categories_flow.set_hexpand(true);
+        categories_flow.set_vexpand(false);
+        categories_flow.set_halign(gtk4::Align::Fill);
+        categories_flow.set_valign(gtk4::Align::Start);
+        categories_flow.set_homogeneous(false);
+        categories_flow.set_selection_mode(gtk4::SelectionMode::None);
+        categories_flow.set_max_children_per_line(10);
+        categories_flow.set_min_children_per_line(1);
+        categories_flow.set_row_spacing(10);
+        categories_flow.set_column_spacing(10);
+        categories_flow.set_margin_start(24);
+        categories_flow.set_margin_end(24);
+        categories_flow.set_margin_bottom(24);
+        categories_scrolled.set_child(Some(&categories_flow));
         categories_page.append(&categories_scrolled);
-
-        // Botón para limpiar el filtro y mostrar todos los medios.
-        let clear_category_button = Button::with_label(&t("button.clear_category"));
-        clear_category_button.add_css_class("flat-button");
-        clear_category_button.set_halign(gtk4::Align::Start);
-        clear_category_button.set_margin_start(24);
-        clear_category_button.set_margin_bottom(16);
-        clear_category_button.set_visible(false);
-        categories_page.append(&clear_category_button);
 
         stack.add_titled(&categories_page, Some("categories"), &t("stack.categories"));
 
@@ -276,10 +336,15 @@ impl MainWindow {
             metadata_sync_running: Rc::new(Cell::new(false)),
             toast_overlay,
             translations,
-            categories_list,
+            categories_flow,
+            categories_empty,
             categories_title,
+            categories_subtitle,
             clear_category_button,
-            previous_page: Rc::new(Cell::new(None)),
+            filter_bar,
+            filter_label,
+            filter_clear_button,
+            history: RefCell::new(Vec::new()),
             current_category: Rc::new(RefCell::new(None)),
             current_category_name: Rc::new(RefCell::new(None)),
         }));
@@ -287,16 +352,15 @@ impl MainWindow {
         this.borrow().window.present();
 
         // Cargar medios iniciales (SQLite local, rápido).
-        Self::load_media(&this, &db_path);
+        Self::load_media(&this);
 
-        // Logo: acceso directo a la pantalla principal desde cualquier vista.
+        // Logo: acceso directo al inicio desde cualquier vista. Limpia la
+        // búsqueda y el filtro, sin reiniciar la aplicación ni recargar la
+        // biblioteca si no hay filtro que retirar.
         let this_logo = this.clone();
-        let logo_click = gtk4::GestureClick::new();
-        logo_click.connect_pressed(move |_, _, _, _| {
-            let w = this_logo.borrow();
-            w.go_home();
+        logo_button.connect_clicked(move |_| {
+            Self::go_home(&this_logo);
         });
-        logo_label.add_controller(logo_click);
 
         // Botón "Categorías": abre el selector de categorías para filtrar.
         let categories_button = Button::with_label(&t("button.categories"));
@@ -304,9 +368,10 @@ impl MainWindow {
         categories_button.set_valign(gtk4::Align::Center);
         let this_cat = this.clone();
         categories_button.connect_clicked(move |_| {
-            let w = this_cat.borrow();
-            w.stack.set_visible_child_name("categories");
-            drop(w);
+            {
+                let w = this_cat.borrow();
+                w.stack.set_visible_child_name("categories");
+            }
             Self::populate_categories_page(&this_cat);
         });
         nav_box.append(&categories_button);
@@ -315,43 +380,40 @@ impl MainWindow {
             w.categories_button = categories_button;
         }
 
-        // Callback: botón "Ver todo" -> quita el filtro de categoría.
+        // Callbacks: ambos botones "Ver todo" retiran el filtro activo.
         let this_clear = this.clone();
         this.borrow_mut()
             .clear_category_button
             .connect_clicked(move |_| {
-                {
-                    let w = this_clear.borrow();
-                    w.current_category.replace(None);
-                    w.current_category_name.replace(None);
-                }
-                Self::load_media_by_category(&this_clear, None);
-                let w = this_clear.borrow();
-                w.stack.set_visible_child_name("list");
-                w.media_list.refresh();
+                Self::clear_category_filter(&this_clear);
+            });
+        let this_filter_clear = this.clone();
+        this.borrow_mut()
+            .filter_clear_button
+            .connect_clicked(move |_| {
+                Self::clear_category_filter(&this_filter_clear);
             });
 
         // Callback: al seleccionar un medio de la lista, mostrar detalles.
         let this_clone = this.clone();
         this.borrow_mut().media_list.on_select(move |media_id| {
             let w = this_clone.borrow();
-            w.show_details(media_id);
+            w.navigate_to_details(media_id);
         });
 
         // Callback: al buscar y seleccionar un resultado, mostrar detalles.
         let this_clone = this.clone();
         this.borrow_mut().search_bar.on_select(move |media_id| {
             let w = this_clone.borrow();
-            w.show_details(media_id);
+            w.navigate_to_details(media_id);
         });
 
-        // Callback: botón de Ajustes -> navega a la vista de ajustes dentro del Stack,
-        // recordando la página de origen para poder volver a ella.
+        // Callback: botón de Ajustes -> navega a la vista de ajustes dentro del
+        // Stack, guardando la vista exacta de origen para volver a ella.
         let this_clone = this.clone();
         this.borrow_mut().settings_button.connect_clicked(move |_| {
             let w = this_clone.borrow();
-            let current = w.stack.visible_child_name().map(|name| name.to_string());
-            w.previous_page.set(current);
+            w.push_current_view();
             w.stack.set_visible_child_name("settings");
         });
 
@@ -399,8 +461,7 @@ impl MainWindow {
         // Callback: la indexación terminó -> recargar la galería.
         let this_clone = this.clone();
         this.borrow_mut().settings_view.on_library_changed(move || {
-            let db_path = this_clone.borrow().db_path.clone();
-            Self::load_media(&this_clone, &db_path);
+            Self::load_media(&this_clone);
             let this = this_clone.clone();
             glib::timeout_add_local(Duration::from_millis(500), move || {
                 let w = this.borrow();
@@ -417,26 +478,24 @@ impl MainWindow {
             .cancel_button()
             .connect_clicked(move |_| {
                 let w = this_clone.borrow();
-                w.go_back_to_previous();
+                w.return_from_settings();
             });
 
         // Conectar botón Guardar de ajustes -> guarda, recarga medios y vuelve
-        // a la página de origen (no siempre al inicio).
+        // a la vista exacta de origen (no siempre al inicio).
         let this_clone = this.clone();
         let db_path_for_reload = db_path.clone();
         this.borrow_mut()
             .settings_view
             .save_button()
             .connect_clicked(move |_| {
-                let w = this_clone.borrow();
                 // Recargar medios después de guardar ajustes (pueden haber
                 // cambiado las carpetas).
-                drop(w);
-                Self::load_media(&this_clone, &db_path_for_reload);
+                Self::load_media(&this_clone);
                 Self::start_metadata_sync(&this_clone, db_path_for_reload.clone());
-                // Volver a la página de origen después de guardar.
+                // Volver a la vista de origen después de guardar.
                 let w = this_clone.borrow();
-                w.go_back_to_previous();
+                w.return_from_settings();
             });
 
         // Conectar botón de metadatos -> confirma y lanza la actualización forzada.
@@ -455,12 +514,13 @@ impl MainWindow {
             .on_back(move || {
                 let parent_id = this_clone.borrow().media_details.borrow().parent_id();
                 let w = this_clone.borrow();
+                // Temporada/episodio -> serie. Película/serie -> vista previa.
                 if let Some(parent_id) = parent_id
-                    && w.show_details(parent_id)
+                    && w.show_details(parent_id, None)
                 {
                     return;
                 }
-                w.show_list();
+                w.go_back();
             });
 
         // Callback: reproducir el archivo principal (episodio por ver o primero).
@@ -499,64 +559,77 @@ impl MainWindow {
                 );
             });
 
-        let this_clone = this.clone();
-        this.borrow_mut()
-            .media_details
-            .borrow_mut()
-            .on_change_season(move |season_id| {
-                let this = this_clone.clone();
-                glib::timeout_add_local(std::time::Duration::from_millis(0), move || {
-                    let w = this.borrow();
-                    // Recargar únicamente los episodios de la temporada
-                    // seleccionada, sin mezclar temporadas distintas.
-                    w.media_details
-                        .borrow_mut()
-                        .load_episodes_for_season(season_id);
-                    glib::ControlFlow::Break
-                });
-            });
-
         // Completar metadatos y pósters que falten sin bloquear la UI.
         Self::start_metadata_sync(&this, db_path.clone());
 
         this
     }
 
-    fn load_media(this: &MainWindowRef, db_path: &str) {
-        let mut conn = match open_db(db_path) {
+    /// Carga en la galería los medios visibles según el filtro de categoría
+    /// activo. Solo cambia de página cuando la vista actual es la biblioteca;
+    /// así una sincronización de metadatos no interrumpe Detalles o Ajustes.
+    fn load_media(this: &MainWindowRef) {
+        let (db_path, category_id) = {
+            let w = this.borrow();
+            (w.db_path.clone(), *w.current_category.borrow())
+        };
+
+        let mut conn = match open_db(&db_path) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Error abriendo BD: {}", e);
                 return;
             }
         };
-        let mut repo = MediaRepository::new(&mut conn);
-        let media = repo
-            .list(ListMediaOptions {
+        let media = {
+            let mut repo = MediaRepository::new(&mut conn);
+            let options = ListMediaOptions {
                 r#type: None,
                 limit: Some(500),
                 offset: Some(0),
                 order_by: None,
-            })
-            .unwrap_or_default();
+            };
+            match category_id {
+                Some(id) => repo.list_by_category(id, options),
+                None => repo.list(options),
+            }
+            .unwrap_or_default()
+        };
         close_db(conn);
-
-        println!("Medios cargados desde la BD: {}", media.len());
 
         let media_count = media.len();
         let mut w = this.borrow_mut();
         w.media_count = media_count;
         w.media_list.set_media(media);
 
-        // Alternar entre la lista de medios y la página vacía (AdwStatusPage)
-        // según si hay medios indexados.
-        if media_count > 0 {
-            w.stack.set_visible_child_name("list");
-        } else {
-            w.stack.set_visible_child_name("empty");
+        let visible = w.stack.visible_child_name().map(|name| name.to_string());
+        if matches!(visible.as_deref(), Some("list") | Some("empty")) {
+            let filtered = w.current_category.borrow().is_some();
+            if media_count == 0 && !filtered {
+                w.stack.set_visible_child_name("empty");
+            } else {
+                w.stack.set_visible_child_name("list");
+            }
         }
 
+        w.update_filter_bar();
         Self::update_library_status(&w);
+    }
+
+    /// Refresca la barra que indica la categoría activa y el botón «Ver todo».
+    fn update_filter_bar(&self) {
+        let name = self.current_category_name.borrow().clone();
+        match name {
+            Some(name) => {
+                let text = self.t("categories.filter_format").replacen("{}", &name, 1);
+                self.filter_label.set_label(&text);
+                self.filter_bar.set_visible(true);
+            }
+            None => self.filter_bar.set_visible(false),
+        }
+
+        self.clear_category_button
+            .set_visible(self.current_category.borrow().is_some());
     }
 
     /// Muestra una notificación temporal (AdwToast) en la parte inferior de la
@@ -607,14 +680,20 @@ impl MainWindow {
         // Placeholder del buscador
         self.search_bar.set_placeholder(&self.translations);
 
-        // Página de categorías: título y botón "Todas las categorías" (los
-        // nombres de categoría provienen de la BD y no se traducen).
+        // Página de categorías: textos fijos y chip "Todas las categorías"
+        // (los nombres de categoría provienen de la BD y no se traducen).
         self.categories_title.set_label(&self.t("stack.categories"));
-        if let Some(first) = self.categories_list.first_child()
+        self.categories_subtitle
+            .set_label(&self.t("categories.subtitle"));
+        self.categories_empty.set_label(&self.t("categories.empty"));
+        self.filter_clear_button
+            .set_label(&self.t("button.clear_category"));
+        if let Some(first) = self.categories_flow.first_child()
             && let Ok(button) = first.downcast::<Button>()
         {
             button.set_label(&self.t("button.all_categories"));
         }
+        self.update_filter_bar();
 
         // Vista de ajustes (título, secciones, botones, filas de carpetas)
         self.settings_view.refresh_texts();
@@ -650,9 +729,9 @@ impl MainWindow {
         w.library_status.set_tooltip_text(tooltip.as_deref());
     }
 
-    /// Muestra los detalles de un medio. Devuelve `false` si el medio no
-    /// existe, para que la navegación pueda volver a la lista.
-    fn show_details(&self, media_id: i64) -> bool {
+    /// Muestra los detalles de un medio, conservando la temporada solicitada
+    /// si sigue existiendo. Devuelve `false` si el medio ya no existe.
+    fn show_details(&self, media_id: i64, season: Option<SeasonSelection>) -> bool {
         let mut conn = match open_db(&self.db_path) {
             Ok(c) => c,
             Err(e) => {
@@ -660,12 +739,16 @@ impl MainWindow {
                 return false;
             }
         };
-        let mut repo = MediaRepository::new(&mut conn);
-        let media = repo.find_by_id(media_id).unwrap_or(None);
+        let media = {
+            let mut repo = MediaRepository::new(&mut conn);
+            repo.find_by_id(media_id).unwrap_or(None)
+        };
         close_db(conn);
 
         if let Some(media) = media {
-            self.media_details.borrow_mut().set_media(&media);
+            self.media_details
+                .borrow_mut()
+                .set_media_with_season(&media, season);
             self.stack.set_visible_child_name("details");
             true
         } else {
@@ -673,49 +756,147 @@ impl MainWindow {
         }
     }
 
-    fn show_list(&self) {
-        self.stack.set_visible_child_name("list");
-        self.media_list.refresh();
-    }
-
-    /// Navega a la pantalla principal de la biblioteca, limpiando filtros o
-    /// estado temporal. Se usa al pulsar el logo desde cualquier pantalla.
-    fn go_home(&self) {
-        // Limpiar el buscador para mostrar la biblioteca completa.
-        self.search_bar.clear_query();
-        self.stack.set_visible_child_name("list");
-        self.media_list.refresh();
-    }
-
-    /// Vuelve a la página de origen de Ajustes (serie, película, temporada o
-    /// lista). Si no hay página registrada, vuelve a la lista principal.
-    fn go_back_to_previous(&self) {
-        let previous = self.previous_page.take();
-        match previous.as_deref() {
-            Some("details") => {
-                let media_id = self.media_details.borrow().media_id();
-                if media_id > 0 {
-                    self.show_details(media_id);
-                } else {
-                    self.show_list();
-                }
+    /// Describe la vista actual para poder restaurarla desde el historial.
+    fn current_view(&self) -> View {
+        let page = self
+            .stack
+            .visible_child_name()
+            .map(|name| name.to_string())
+            .unwrap_or_else(|| "list".to_string());
+        if page == "details" {
+            let details = self.media_details.borrow();
+            View::Details {
+                media_id: details.media_id(),
+                season: details.season_selection(),
             }
-            Some(page) => {
+        } else {
+            View::Page(page)
+        }
+    }
+
+    /// Guarda la vista actual en el historial, evitando duplicados seguidos.
+    fn push_current_view(&self) {
+        let view = self.current_view();
+        let mut history = self.history.borrow_mut();
+        if history.last() != Some(&view) {
+            history.push(view);
+        }
+        // Límite defensivo: la navegación no necesita un historial infinito.
+        if history.len() > 32 {
+            history.remove(0);
+        }
+    }
+
+    /// Abre los detalles recordando la pantalla desde la que se navega.
+    fn navigate_to_details(&self, media_id: i64) {
+        self.push_current_view();
+        if self.show_details(media_id, None) {
+            return;
+        }
+        let previous = self.history.borrow_mut().pop();
+        match previous {
+            Some(view) => self.restore_view(&view),
+            None => self.show_list(),
+        }
+    }
+
+    /// Restaura una vista concreta sin volver a añadirla al historial.
+    fn restore_view(&self, view: &View) {
+        match view {
+            View::Page(page) if page == "details" => self.show_list(),
+            View::Page(page) => {
                 self.stack.set_visible_child_name(page);
             }
-            None => {
-                self.show_list();
+            View::Details { media_id, season } => {
+                if !self.show_details(*media_id, *season) {
+                    self.show_list();
+                }
             }
         }
     }
 
-    /// Rellena la página de categorías con la lista disponible en la BD y
-    /// actualiza el estado visual del filtro activo.
+    /// Vuelve a la vista anterior de la pila. Si no existe, vuelve al inicio.
+    fn go_back(&self) {
+        while let Some(view) = self.history.borrow_mut().pop() {
+            if let View::Page(page) = &view
+                && page == "details"
+            {
+                continue;
+            }
+            self.restore_view(&view);
+            return;
+        }
+        self.show_list();
+    }
+
+    /// Salida de Ajustes: restaura exactamente la pantalla de origen.
+    fn return_from_settings(&self) {
+        self.go_back();
+    }
+
+    /// Muestra la biblioteca (o la página vacía si no hay medios ni filtro).
+    fn show_list(&self) {
+        let filtered = self.current_category.borrow().is_some();
+        if self.media_count == 0 && !filtered {
+            self.stack.set_visible_child_name("empty");
+        } else {
+            self.stack.set_visible_child_name("list");
+        }
+    }
+
+    /// Navega al inicio limpiando búsqueda, filtro e historial. No recarga la
+    /// biblioteca si no había un filtro que retirar.
+    fn go_home(this: &MainWindowRef) {
+        let had_filter = {
+            let w = this.borrow();
+            w.search_bar.clear_query();
+            let had_filter = w.current_category.borrow().is_some();
+            w.current_category.replace(None);
+            w.current_category_name.replace(None);
+            w.history.borrow_mut().clear();
+            w.update_filter_bar();
+            had_filter
+        };
+
+        if had_filter {
+            Self::load_media(this);
+        }
+        this.borrow().show_list();
+    }
+
+    /// Aplica o retira el filtro de categoría y vuelve a la biblioteca.
+    fn set_category_filter(this: &MainWindowRef, category: Option<(i64, String)>) {
+        {
+            let w = this.borrow();
+            match category {
+                Some((id, name)) => {
+                    w.current_category.replace(Some(id));
+                    w.current_category_name.replace(Some(name));
+                }
+                None => {
+                    w.current_category.replace(None);
+                    w.current_category_name.replace(None);
+                }
+            }
+            w.update_filter_bar();
+        }
+
+        Self::load_media(this);
+        this.borrow().show_list();
+    }
+
+    /// Retira el filtro de categoría activo.
+    fn clear_category_filter(this: &MainWindowRef) {
+        Self::set_category_filter(this, None);
+    }
+
+    /// Rellena la página de categorías con las categorías reales de la BD,
+    /// incluyendo el número de medios de cada una.
     fn populate_categories_page(this: &MainWindowRef) {
-        let w = this.borrow();
-        let db_path = w.db_path.clone();
-        let active_id = *w.current_category.borrow();
-        drop(w);
+        let (db_path, active_id) = {
+            let w = this.borrow();
+            (w.db_path.clone(), *w.current_category.borrow())
+        };
 
         let mut conn = match open_db(&db_path) {
             Ok(c) => c,
@@ -724,118 +905,70 @@ impl MainWindow {
                 return;
             }
         };
-        let mut repo = MediaRepository::new(&mut conn);
-        let categories = repo.list_categories().unwrap_or_default();
+        let categories = {
+            let mut repo = MediaRepository::new(&mut conn);
+            repo.list_categories().unwrap_or_default()
+        };
         close_db(conn);
 
-        let w = this.borrow();
-        // Limpiar lista existente.
-        while let Some(child) = w.categories_list.first_child() {
-            w.categories_list.remove(&child);
-        }
+        // Las categorías sin medios no aportan nada al filtro.
+        let categories: Vec<_> = categories
+            .into_iter()
+            .filter(|category| category.media_count > 0)
+            .collect();
 
-        // Botón "Todas" para quitar el filtro.
+        let w = this.borrow();
+        while let Some(child) = w.categories_flow.first_child() {
+            w.categories_flow.remove(&child);
+        }
+        w.categories_empty.set_visible(categories.is_empty());
+
+        // Chip "Todas" para retirar cualquier filtro.
         let all_button = Button::with_label(&w.t("button.all_categories"));
-        all_button.add_css_class("nav-button");
-        all_button.set_hexpand(false);
+        all_button.add_css_class("category-chip");
         all_button.set_valign(gtk4::Align::Center);
-        if active_id.is_some() {
+        if active_id.is_none() {
             all_button.add_css_class("active");
         }
         let this_all = this.clone();
         all_button.connect_clicked(move |_| {
-            {
-                let w = this_all.borrow();
-                w.current_category.replace(None);
-                w.current_category_name.replace(None);
-            }
-            Self::load_media_by_category(&this_all, None);
-            let w = this_all.borrow();
-            w.stack.set_visible_child_name("list");
-            w.media_list.refresh();
+            Self::clear_category_filter(&this_all);
         });
-        w.categories_list.append(&all_button);
+        w.categories_flow.append(&all_button);
 
-        for category in categories.iter() {
-            let btn = Button::with_label(&category.name);
-            btn.add_css_class("nav-button");
-            btn.set_hexpand(false);
+        for category in categories {
+            let label = w
+                .t("categories.chip_format")
+                .replacen("{}", &category.name, 1)
+                .replacen("{}", &category.media_count.to_string(), 1);
+            let btn = Button::with_label(&label);
+            btn.add_css_class("category-chip");
             btn.set_valign(gtk4::Align::Center);
             if active_id == Some(category.id) {
                 btn.add_css_class("active");
             }
+
             let this_cat = this.clone();
             let cat_id = category.id;
             let cat_name = category.name.clone();
             btn.connect_clicked(move |_| {
-                // Primero actualizamos el estado y soltamos el borrow antes de
-                // llamar a load_media_by_category (que usa borrow_mut).
-                {
+                // Volver a pulsar la categoría activa la desactiva.
+                let is_active = {
                     let w = this_cat.borrow();
-                    w.current_category.replace(Some(cat_id));
-                    w.current_category_name.replace(Some(cat_name.clone()));
-                }
-                Self::load_media_by_category(&this_cat, Some(cat_id));
-                let w = this_cat.borrow();
-                w.stack.set_visible_child_name("list");
-                w.media_list.refresh();
+                    *w.current_category.borrow() == Some(cat_id)
+                };
+                let selection = if is_active {
+                    None
+                } else {
+                    Some((cat_id, cat_name.clone()))
+                };
+                Self::set_category_filter(&this_cat, selection);
             });
-            w.categories_list.append(&btn);
+            w.categories_flow.append(&btn);
         }
 
-        // Mostrar u ocultar el botón "Ver todo" según si hay filtro activo.
-        let active = w.current_category.borrow().is_some();
-        if active {
-            w.clear_category_button.set_visible(true);
-        } else {
-            w.clear_category_button.set_visible(false);
-        }
+        w.update_filter_bar();
         drop(w);
-    }
-
-    /// Carga los medios filtrados por categoría (o todos si es None) en la
-    /// galería y actualiza el contador.
-    fn load_media_by_category(this: &MainWindowRef, category_id: Option<i64>) {
-        let db_path = {
-            let w = this.borrow();
-            w.db_path.clone()
-        };
-        let mut conn = match open_db(&db_path) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Error abriendo BD: {}", e);
-                return;
-            }
-        };
-        let mut repo = MediaRepository::new(&mut conn);
-        let media = match category_id {
-            Some(id) => repo
-                .list_by_category(
-                    id,
-                    crate::db::media_repo::ListMediaOptions {
-                        r#type: None,
-                        limit: Some(500),
-                        offset: Some(0),
-                        order_by: None,
-                    },
-                )
-                .unwrap_or_default(),
-            None => repo
-                .list(crate::db::media_repo::ListMediaOptions {
-                    r#type: None,
-                    limit: Some(500),
-                    offset: Some(0),
-                    order_by: None,
-                })
-                .unwrap_or_default(),
-        };
-        close_db(conn);
-
-        let media_count = media.len();
-        let mut w = this.borrow_mut();
-        w.media_count = media_count;
-        w.media_list.set_media(media);
-        Self::update_library_status(&w);
     }
 
     fn play_episode(&self, file_path: &str) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
@@ -991,19 +1124,20 @@ impl MainWindow {
     }
 
     fn refresh_views(this: &MainWindowRef) {
-        let (db_path, visible, media_id) = {
+        let (visible, media_id, season) = {
             let w = this.borrow();
+            let details = w.media_details.borrow();
             (
-                w.db_path.clone(),
                 w.stack.visible_child_name().map(|name| name.to_string()),
-                w.media_details.borrow().media_id(),
+                details.media_id(),
+                details.season_selection(),
             )
         };
 
-        Self::load_media(this, &db_path);
+        Self::load_media(this);
 
         if visible.as_deref() == Some("details") && media_id > 0 {
-            this.borrow().show_details(media_id);
+            this.borrow().show_details(media_id, season);
         }
     }
 

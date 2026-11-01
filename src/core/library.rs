@@ -129,10 +129,11 @@ impl LibraryService {
         if videos.is_empty() {
             if !season_dirs.is_empty() {
                 let series_type = detect_media_type(dir);
+                let series_title = folder_title(dir);
                 let series_id = Self::upsert_named_media(
                     conn,
                     dir,
-                    folder_title(dir),
+                    series_title.clone(),
                     series_type,
                     None,
                     counters,
@@ -140,7 +141,14 @@ impl LibraryService {
                 counters.folders_processed += 1;
 
                 for season in &season_dirs {
-                    Self::index_season(conn, season, series_id, series_type, counters)?;
+                    Self::index_season(
+                        conn,
+                        season,
+                        series_id,
+                        series_type,
+                        &series_title,
+                        counters,
+                    )?;
                 }
 
                 // Las carpetas que no son temporadas (extras, material adicional)
@@ -178,53 +186,56 @@ impl LibraryService {
         // llamada "Solo Leveling S01".
         let is_current_season = is_season_dir(dir);
 
-        let series_id = if is_current_season {
-            let series_title = extract_series_title_from_season_folder(
+        let series_title = if is_current_season {
+            extract_series_title_from_season_folder(
                 &dir.file_name()
                     .map(|name| name.to_string_lossy().to_string())
                     .unwrap_or_default(),
             )
-            .unwrap_or_else(|| folder_title(dir));
-
-            Self::upsert_named_media(conn, dir, series_title, series_type, None, counters)?
+            .unwrap_or_else(|| folder_title(dir))
         } else {
-            Self::upsert_named_media(conn, dir, folder_title(dir), series_type, None, counters)?
+            folder_title(dir)
         };
+
+        let series_id =
+            Self::upsert_named_media(conn, dir, series_title.clone(), series_type, None, counters)?;
         counters.folders_processed += 1;
 
         let mut videos = videos;
         videos.sort();
 
-        if is_current_season {
-            // La carpeta actual es una temporada indexada directamente (por
-            // ejemplo `Solo Leveling S01/` sin carpeta padre de serie). Como el
-            // folder_path de la serie y de la temporada sería el mismo, no
-            // creamos un registro de temporada separado (colisionaría por la
-            // restricción UNIQUE de folder_path). Guardamos los episodios como
-            // hijos directos de la serie, extrayendo el número de temporada
-            // del nombre de la carpeta cuando sea posible.
-            let season_number = extract_season_number_from_folder(
+        let folder_season_number = if is_current_season {
+            extract_season_number_from_folder(
                 &dir.file_name()
                     .map(|name| name.to_string_lossy().to_string())
                     .unwrap_or_default(),
-            );
+            )
+        } else {
+            None
+        };
 
-            let files: Vec<MediaFileInput> = videos
-                .iter()
-                .enumerate()
-                .map(|(index, video)| MediaFileInput {
+        let files: Vec<MediaFileInput> = videos
+            .iter()
+            .enumerate()
+            .map(|(index, video)| {
+                let parsed = parse_season_episode(&file_stem(video));
+                MediaFileInput {
                     media_id: series_id,
-                    season: season_number,
-                    episode: Some(index as i32 + 1),
-                    title: Some(media_file_title(video)),
+                    season: parsed.map(|(season, _)| season).or(folder_season_number),
+                    episode: parsed
+                        .map(|(_, episode)| episode)
+                        .or(Some(index as i32 + 1)),
+                    title: Some(episode_file_title(video, &series_title)),
                     file_path: path_string(video),
                     size_bytes: file_size(video),
                     mtime_ms: None,
-                })
-                .collect();
+                }
+            })
+            .collect();
 
-            Self::save_files(conn, &files, counters)?;
+        Self::save_files(conn, &files, counters)?;
 
+        if is_current_season {
             // Las subcarpetas que no son temporadas se recorren por si
             // contienen medios independientes.
             for other in &other_dirs {
@@ -233,24 +244,15 @@ impl LibraryService {
             return Ok(());
         }
 
-        let files: Vec<MediaFileInput> = videos
-            .iter()
-            .enumerate()
-            .map(|(index, video)| MediaFileInput {
-                media_id: series_id,
-                season: None,
-                episode: Some(index as i32 + 1),
-                title: Some(media_file_title(video)),
-                file_path: path_string(video),
-                size_bytes: file_size(video),
-                mtime_ms: None,
-            })
-            .collect();
-
-        Self::save_files(conn, &files, counters)?;
-
         for season in &season_dirs {
-            Self::index_season(conn, season, series_id, series_type, counters)?;
+            Self::index_season(
+                conn,
+                season,
+                series_id,
+                series_type,
+                &series_title,
+                counters,
+            )?;
         }
 
         // Otras subcarpetas dentro de una serie se ignoran deliberadamente:
@@ -272,6 +274,7 @@ impl LibraryService {
         season_dir: &Path,
         series_id: i64,
         series_type: &str,
+        series_title: &str,
         counters: &mut IndexCounters,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut videos: Vec<PathBuf> = read_entries(season_dir)?
@@ -293,17 +296,29 @@ impl LibraryService {
         )?;
         counters.folders_processed += 1;
 
+        let folder_season_number = extract_season_number_from_folder(
+            &season_dir
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_default(),
+        );
+
         let files: Vec<MediaFileInput> = videos
             .iter()
             .enumerate()
-            .map(|(index, video)| MediaFileInput {
-                media_id: season_id,
-                season: None,
-                episode: Some(index as i32 + 1),
-                title: Some(media_file_title(video)),
-                file_path: path_string(video),
-                size_bytes: file_size(video),
-                mtime_ms: None,
+            .map(|(index, video)| {
+                let parsed = parse_season_episode(&file_stem(video));
+                MediaFileInput {
+                    media_id: season_id,
+                    season: parsed.map(|(season, _)| season).or(folder_season_number),
+                    episode: parsed
+                        .map(|(_, episode)| episode)
+                        .or(Some(index as i32 + 1)),
+                    title: Some(episode_file_title(video, series_title)),
+                    file_path: path_string(video),
+                    size_bytes: file_size(video),
+                    mtime_ms: None,
+                }
             })
             .collect();
 
@@ -614,54 +629,172 @@ fn looks_like_episode(name: &str) -> bool {
         return true;
     }
 
-    let bytes = lower.as_bytes();
+    find_season_episode_span(name).is_some()
+}
 
-    // S01E02 / S1E2
-    for index in 0..bytes.len() {
-        if bytes[index] != b's' {
+/// Extrae `(temporada, episodio)` de un nombre con formato `S01E02`, `s1e2`,
+/// `S01.E02` o `1x02`. Devuelve `None` cuando no hay una marca reconocible.
+pub(crate) fn parse_season_episode(name: &str) -> Option<(i32, i32)> {
+    find_season_episode_span(name).map(|(_, _, episode)| episode)
+}
+
+/// Localiza el marcador de temporada/episodio y devuelve sus límites de byte
+/// dentro de `name` junto con sus valores numéricos.
+///
+/// La búsqueda se hace sobre el nombre original comparando `s`, `e` y `x` sin
+/// distinguir mayúsculas. Así los índices devueltos siempre son válidos para
+/// recortar el título original, incluso si contiene caracteres Unicode cuyo
+/// `to_lowercase()` cambia el número de bytes.
+fn find_season_episode_span(name: &str) -> Option<(usize, usize, (i32, i32))> {
+    let bytes = name.as_bytes();
+
+    // S01E02 / S1E2 / S01.E02
+    for (index, character) in name.char_indices() {
+        if !character.eq_ignore_ascii_case(&'s') || !starts_word(name, index) {
             continue;
         }
-        let mut cursor = index + 1;
-        let digits_start = cursor;
+
+        let season_start = index + 1;
+        let mut cursor = season_start;
         while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
             cursor += 1;
         }
-        if cursor == digits_start || cursor >= bytes.len() || bytes[cursor] != b'e' {
+        if cursor == season_start {
             continue;
         }
-        cursor += 1;
-        let episode_start = cursor;
-        while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
-            cursor += 1;
+        let season_digits = &name[season_start..cursor];
+
+        let mut marker = cursor;
+        while marker < bytes.len()
+            && is_season_separator(name[marker..].chars().next().unwrap_or(' '))
+        {
+            marker += 1;
         }
-        if cursor > episode_start {
-            return true;
+        let is_episode_marker = name[marker..]
+            .chars()
+            .next()
+            .is_some_and(|character| character.eq_ignore_ascii_case(&'e'));
+        if marker >= bytes.len() || !is_episode_marker {
+            continue;
         }
+
+        let episode_start = marker + 1;
+        let mut episode_end = episode_start;
+        while episode_end < bytes.len() && bytes[episode_end].is_ascii_digit() {
+            episode_end += 1;
+        }
+        if episode_end == episode_start {
+            continue;
+        }
+
+        let Ok(season) = season_digits.parse::<i32>() else {
+            continue;
+        };
+        let Ok(episode) = name[episode_start..episode_end].parse::<i32>() else {
+            continue;
+        };
+        return Some((index, episode_end, (season, episode)));
     }
 
     // 1x02
-    for index in 0..bytes.len() {
-        if !bytes[index].is_ascii_digit() {
+    for (index, character) in name.char_indices() {
+        if !character.is_ascii_digit() || !starts_word(name, index) {
             continue;
         }
-        let mut cursor = index;
+
+        let season_start = index;
+        let mut cursor = season_start;
         while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
             cursor += 1;
         }
-        if cursor >= bytes.len() || bytes[cursor] != b'x' {
+        let is_cross_marker = name[cursor..]
+            .chars()
+            .next()
+            .is_some_and(|character| character.eq_ignore_ascii_case(&'x'));
+        if cursor >= bytes.len() || !is_cross_marker {
             continue;
         }
-        cursor += 1;
-        let episode_start = cursor;
-        while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
-            cursor += 1;
+
+        let episode_start = cursor + 1;
+        let mut episode_end = episode_start;
+        while episode_end < bytes.len() && bytes[episode_end].is_ascii_digit() {
+            episode_end += 1;
         }
-        if cursor > episode_start {
-            return true;
+        if episode_end == episode_start {
+            continue;
         }
+
+        let Ok(season) = name[season_start..cursor].parse::<i32>() else {
+            continue;
+        };
+        let Ok(episode) = name[episode_start..episode_end].parse::<i32>() else {
+            continue;
+        };
+        return Some((season_start, episode_end, (season, episode)));
     }
 
-    false
+    None
+}
+
+/// Título visible de un episodio a partir de su archivo. Elimina la marca
+/// `SxxEyy` y el nombre de la serie para no repetirlos en la tarjeta.
+fn episode_file_title(path: &Path, series_title: &str) -> String {
+    let raw = file_stem(path);
+    let Some((start, end, _)) = find_season_episode_span(&raw) else {
+        return media_file_title(path);
+    };
+
+    // Los límites son índices de byte válidos del nombre original.
+    let Some(before) = raw.get(..start) else {
+        return media_file_title(path);
+    };
+    let Some(after) = raw.get(end..) else {
+        return media_file_title(path);
+    };
+
+    let before = clean_title(before.trim_matches(is_title_separator));
+    let after = clean_title(after.trim_matches(is_title_separator));
+    let has_meaningful_after = after
+        .chars()
+        .filter(|character| character.is_alphabetic())
+        .count()
+        >= 3;
+    let candidate = if has_meaningful_after { after } else { before };
+
+    strip_series_prefix(&candidate, series_title)
+}
+
+fn is_title_separator(character: char) -> bool {
+    character.is_whitespace()
+        || matches!(
+            character,
+            '-' | '_' | '.' | ':' | ',' | '·' | '–' | '—' | '|' | '/'
+        )
+}
+
+/// Quita el nombre de la serie al principio del título de un episodio.
+fn strip_series_prefix(title: &str, series_title: &str) -> String {
+    let series_title = series_title.trim();
+    if series_title.is_empty() {
+        return title.trim().to_string();
+    }
+
+    let lower_title = title.to_lowercase();
+    let lower_series = series_title.to_lowercase();
+    if lower_title == lower_series {
+        return String::new();
+    }
+    if !lower_title.starts_with(&lower_series) {
+        return title.trim().to_string();
+    }
+
+    // Se usa el número de caracteres, no de bytes, para respetar Unicode.
+    let series_chars = series_title.chars().count();
+    let Some((index, _)) = title.char_indices().nth(series_chars) else {
+        return String::new();
+    };
+    let rest = title[index..].trim_start_matches(is_title_separator);
+    rest.trim().to_string()
 }
 
 fn is_short_numeric_stem(path: &Path) -> bool {
@@ -1840,6 +1973,65 @@ mod tests {
                 "no debería detectarse como temporada: {name}"
             );
         }
+    }
+
+    #[test]
+    fn parsea_temporada_y_episodio_sin_distinguir_mayusculas() {
+        assert_eq!(
+            super::parse_season_episode("Show.S01E02.1080p"),
+            Some((1, 2))
+        );
+        assert_eq!(super::parse_season_episode("Show.s1.e2"), Some((1, 2)));
+        assert_eq!(super::parse_season_episode("Show.1x02"), Some((1, 2)));
+        assert_eq!(
+            super::parse_season_episode("Show.S02E10.Proper"),
+            Some((2, 10))
+        );
+        assert_eq!(super::parse_season_episode("Show.Episodio 2"), None);
+        assert_eq!(super::parse_season_episode("Pelicula (2024)"), None);
+    }
+
+    #[test]
+    fn titulo_de_episodio_con_unicode_no_se_corrompe() {
+        let path = Path::new("Año.Ñandú.S01E02.La.Caída.mkv");
+        assert_eq!(super::episode_file_title(path, "Año Ñandú"), "La Caída");
+    }
+
+    #[test]
+    fn indexa_episodios_directos_con_temporada_en_el_nombre() {
+        let (db_path, _db_dir) = temp_db();
+        let library = TempDir::new().expect("biblioteca temporal");
+        let root = library.path();
+        let show = root.join("Anime").join("Frieren");
+        touch(&show.join("Frieren.S01E01.El.viaje.mkv"));
+        touch(&show.join("Frieren.S02E03.La.prueba.mkv"));
+        touch(&show.join("Frieren.1x04.Reencuentro.mkv"));
+
+        LibraryService::index_folder(&db_path, root.to_str().unwrap()).expect("indexar");
+
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let show_id: i64 = conn
+            .query_row(
+                "SELECT id FROM media WHERE title = 'Frieren' AND parent_id IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("id de la serie");
+        let mut repo = MediaRepository::new(&mut conn);
+        let files = repo.list_files_by_media(show_id).expect("episodios");
+
+        assert_eq!(files.len(), 3);
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| (file.season, file.episode))
+                .collect::<Vec<_>>(),
+            vec![(Some(1), Some(1)), (Some(1), Some(4)), (Some(2), Some(3))],
+            "cada archivo conserva la temporada y el episodio de su nombre"
+        );
+        assert_eq!(files[0].title.as_deref(), Some("El viaje"));
+        assert_eq!(files[1].title.as_deref(), Some("Reencuentro"));
+        assert_eq!(files[2].title.as_deref(), Some("La prueba"));
     }
 
     #[test]

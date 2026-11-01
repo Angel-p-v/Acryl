@@ -189,6 +189,24 @@ ALTER TABLE media ADD COLUMN vote_average REAL;
 ALTER TABLE media_files ADD COLUMN episode_image_path TEXT;
 "#;
 
+/// Origen de metadatos y estado de tareas derivadas de ellos.
+///
+/// - `metadata_source_id`: identificador del show en TVmaze, necesario para
+///   pedir sus episodios sin repetir la búsqueda por título.
+/// - `categories_fetched_at`: marca de que ya se intentó extraer categorías.
+///   Permite rellenar categorías de bibliotecas creadas antes de la migración
+///   sin repetir la petición en cada arranque.
+/// - `episode_image_checked_at`: marca por archivo de que ya se intentó
+///   obtener su thumbnail. Se reinicia cuando cambia la temporada/episodio.
+const MEDIA_METADATA_SOURCE_SQL: &str = r#"
+ALTER TABLE media ADD COLUMN metadata_source_id INTEGER;
+ALTER TABLE media ADD COLUMN categories_fetched_at TEXT;
+ALTER TABLE media_files ADD COLUMN episode_image_checked_at TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_media_files_episode_image_pending
+  ON media_files(episode_image_checked_at);
+"#;
+
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -234,5 +252,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 9,
         name: "media-categories-and-vote",
         sql: MEDIA_CATEGORIES_AND_VOTE_SQL,
+    },
+    Migration {
+        version: 10,
+        name: "media-metadata-source-and-episode-images",
+        sql: MEDIA_METADATA_SOURCE_SQL,
     },
 ];

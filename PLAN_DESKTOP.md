@@ -410,7 +410,7 @@ Objetivo: interfaz visual bonita con Libadwaita + CSS, renderizado de pósters d
 | Hito | Contenido | Estado |
 |------|-----------|--------|
 | **Hito G.1** | Infraestructura de datos masivos: tabla `media_streams`, índices, extracción con `ffprobe`, consultas paginadas | ✅ completado |
-| **Hito G.2** | Galería de pósters con caché local y descarga asíncrona desde TVmaze | ⚠️ parcial: caché y descarga asíncrona sí; la galería usa `FlowBox` con límite de 500 y no está virtualizada |
+| **Hito G.2** | Galería de pósters con caché local y descarga asíncrona desde TVmaze | ✅ completado: la galería usa `GtkGrid` con reflow por tick callback, tarjetas uniformes 216×404, espaciado constante, alineación a la izquierda y adaptación al ancho de la ventana; sin centrado individual ni `FlowBox`/`AdwClamp` |
 | **Hito G.3** | UI moderna con Libadwaita y CSS de GTK4 (`AdwStatusPage`, `AdwToast`, `AdwClamp`) | ✅ implementado |
 | **Hito G.4** | Selección de pistas audio / subtítulos y reproducción con `mpv` aplicando `--aid` / `--sid` | ✅ implementado |
 | **Hito G.5** | Pruebas de estrés con colección grande y ajuste de rendimiento | Pendiente |
@@ -512,5 +512,61 @@ Orden de trabajo vigente:
 *Nota: este apartado era urgente porque afectaba a la funcionalidad básica de agregar/quitar contenido y a la apariencia visual. 18.1, 18.2 y 18.3 están implementados; el siguiente trabajo planificado es la Fase G (UI moderna, pistas y rendimiento).*
 
 ---
+
+## 19. Rediseño de la UI estilo Crunchyroll/Netflix (categorías, temporadas y detalles)
+
+> Estado: implementado y verificado visualmente en rama `feat/rediseno-ui-categorias-temporadas`.
+
+### 19.1. Galería principal
+- Las tarjetas empiezan a la izquierda con espaciado pequeño y uniforme, fluyen de izquierda a derecha y se envuelven automáticamente.
+- Se adaptan al ancho de la ventana, sin centrado individual, espaciado constante y dimensiones uniformes (216×404 px).
+- Implementado con `GtkGrid` y un callback de reflow por tick, sin `FlowBox` ni `AdwClamp`.
+- Reutiliza tarjetas para evitar recargas innecesarias de pósters.
+
+### 19.2. Barra superior y navegación
+- `GtkCenterBox`: logo a la izquierda, "Categorías" en el centro, búsqueda/estado/ajustes a la derecha.
+- Se eliminaron los botones "Novedades", "Popular" y "Simulcasts"; solo queda "Categorías".
+- El logo vuelve al inicio borrando filtros sin reiniciar la app ni recargar la biblioteca.
+- Historial de navegación (`RefCell<Vec<View>>`) con página o detalles + temporada seleccionada: episodio/temporada → serie, serie/película → pantalla anterior, Ajustes → pantalla exacta anterior.
+
+### 19.3. Categorías
+- Solo el botón "Categorías" en la barra superior.
+- Usa metadatos reales de TVmaze (géneros); no hay categorías inventadas ni duplicadas.
+- Chips con conteo y estado vacío; filtrar, cambiar y limpiar categorías funcionan.
+- Slugs con tildes plegadas (`Acción` → `accion`) para evitar duplicados.
+
+### 19.4. Series y temporadas
+- Temporada por defecto seleccionada; solo se muestran los episodios de esa temporada.
+- Cambiar de temporada refresca la vista sin mezclar temporadas.
+- Se identifica la temporada seleccionada en el desplegable.
+
+### 19.5. Vistas de detalles
+- Cabecera solo con banner (sin póster vertical en el encabezado).
+- Se muestra la puntuación de metadatos (score); se eliminó la acción de valoración.
+- Se eliminaron las acciones "Visto" y "Favorito".
+- Cada episodio tiene su propio thumbnail en caché de 16:9, con fallback visual y sin reutilizar el póster de la serie.
+- Botón de reproducción para películas; etiqueta contextual de "volver".
+
+### 19.6. Base de datos (migración 10)
+- `media.metadata_source_id`: identificador del show en TVmaze.
+- `media.categories_fetched_at`: marca de categorías ya obtenidas (backfill para librerías existentes).
+- `media_files.episode_image_path`: URL del thumbnail del episodio.
+- `media_files.episode_image_checked_at`: marca de comprobación de imagen de episodio.
+- Índice `idx_media_files_episode_image_pending` para episodios sin imagen verificada.
+- `get_or_create_category` normaliza nombres, reutiliza slugs, pliega tildes y rechaza nombres vacíos.
+- Al reindexar, si cambia la temporada/episodio se resetea la imagen y la marca del episodio.
+
+### 19.7. Pruebas y calidad
+- `cargo fmt --all -- --check`: pasa.
+- `cargo clippy --all-targets --all-features -- -D warnings`: pasa.
+- `cargo test --all-targets --all-features`: 74 unitarios + 23 integración + 4 mpv, todos pasan.
+- `cargo build --all-features`: pasa.
+- Validación visual con capturas de pantalla (página de inicio, categorías, filtro por categoría, detalles de serie, episodios con thumbnails individuales).
+
+### 19.8. Limitaciones conocidas
+- El título de episodio en BD antigua puede conservar el prefijo `SxxEyy` (ej. `Episodio 1 - S01E01v2`); no se limpia en la UI de detalles.
+- El detalle de serie puede abrirse inesperadamente tras una sincronización de metadatos en ciertos flujos.
+- Las pruebas de estrés con colecciones masivas (Hito G.5) quedan pendientes.
+- No hay releases automáticos de GitHub; la instalación se hace clonando y compilando el repositorio.
 
 *Nota: Este plan es un borrador inicial. A medida que se avanza en la implementación, se deben actualizar los hitos y criterios de aceptación.*
