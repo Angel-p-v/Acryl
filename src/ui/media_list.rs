@@ -74,6 +74,7 @@ impl MediaList {
         factory.connect_bind({
             let media_for_bind = Rc::clone(&media_ref);
             let translations_for_bind = translations_clone.clone();
+            let on_select_for_bind = Rc::clone(&on_select_ref);
             move |_, list_item| {
                 // Obtener el StringObject del modelo a través de la propiedad "item"
                 // del GtkListItem, y usarlo para encontrar el Media correspondiente.
@@ -97,6 +98,21 @@ impl MediaList {
                     .expect("el child debe ser un Box");
 
                 bind_card(box_child, item, &translations_for_bind);
+
+                /* Conectar un gestor de clic en la tarjeta para que la navegación a
+                 * detalles siempre se dispare al pulsar, incluso si el usuario pulsa
+                 * la misma tarjeta que ya estaba seleccionada (en cuyo caso
+                 * SingleSelection no emite selection_changed porque la posición no
+                 * cambia). */
+                let on_select_cb = Rc::clone(&on_select_for_bind);
+                let media_id = item.id;
+                let click = gtk4::GestureClick::new();
+                click.connect_pressed(move |_, _, _, _| {
+                    if let Some(cb) = on_select_cb.borrow().as_ref() {
+                        cb(media_id);
+                    }
+                });
+                box_child.add_controller(click);
             }
         });
 
@@ -257,6 +273,11 @@ fn build_card_widget() -> Box {
     card.set_halign(gtk4::Align::Start);
     card.set_valign(gtk4::Align::Start);
     card.set_size_request(CARD_WIDTH, CARD_HEIGHT);
+    // Pequeña separación respecto al borde superior de la galería.
+    card.set_margin_top(8);
+    // Pequeña separación respecto a los bordes izquierdo y derecho de la galería.
+    card.set_margin_start(8);
+    card.set_margin_end(8);
 
     let poster_stack = Box::new(Orientation::Vertical, 0);
     poster_stack.set_halign(gtk4::Align::Start);

@@ -243,6 +243,13 @@ pub fn install_theme_css() {
             ".media-card:hover {{ background-color: {}; border-color: {}; transform: scale(1.03); }}\n",
             colors::SURFACE, colors::BORDER_HOVER,
         ));
+        /* Anular el fondo de acento que GTK4 aplica por defecto al ítem
+         * seleccionado de un GtkGridView/GtkListView, de modo que ninguna
+         * tarjeta quede con tono azul tras volver de los detalles. */
+        css.push_str(&format!(
+            ".media-card:selected {{ background-color: {}; border-color: {}; }}\n",
+            colors::CARD, colors::BORDER,
+        ));
 
         /* Póster de medio */
         css.push_str(&format!(
