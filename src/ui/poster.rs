@@ -305,6 +305,11 @@ impl Banner {
                 let texture = gtk4::gdk::Texture::for_pixbuf(&pixbuf);
                 self.picture.set_paintable(Some(&texture));
                 self.picture.set_visible(true);
+                // Forzar redibujado inmediato para que el nuevo banner se vea
+                // sin necesidad de reiniciar la aplicación.
+                self.picture.queue_draw();
+                self.drawing.queue_draw();
+                self.overlay.queue_draw();
             }
             None => {
                 // No hay banner propio: mostrar color de fondo del tema en lugar
@@ -315,6 +320,7 @@ impl Banner {
                 self.picture.set_visible(false);
                 *self.palette.borrow_mut() = BannerPalette::default();
                 self.drawing.queue_draw();
+                self.overlay.queue_draw();
             }
         }
 

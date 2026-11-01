@@ -886,8 +886,8 @@ impl MainWindow {
                     (w.media_details.borrow().media_id(), w.db_path.clone())
                 };
 
-                // Obtener el medio actual para saber el tipo, show_id y las rutas actuales.
-                let (media_type, metadata_source_id, current_poster, current_banner) = {
+                // Obtener el medio actual para saber el show_id y las rutas actuales.
+                let (metadata_source_id, current_poster, current_banner) = {
                     let mut conn = match open_db(&db_path) {
                         Ok(c) => c,
                         Err(e) => {
@@ -899,7 +899,7 @@ impl MainWindow {
                     let media = repo.find_by_id(media_id).unwrap_or(None);
                     close_db(conn);
                     match media {
-                        Some(m) => (m.r#type, m.metadata_source_id, m.poster_path, m.banner_path),
+                        Some(m) => (m.metadata_source_id, m.poster_path, m.banner_path),
                         None => return,
                     }
                 };
@@ -918,7 +918,6 @@ impl MainWindow {
 
                 // Consultar TVmaze en un hilo secundario (solo datos Send).
                 let show_id_for_spawn = show_id;
-                let media_type_for_spawn = media_type.clone();
                 std::thread::spawn(move || {
                     let rt = match tokio::runtime::Runtime::new() {
                         Ok(rt) => rt,
@@ -939,32 +938,7 @@ impl MainWindow {
                         .filter(|o| o.image_type == "banner" || o.image_type == "background")
                         .cloned()
                         .collect();
-
-                    // Fanart.tv solo como proveedor adicional para series/anime
-                    // (no para películas, que requieren TMDb ID que no tenemos).
-                    // Se consulta solo cuando el usuario abre el selector, no en
-                    // el indexado automático.
-                    if media_type_for_spawn != "movie" {
-                        let fanart_images = rt.block_on(
-                            crate::core::metadata::fetch_fanart_images(
-                                &media_type_for_spawn,
-                                show_id_for_spawn,
-                                &client,
-                                None,
-                            ),
-                        );
-                        for opt in fanart_images {
-                            if opt.image_type == "poster" {
-                                poster_options.push(opt);
-                            } else if opt.image_type == "banner"
-                                || opt.image_type == "background"
-                            {
-                                banner_options.push(opt);
-                            }
-                        }
-                    }
-                    // Deduplicar por URL para no mostrar la misma imagen dos veces
-                    // (puede repetirse entre TVmaze y Fanart.tv).
+                    // Deduplicar por URL para no mostrar la misma imagen dos veces.
                     poster_options.dedup_by(|a, b| a.url == b.url);
                     banner_options.dedup_by(|a, b| a.url == b.url);
 

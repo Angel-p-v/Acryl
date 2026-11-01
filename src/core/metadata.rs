@@ -9,17 +9,12 @@ use crate::db::file_repo::{FileRepository, MediaFile};
 use crate::db::media_repo::ListMediaOptions;
 use crate::db::{MediaRepository, close_db, open_db};
 use reqwest::Client;
-use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
 
 const TVMAZE_TIMEOUT_SECS: u64 = 20;
-
-/// Clave pública de Fanart.tv para uso de desarrollo.
-/// Fanart.tv requiere el header `api-key` en todas las peticiones.
-const FANART_API_KEY: &str = "cf5de9043f1c327e3e8c5c3e5e4c5e4c";
 
 /// Resultado de sincronización de metadatos.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -744,107 +739,6 @@ pub async fn fetch_tvmaze_images(show_id: u64, client: &TvmazeClient) -> Vec<Ima
             resolution: "original".to_string(),
             url,
         });
-    }
-
-    options
-}
-
-/// Obtiene imágenes de Fanart.tv para un medio (usado solo cuando el usuario
-/// abre el selector de póster/banner, no en el indexado automático).
-///
-/// Fanart.tv requiere un ID externo: TMDb ID para películas, TVmaze ID o TMDb ID para series.
-/// Devuelve un vector vacío si la consulta falla o no hay resultados.
-pub async fn fetch_fanart_images(
-    media_type: &str,
-    external_id: u64,
-    client: &TvmazeClient,
-    api_key: Option<&str>,
-) -> Vec<ImageOption> {
-    let api_key = api_key.or(Some(FANART_API_KEY));
-
-    let endpoint = if media_type == "movie" {
-        format!("https://webservice.fanart.tv/v3/movies/{}", external_id)
-    } else {
-        format!("https://webservice.fanart.tv/v3/tv/{}", external_id)
-    };
-
-    let mut headers = HeaderMap::new();
-    if let Some(key) = api_key && let Ok(hv) = HeaderValue::from_str(key) {
-        headers.insert("api-key", hv);
-    }
-
-    let response: Value = match client.client.get(&endpoint).headers(headers).send().await {
-        Ok(r) => match r.error_for_status() {
-            Ok(r) => match r.json::<Value>().await {
-                Ok(v) => v,
-                Err(_) => return Vec::new(),
-            },
-            Err(_) => return Vec::new(),
-        },
-        Err(_) => return Vec::new(),
-    };
-
-    let mut options: Vec<ImageOption> = Vec::new();
-    let mut seen_urls: HashSet<String> = HashSet::new();
-
-    // Extraer posters (movieposter / tvposter)
-    if let Some(posters) = response
-        .get("movieposter")
-        .or_else(|| response.get("tvposter"))
-        .and_then(|p| p.as_array())
-    {
-        for poster in posters {
-            if let Some(url) = poster.get("url").and_then(|u| u.as_str()).filter(|u| !u.is_empty())
-                && seen_urls.insert(url.to_string())
-            {
-                options.push(ImageOption {
-                    image_type: "poster".to_string(),
-                    provider: "Fanart.tv".to_string(),
-                    resolution: "original".to_string(),
-                    url: url.to_string(),
-                });
-            }
-        }
-    }
-
-    // Extraer banners (moviebanner / tvbanner)
-    if let Some(banners) = response
-        .get("moviebanner")
-        .or_else(|| response.get("tvbanner"))
-        .and_then(|b| b.as_array())
-    {
-        for banner in banners {
-            if let Some(url) = banner.get("url").and_then(|u| u.as_str()).filter(|u| !u.is_empty())
-                && seen_urls.insert(url.to_string())
-            {
-                options.push(ImageOption {
-                    image_type: "banner".to_string(),
-                    provider: "Fanart.tv".to_string(),
-                    resolution: "original".to_string(),
-                    url: url.to_string(),
-                });
-            }
-        }
-    }
-
-    // Extraer backgrounds (moviebackground / tvbackground) — se usan como banner
-    if let Some(backgrounds) = response
-        .get("moviebackground")
-        .or_else(|| response.get("tvbackground"))
-        .and_then(|b| b.as_array())
-    {
-        for bg in backgrounds {
-            if let Some(url) = bg.get("url").and_then(|u| u.as_str()).filter(|u| !u.is_empty())
-                && seen_urls.insert(url.to_string())
-            {
-                options.push(ImageOption {
-                    image_type: "background".to_string(),
-                    provider: "Fanart.tv".to_string(),
-                    resolution: "original".to_string(),
-                    url: url.to_string(),
-                });
-            }
-        }
     }
 
     options
