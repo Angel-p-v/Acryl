@@ -52,7 +52,23 @@ impl LibraryService {
         Self::scan_root(&mut conn, root, &mut counters)?;
 
         close_db(conn);
+
+        // Extraer pistas de audio y subtítulos de los archivos recién indexados
+        // mediante ffprobe. No bloquea la UI porque se ejecuta tras el indexado
+        // de la carpeta y un archivo que falle no detiene el proceso.
+        let streams_indexed = Self::index_missing_streams_for_folder(db_path, folder_path)?;
+        counters.streams_indexed = streams_indexed;
+
         Ok(counters.into_result())
+    }
+
+    /// Extrae las pistas de audio y subtítulos de los archivos de `folder_path`
+    /// que aún no han sido analizados por `ffprobe`.
+    fn index_missing_streams_for_folder(
+        db_path: &str,
+        folder_path: &str,
+    ) -> Result<usize, Box<dyn std::error::Error>> {
+        crate::core::library::index_missing_streams(db_path, Some(folder_path))
     }
 
     /// Recorre la raíz: los vídeos sueltos son películas y cada subcarpeta se
@@ -542,6 +558,7 @@ pub struct IndexResult {
     pub media_added: i64,
     pub files_added: i64,
     pub folders_processed: i64,
+    pub streams_indexed: usize,
 }
 
 #[derive(Default)]
@@ -549,6 +566,7 @@ struct IndexCounters {
     media_added: i64,
     files_added: i64,
     folders_processed: i64,
+    streams_indexed: usize,
 }
 
 impl IndexCounters {
@@ -557,6 +575,7 @@ impl IndexCounters {
             media_added: self.media_added,
             files_added: self.files_added,
             folders_processed: self.folders_processed,
+            streams_indexed: self.streams_indexed,
         }
     }
 }

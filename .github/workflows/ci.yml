@@ -48,6 +48,6 @@ jobs:
       - name: Ejecutar tests E2E con display virtual (GTK4)
         run: xvfb-run -a cargo test --test e2e_app -- --test-threads=1
       - run: cargo audit
-      - name: Cobertura de código con tarpaulin
-        run: cargo tarpaulin --all-targets --all-features --out xml
-        continue-on-error: true
+      - name: Cobertura de código con tarpaulin (umbral mínimo 60%)
+        run: |
+          cargo tarpaulin --all-targets --all-features --out xml --threshold 60

@@ -6,7 +6,7 @@
 //! bibliotecas grandes. A diferencia de `GtkListView` (un ítem por fila),
 //! `GtkGridView` organiza los ítems en múltiples columnas como una rejilla.
 
-use crate::core::poster_service::cached_path;
+use crate::core::poster_service::{PosterService, cached_path};
 use crate::db::media_repo::Media;
 use crate::ui::i18n::TranslationsRef;
 use crate::ui::poster::{placeholder_widget, poster_picture};
@@ -16,7 +16,9 @@ use gtk4::{
     Box, GridView, Label, Orientation, ScrolledWindow, SignalListItemFactory, SingleSelection,
     StringObject, gio,
 };
+use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::mpsc;
 
 /// Tamaño del póster en la galería (relación 2:3).
 const CARD_POSTER_WIDTH: i32 = 200;
@@ -34,12 +36,23 @@ const MAX_COLUMNS: u32 = 8;
 type SelectCallback = Rc<dyn Fn(i64)>;
 type SharedSelectCallback = Rc<std::cell::RefCell<Option<SelectCallback>>>;
 
+/// Callback compartido para refresh o scroll (hilo principal).
+type ViewCallback = Rc<std::cell::RefCell<Option<Rc<dyn Fn()>>>>;
+
 /// Componente que muestra una galería de medios con pósters, virtualizada.
 pub struct MediaList {
     content: Box,
     store: gio::ListStore,
     /// Medios completos, indexados por la misma posición que el `store`.
-    media: Rc<std::cell::RefCell<Vec<Media>>>,
+    media: Rc<RefCell<Vec<Media>>>,
+    /// Callback para refrescar la galería cuando una descarga de póster termina.
+    refresh_callback: ViewCallback,
+    /// Callback para cargar más medios cuando el scroll llega al final.
+    on_scroll_bottom: ViewCallback,
+    /// Canal para señalar descargas de póster completadas (hilo secundario -> principal).
+    download_tx: mpsc::Sender<()>,
+    /// Receptor de señales de descarga completada (solo hilo principal).
+    download_rx: mpsc::Receiver<()>,
     selection: SingleSelection,
     on_media_select: SharedSelectCallback,
     scrolled: ScrolledWindow,
@@ -64,6 +77,7 @@ impl MediaList {
         let translations_clone = translations.clone();
         let media_ref = Rc::new(std::cell::RefCell::new(Vec::<Media>::new()));
         let on_select_ref = Rc::new(std::cell::RefCell::new(None as Option<SelectCallback>));
+        let on_scroll_bottom_ref = ViewCallback::default();
 
         // connect_setup crea el widget vacío de cada fila y lo asigna al ListItem.
         factory.connect_setup(move |_, list_item| {
@@ -150,14 +164,90 @@ impl MediaList {
 
         content.append(&scrolled);
 
+        // Detectar scroll cerca del final para paginación infinita.
+        let adjustment = scrolled.vadjustment();
+        let on_scroll_bottom_for_scroll = Rc::clone(&on_scroll_bottom_ref);
+        adjustment.connect_value_changed(move |adj| {
+            let value = adj.value();
+            let upper = adj.upper();
+            let page_size = adj.page_size();
+            if value + page_size >= upper - 1.0
+                && let Some(cb) = on_scroll_bottom_for_scroll.borrow().as_ref()
+            {
+                cb();
+            }
+        });
+
+        let (download_tx, download_rx) = mpsc::channel();
+
         Self {
             content,
             store,
             media: media_ref,
+            refresh_callback: ViewCallback::default(),
+            on_scroll_bottom: Rc::clone(&on_scroll_bottom_ref),
+            download_tx,
+            download_rx,
             selection,
             on_media_select: on_select_ref,
-            scrolled,
+            scrolled: scrolled.clone(),
         }
+    }
+
+    /// Registra un callback que se invoca cuando una descarga de póster termina
+    /// para refrescar la galería y mostrar las imágenes descargadas.
+    pub fn set_refresh_callback<F>(&mut self, callback: F)
+    where
+        F: Fn() + 'static,
+    {
+        *self.refresh_callback.borrow_mut() = Some(Rc::new(callback));
+    }
+
+    /// Registra un callback que se invocará cuando el scroll llegue al final
+    /// de la galería, para cargar más medios (paginación infinita).
+    pub fn set_on_scroll_bottom<F>(&mut self, callback: F)
+    where
+        F: Fn() + 'static,
+    {
+        *self.on_scroll_bottom.borrow_mut() = Some(Rc::new(callback));
+    }
+
+    /// Inicia la descarga asíncrona de los pósters que aún no están en caché.
+    /// Cada descarga se ejecuta en un hilo secundario para no bloquear la UI.
+    /// Cuando termina, se invoca el `refresh_callback` para refrescar la
+    /// galería y mostrar los pósters descargados.
+    pub fn start_poster_downloads(&self) {
+        let media = self.media.borrow().clone();
+        let download_tx = self.download_tx.clone();
+
+        for m in media {
+            let Some(poster_url) = m.poster_path.as_deref() else {
+                continue;
+            };
+            if cached_path(poster_url).is_some() {
+                continue;
+            }
+
+            let url = poster_url.to_string();
+            let tx = download_tx.clone();
+
+            std::thread::spawn(move || {
+                let service = PosterService::new();
+                let runtime = match tokio::runtime::Runtime::new() {
+                    Ok(rt) => rt,
+                    Err(_) => return,
+                };
+                let _ = runtime.block_on(service.download_async(&url));
+                let _ = tx.send(());
+            });
+        }
+    }
+
+    /// Devuelve `true` si hay descargas de póster pendientes por procesar.
+    /// Se debe llamar desde el hilo principal (por ejemplo, con
+    /// `glib::timeout_add_local`) para refrescar la galería cuando terminen.
+    pub fn check_downloads(&self) -> bool {
+        self.download_rx.try_recv().is_ok()
     }
 
     /// Devuelve el `ScrolledWindow` que contiene la galería.
@@ -176,6 +266,7 @@ impl MediaList {
     }
 
     /// Reemplaza el contenido de la galería con la lista de medios dada.
+    /// Se usa para la carga inicial o cuando cambia el filtro/búsqueda.
     pub fn set_media(&self, media: Vec<Media>) {
         self.store.remove_all();
         *self.media.borrow_mut() = media.clone();
@@ -186,6 +277,25 @@ impl MediaList {
         // Limpiar la selección: al recargar el contenido, la selección
         // anterior ya no es válida y podría dejar una tarjeta resaltada.
         self.clear_selection();
+        // Iniciar descargas asíncronas de pósters que aún no están en caché.
+        self.start_poster_downloads();
+    }
+
+    /// Añade medios al final de la galería sin reemplazar los existentes.
+    /// Se usa para paginación con scroll infinito.
+    pub fn append_media(&self, media: &[Media]) {
+        if media.is_empty() {
+            return;
+        }
+        let mut current = self.media.borrow_mut();
+        for m in media {
+            current.push(m.clone());
+            let obj = StringObject::new(&m.title);
+            self.store.append(&obj);
+        }
+        // Iniciar descargas asíncronas de los nuevos pósters que faltan.
+        drop(current);
+        self.start_poster_downloads();
     }
 
     /// Registra el callback invocado cuando el usuario selecciona un medio.
