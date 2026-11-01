@@ -11,6 +11,7 @@
   "empty.description": "Add a media folder in Settings to start indexing your library.",
 
   "button.categories": "Categories",
+  "button.all_categories": "All categories",
   "button.clear_category": "Show all",
   "button.settings": "⚙ Settings",
   "button.save": "Save",
@@ -45,6 +46,7 @@
   "settings.folders.title": "Media folders",
   "settings.folders.description": "Folders where media files are indexed:\\nChoose a folder and press Add or Enter. It will be indexed in the background.",
   "settings.folders.entry_placeholder": "/path/to/your/media",
+  "settings.folders.dialog_title": "Select media folder",
   "settings.language.title": "Language",
   "settings.language.es": "Spanish",
   "settings.language.en": "English",
@@ -58,6 +60,7 @@
 
   "episode.ep_word": "Episode",
   "episode.season_word": "Season",
+  "episode.season_abbr": "S",
   "episode.label_title_format": "{}",
   "episode.number_se_format": "S{:02}E{:02}",
   "episode.number_ep_format": "E{:02}",
@@ -71,7 +74,29 @@
   "tooltip.tracks": "Choose audio and subtitle tracks",
   "tooltip.redetect": "Run ffprobe again to read all tracks of the file",
 
+  "track.title": "Audio and subtitle tracks",
+  "track.heading": "Audio and subtitle tracks",
+  "track.audio": "Audio",
+  "track.subtitles": "Subtitles",
+  "track.auto": "Automatic (default)",
+  "track.none": "None (disabled)",
+
+  "stream.track_word": "Track",
   "stream.label_format": "Track {} · {} · {}",
+
+  "language.es": "Spanish",
+  "language.en": "English",
+  "language.ja": "Japanese",
+  "language.fr": "French",
+  "language.de": "German",
+  "language.it": "Italian",
+  "language.pt": "Portuguese",
+  "language.ru": "Russian",
+  "language.zh": "Chinese",
+  "language.ko": "Korean",
+  "language.ar": "Arabic",
+  "language.hi": "Hindi",
+  "language.unknown": "Unknown",
 
   "toast.indexing_completed": "Indexing completed",
   "toast.tracks_saved": "Tracks saved",
@@ -119,6 +144,7 @@
   "status.detecting": "Detecting tracks with ffprobe…",
   "status.no_streams": "No audio or subtitle tracks detected in this file.",
   "status.detect_error_format": "Could not detect tracks: {}",
+  "status.disconnected": "Could not detect the tracks in this file.",
   "status.language_applied": "Language applied",
   "status.save_error_format": "Could not save selection: {}"
 }

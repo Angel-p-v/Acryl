@@ -9,6 +9,7 @@
 use crate::core::library::ensure_media_streams;
 use crate::db::media_repo::MediaStream;
 use crate::db::{FileRepository, TrackSelection, close_db, open_db};
+use crate::ui::i18n::TranslationsRef;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, DropDown, Label, Orientation, Window};
 use std::cell::{Cell, RefCell};
@@ -24,12 +25,13 @@ pub fn show_track_dialog(
     parent: &impl IsA<gtk4::Window>,
     db_path: &str,
     file_path: &str,
+    translations: TranslationsRef,
     on_saved: Rc<dyn Fn()>,
 ) {
     let window = Window::builder()
         .transient_for(parent)
         .modal(true)
-        .title("Pistas de audio y subtítulos")
+        .title(translations.borrow().t("track.title"))
         .default_width(460)
         .build();
 
@@ -40,7 +42,10 @@ pub fn show_track_dialog(
     content.set_margin_end(18);
 
     let heading = Label::new(None);
-    heading.set_markup("<b>Pistas de audio y subtítulos</b>");
+    heading.set_markup(&format!(
+        "<b>{}</b>",
+        translations.borrow().t("track.heading")
+    ));
     heading.set_halign(gtk4::Align::Start);
     content.append(&heading);
 
@@ -57,40 +62,50 @@ pub fn show_track_dialog(
     status_label.add_css_class("dim-label");
     content.append(&status_label);
 
-    let audio_label = Label::new(Some("Audio"));
+    let audio_label = Label::new(None);
     audio_label.set_halign(gtk4::Align::Start);
-    audio_label.set_markup("<b>Audio</b>");
+    audio_label.set_markup(&format!(
+        "<b>{}</b>",
+        translations.borrow().t("track.audio")
+    ));
     content.append(&audio_label);
 
-    let audio_dropdown = DropDown::from_strings(&["Automático (predeterminado)"]);
+    let audio_options = [translations.borrow().t("track.auto")];
+    let audio_option_refs: Vec<&str> = audio_options.iter().map(String::as_str).collect();
+    let audio_dropdown = DropDown::from_strings(&audio_option_refs);
     audio_dropdown.set_hexpand(true);
     content.append(&audio_dropdown);
 
-    let subtitle_label = Label::new(Some("Subtítulos"));
+    let subtitle_label = Label::new(None);
     subtitle_label.set_halign(gtk4::Align::Start);
-    subtitle_label.set_markup("<b>Subtítulos</b>");
+    subtitle_label.set_markup(&format!(
+        "<b>{}</b>",
+        translations.borrow().t("track.subtitles")
+    ));
     content.append(&subtitle_label);
 
-    let subtitle_dropdown =
-        DropDown::from_strings(&["Automático (predeterminado)", "Ninguno (desactivados)"]);
+    let subtitle_options = [
+        translations.borrow().t("track.auto"),
+        translations.borrow().t("track.none"),
+    ];
+    let subtitle_option_refs: Vec<&str> = subtitle_options.iter().map(String::as_str).collect();
+    let subtitle_dropdown = DropDown::from_strings(&subtitle_option_refs);
     subtitle_dropdown.set_hexpand(true);
     content.append(&subtitle_dropdown);
 
     // Botón para forzar la re-detección con ffprobe (útil cuando la BD tiene
     // pistas cacheadas de una indexación previa incompleta).
-    let redetect_button = Button::with_label("🔄 Volver a detectar pistas");
+    let redetect_button = Button::with_label(&translations.borrow().t("button.redetect"));
     redetect_button.set_halign(gtk4::Align::Start);
-    redetect_button.set_tooltip_text(Some(
-        "Ejecuta ffprobe de nuevo para leer todas las pistas del archivo",
-    ));
+    redetect_button.set_tooltip_text(Some(&translations.borrow().t("tooltip.redetect")));
     content.append(&redetect_button);
 
     let buttons = Box::new(Orientation::Horizontal, 8);
     buttons.set_halign(gtk4::Align::End);
     buttons.set_margin_top(6);
 
-    let cancel_button = Button::with_label("Cancelar");
-    let save_button = Button::with_label("Guardar");
+    let cancel_button = Button::with_label(&translations.borrow().t("dialog.remove_folder.cancel"));
+    let save_button = Button::with_label(&translations.borrow().t("button.save"));
     save_button.add_css_class("suggested-action");
     buttons.append(&cancel_button);
     buttons.append(&save_button);
@@ -116,12 +131,13 @@ pub fn show_track_dialog(
         &audio_streams.borrow(),
         &subtitle_streams.borrow(),
         selection.get(),
+        &translations,
     );
 
     if has_stored_streams {
         status_label.set_visible(false);
     } else {
-        status_label.set_label("Detectando pistas con ffprobe…");
+        status_label.set_label(&translations.borrow().t("status.detecting"));
         detect_streams_in_background(
             false,
             db_path.to_string(),
@@ -132,6 +148,7 @@ pub fn show_track_dialog(
             audio_streams.clone(),
             subtitle_streams.clone(),
             selection.clone(),
+            translations.clone(),
         );
     }
 
@@ -148,6 +165,7 @@ pub fn show_track_dialog(
     let subtitle_streams_for_save = subtitle_streams.clone();
     let db_path_for_save = db_path.to_string();
     let file_path_for_save = file_path.to_string();
+    let translations_for_save = translations.clone();
     save_button.connect_clicked(move |_| {
         let selection = current_selection(
             &audio_for_save,
@@ -162,13 +180,16 @@ pub fn show_track_dialog(
                 window_for_save.close();
             }
             Ok(false) => {
-                status_for_save.set_label(
-                    "No se encontró el archivo en la biblioteca; vuelve a indexar la carpeta.",
-                );
+                status_for_save
+                    .set_label(&translations_for_save.borrow().t("status.not_in_library"));
                 status_for_save.set_visible(true);
             }
             Err(error) => {
-                status_for_save.set_label(&format!("No se pudo guardar la selección: {}", error));
+                let text = translations_for_save
+                    .borrow()
+                    .t("status.save_error_format")
+                    .replacen("{}", &error.to_string(), 1);
+                status_for_save.set_label(&text);
                 status_for_save.set_visible(true);
             }
         }
@@ -184,8 +205,9 @@ pub fn show_track_dialog(
     let audio_streams_red = audio_streams.clone();
     let subtitle_streams_red = subtitle_streams.clone();
     let selection_red = selection.clone();
+    let translations_red = translations.clone();
     redetect_for_click.connect_clicked(move |_| {
-        status_red.set_label("Detectando pistas con ffprobe…");
+        status_red.set_label(&translations_red.borrow().t("status.detecting"));
         status_red.set_visible(true);
         detect_streams_in_background(
             true,
@@ -197,6 +219,7 @@ pub fn show_track_dialog(
             audio_streams_red.clone(),
             subtitle_streams_red.clone(),
             selection_red.clone(),
+            translations_red.clone(),
         );
     });
 
@@ -269,6 +292,7 @@ fn detect_streams_in_background(
     audio_streams: Rc<RefCell<Vec<MediaStream>>>,
     subtitle_streams: Rc<RefCell<Vec<MediaStream>>>,
     selection: Rc<Cell<TrackSelection>>,
+    translations: TranslationsRef,
 ) {
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
@@ -297,12 +321,11 @@ fn detect_streams_in_background(
                     &audio_streams.borrow(),
                     &subtitle_streams.borrow(),
                     selection.get(),
+                    &translations,
                 );
 
                 if audio_streams.borrow().is_empty() && subtitle_streams.borrow().is_empty() {
-                    status_label.set_label(
-                        "No se han detectado pistas de audio ni subtítulos en este archivo.",
-                    );
+                    status_label.set_label(&translations.borrow().t("status.no_streams"));
                     status_label.set_visible(true);
                 } else {
                     status_label.set_visible(false);
@@ -310,13 +333,17 @@ fn detect_streams_in_background(
                 gtk4::glib::ControlFlow::Break
             }
             Ok(Err(error)) => {
-                status_label.set_label(&format!("No se pudieron detectar las pistas: {}", error));
+                let text = translations
+                    .borrow()
+                    .t("status.detect_error_format")
+                    .replacen("{}", &error, 1);
+                status_label.set_label(&text);
                 status_label.set_visible(true);
                 gtk4::glib::ControlFlow::Break
             }
             Err(TryRecvError::Empty) => gtk4::glib::ControlFlow::Continue,
             Err(TryRecvError::Disconnected) => {
-                status_label.set_label("No se pudieron detectar las pistas del archivo.");
+                status_label.set_label(&translations.borrow().t("status.disconnected"));
                 status_label.set_visible(true);
                 gtk4::glib::ControlFlow::Break
             }
@@ -331,19 +358,28 @@ fn refresh_dropdowns(
     audio_streams: &[MediaStream],
     subtitle_streams: &[MediaStream],
     selection: TrackSelection,
+    translations: &TranslationsRef,
 ) {
-    let mut audio_options = vec!["Automático (predeterminado)".to_string()];
-    audio_options.extend(audio_streams.iter().map(stream_label));
+    let auto_label = translations.borrow().t("track.auto");
+    let none_label = translations.borrow().t("track.none");
+
+    let mut audio_options = vec![auto_label.clone()];
+    audio_options.extend(
+        audio_streams
+            .iter()
+            .map(|stream| stream_label(translations, stream)),
+    );
     let audio_model =
         gtk4::StringList::new(&audio_options.iter().map(String::as_str).collect::<Vec<_>>());
     audio_dropdown.set_model(Some(&audio_model));
     audio_dropdown.set_selected(audio_position(audio_streams, selection.audio_stream_index));
 
-    let mut subtitle_options = vec![
-        "Automático (predeterminado)".to_string(),
-        "Ninguno (desactivados)".to_string(),
-    ];
-    subtitle_options.extend(subtitle_streams.iter().map(stream_label));
+    let mut subtitle_options = vec![auto_label, none_label];
+    subtitle_options.extend(
+        subtitle_streams
+            .iter()
+            .map(|stream| stream_label(translations, stream)),
+    );
     let subtitle_model = gtk4::StringList::new(
         &subtitle_options
             .iter()
@@ -418,10 +454,11 @@ fn current_selection(
 }
 
 /// Texto legible de una pista: número, idioma, título y códec.
-fn stream_label(stream: &MediaStream) -> String {
-    let mut parts = vec![format!("Pista {}", stream.stream_index + 1)];
+fn stream_label(translations: &TranslationsRef, stream: &MediaStream) -> String {
+    let track_word = translations.borrow().t("stream.track_word");
+    let mut parts = vec![format!("{} {}", track_word, stream.stream_index + 1)];
     if let Some(language) = stream.language.as_deref() {
-        parts.push(language_name(language));
+        parts.push(language_name(translations, language));
     }
     if let Some(title) = stream.title.as_deref().filter(|title| !title.is_empty()) {
         parts.push(title.to_string());
@@ -432,24 +469,25 @@ fn stream_label(stream: &MediaStream) -> String {
     parts.join(" · ")
 }
 
-/// Nombre en español de los códigos de idioma más habituales.
-fn language_name(code: &str) -> String {
-    match code.to_ascii_lowercase().as_str() {
-        "spa" | "es" | "es-es" | "es-mx" => "Español".to_string(),
-        "eng" | "en" | "en-us" | "en-gb" => "Inglés".to_string(),
-        "jpn" | "ja" => "Japonés".to_string(),
-        "fra" | "fre" | "fr" => "Francés".to_string(),
-        "deu" | "ger" | "de" => "Alemán".to_string(),
-        "ita" | "it" => "Italiano".to_string(),
-        "por" | "pt" | "pt-br" => "Portugués".to_string(),
-        "rus" | "ru" => "Ruso".to_string(),
-        "zho" | "chi" | "zh" => "Chino".to_string(),
-        "kor" | "ko" => "Coreano".to_string(),
-        "ara" | "ar" => "Árabe".to_string(),
-        "hin" | "hi" => "Hindi".to_string(),
-        "und" => "Desconocido".to_string(),
-        other => other.to_uppercase(),
-    }
+/// Nombre traducido de los códigos de idioma más habituales.
+fn language_name(translations: &TranslationsRef, code: &str) -> String {
+    let key = match code.to_ascii_lowercase().as_str() {
+        "spa" | "es" | "es-es" | "es-mx" => "language.es",
+        "eng" | "en" | "en-us" | "en-gb" => "language.en",
+        "jpn" | "ja" => "language.ja",
+        "fra" | "fre" | "fr" => "language.fr",
+        "deu" | "ger" | "de" => "language.de",
+        "ita" | "it" => "language.it",
+        "por" | "pt" | "pt-br" => "language.pt",
+        "rus" | "ru" => "language.ru",
+        "zho" | "chi" | "zh" => "language.zh",
+        "kor" | "ko" => "language.ko",
+        "ara" | "ar" => "language.ar",
+        "hin" | "hi" => "language.hi",
+        "und" => "language.unknown",
+        _ => return code.to_uppercase(),
+    };
+    translations.borrow().t(key)
 }
 
 #[cfg(test)]
@@ -507,7 +545,15 @@ mod tests {
 
     #[test]
     fn etiqueta_de_pista_incluye_idioma_y_codec() {
-        let label = stream_label(&stream("audio", 1, "eng"));
+        let translations = crate::ui::i18n::load_translations("es").expect("cargar español");
+        let label = stream_label(&translations, &stream("audio", 1, "eng"));
         assert_eq!(label, "Pista 2 · Inglés · aac");
+    }
+
+    #[test]
+    fn etiqueta_de_pista_se_traduce_al_ingles() {
+        let translations = crate::ui::i18n::load_translations("en").expect("cargar inglés");
+        let label = stream_label(&translations, &stream("audio", 1, "eng"));
+        assert_eq!(label, "Track 2 · English · aac");
     }
 }

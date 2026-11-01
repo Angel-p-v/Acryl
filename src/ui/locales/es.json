@@ -11,6 +11,7 @@
   "empty.description": "Agrega una carpeta de videos en Ajustes para comenzar a indexar tu biblioteca.",
 
   "button.categories": "Categorías",
+  "button.all_categories": "Todas las categorías",
   "button.clear_category": "Ver todo",
   "button.settings": "⚙ Ajustes",
   "button.save": "Guardar",
@@ -45,6 +46,7 @@
   "settings.folders.title": "Rutas de medios",
   "settings.folders.description": "Carpetas donde se indexan los archivos multimedia:\\nElige una carpeta y pulsa Agregar o Enter. Se indexará en segundo plano.",
   "settings.folders.entry_placeholder": "/ruta/a/tus/medios",
+  "settings.folders.dialog_title": "Seleccionar carpeta de medios",
   "settings.language.title": "Idioma",
   "settings.language.es": "Español",
   "settings.language.en": "Inglés",
@@ -58,6 +60,7 @@
 
   "episode.ep_word": "Episodio",
   "episode.season_word": "Temporada",
+  "episode.season_abbr": "T",
   "episode.label_title_format": "{}",
   "episode.number_se_format": "S{:02}E{:02}",
   "episode.number_ep_format": "E{:02}",
@@ -71,7 +74,29 @@
   "tooltip.tracks": "Elegir pista de audio y subtítulos",
   "tooltip.redetect": "Ejecuta ffprobe de nuevo para leer todas las pistas del archivo",
 
+  "track.title": "Pistas de audio y subtítulos",
+  "track.heading": "Pistas de audio y subtítulos",
+  "track.audio": "Audio",
+  "track.subtitles": "Subtítulos",
+  "track.auto": "Automático (predeterminado)",
+  "track.none": "Ninguno (desactivados)",
+
+  "stream.track_word": "Pista",
   "stream.label_format": "Pista {} · {} · {}",
+
+  "language.es": "Español",
+  "language.en": "Inglés",
+  "language.ja": "Japonés",
+  "language.fr": "Francés",
+  "language.de": "Alemán",
+  "language.it": "Italiano",
+  "language.pt": "Portugués",
+  "language.ru": "Ruso",
+  "language.zh": "Chino",
+  "language.ko": "Coreano",
+  "language.ar": "Árabe",
+  "language.hi": "Hindi",
+  "language.unknown": "Desconocido",
 
   "toast.indexing_completed": "Indexación completada",
   "toast.tracks_saved": "Pistas guardadas",

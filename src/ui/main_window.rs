@@ -38,6 +38,8 @@ pub struct MainWindow {
     translations: TranslationsRef,
     /// Lista de categorías de la página de filtro.
     categories_list: Box,
+    /// Título de la página de categorías.
+    categories_title: Label,
     /// Botón "Ver todo" para limpiar el filtro de categoría.
     clear_category_button: Button,
     /// Página de la que se abrió Ajustes, para volver a ella (no siempre al
@@ -171,7 +173,7 @@ impl MainWindow {
         list_clamp.set_child(Some(media_list.widget()));
 
         // Página principal: lista de medios (envuelta en Clamp).
-        stack.add_titled(&list_clamp, Some("list"), "Lista");
+        stack.add_titled(&list_clamp, Some("list"), &t("stack.list"));
 
         // Configurar columnas responsivas para la galería según el ancho
         // inicial de la ventana. Se calcula restando los márgenes del
@@ -185,7 +187,7 @@ impl MainWindow {
         empty_page.set_icon_name(Some("media-library-symbolic"));
         empty_page.set_vexpand(true);
         empty_page.set_hexpand(true);
-        stack.add_titled(&empty_page, Some("empty"), "Vacía");
+        stack.add_titled(&empty_page, Some("empty"), &t("stack.empty"));
         // --- Página de categorías: selección y filtrado de la biblioteca ---
         let categories_page = Box::new(Orientation::Vertical, 0);
         categories_page.set_hexpand(true);
@@ -221,7 +223,7 @@ impl MainWindow {
         clear_category_button.set_visible(false);
         categories_page.append(&clear_category_button);
 
-        stack.add_titled(&categories_page, Some("categories"), "Categorías");
+        stack.add_titled(&categories_page, Some("categories"), &t("stack.categories"));
 
         let media_details = Rc::new(RefCell::new(MediaDetails::new(
             &db_path,
@@ -238,7 +240,7 @@ impl MainWindow {
         details_scrolled.set_vexpand(true);
         details_scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
         details_scrolled.set_child(Some(media_details.borrow().widget()));
-        stack.add_titled(&details_scrolled, Some("details"), "Detalles");
+        stack.add_titled(&details_scrolled, Some("details"), &t("stack.details"));
 
         let config_rc = Rc::new(RefCell::new(config.inner().clone()));
 
@@ -249,7 +251,11 @@ impl MainWindow {
             &window,
             translations.clone(),
         );
-        stack.add_titled(settings_view.widget(), Some("settings"), "Ajustes");
+        stack.add_titled(
+            settings_view.widget(),
+            Some("settings"),
+            &t("stack.settings"),
+        );
 
         stack.set_visible_child_name("list");
 
@@ -271,6 +277,7 @@ impl MainWindow {
             toast_overlay,
             translations,
             categories_list,
+            categories_title,
             clear_category_button,
             previous_page: Rc::new(Cell::new(None)),
             current_category: Rc::new(RefCell::new(None)),
@@ -397,7 +404,7 @@ impl MainWindow {
             let this = this_clone.clone();
             glib::timeout_add_local(Duration::from_millis(500), move || {
                 let w = this.borrow();
-                w.show_toast("Indexación completada");
+                w.show_toast(&w.t("toast.indexing_completed"));
                 glib::ControlFlow::Break
             });
         });
@@ -465,7 +472,7 @@ impl MainWindow {
                 let w = this_clone.borrow();
                 if let Err(error) = w.play_episode(&file_path) {
                     eprintln!("No se pudo reproducir '{}': {}", file_path, error);
-                    w.show_error("No se pudo reproducir el episodio", &error.to_string());
+                    w.show_error(&w.t("error.play_episode"), &error.to_string());
                 }
             });
 
@@ -481,11 +488,12 @@ impl MainWindow {
                     &w.window,
                     &w.db_path,
                     &file_path,
+                    w.translations.clone(),
                     Rc::new({
                         let this_for_toast = this.clone();
                         move || {
                             let w2 = this_for_toast.borrow();
-                            w2.show_toast("Pistas guardadas");
+                            w2.show_toast(&w2.t("toast.tracks_saved"));
                         }
                     }),
                 );
@@ -597,6 +605,18 @@ impl MainWindow {
 
         // Placeholder del buscador
         self.search_bar.set_placeholder(&self.translations);
+
+        // Página de categorías: título y botón "Todas las categorías" (los
+        // nombres de categoría provienen de la BD y no se traducen).
+        self.categories_title.set_label(&self.t("stack.categories"));
+        if let Some(first) = self.categories_list.first_child()
+            && let Ok(button) = first.downcast::<Button>()
+        {
+            button.set_label(&self.t("button.all_categories"));
+        }
+
+        // Vista de ajustes (título, secciones, botones, filas de carpetas)
+        self.settings_view.refresh_texts();
     }
 
     /// Actualiza el indicador de carpetas y medios de la barra superior.
@@ -714,7 +734,7 @@ impl MainWindow {
         }
 
         // Botón "Todas" para quitar el filtro.
-        let all_button = Button::with_label("Todas las categorías");
+        let all_button = Button::with_label(&w.t("button.all_categories"));
         all_button.add_css_class("nav-button");
         all_button.set_hexpand(false);
         all_button.set_valign(gtk4::Align::Center);
@@ -869,25 +889,33 @@ impl MainWindow {
     /// Pide confirmación antes de sobrescribir todos los metadatos indexados.
     fn confirm_metadata_refresh(this: &MainWindowRef) {
         if this.borrow().metadata_sync_running.get() {
-            this.borrow()
-                .settings_view
-                .set_metadata_status("Ya hay una sincronización de metadatos en curso.");
+            let w = this.borrow();
+            let text = w.t("status.metadata.already_running");
+            w.settings_view.set_metadata_status(&text);
             return;
         }
 
+        let (window, message, detail, cancel, update) = {
+            let w = this.borrow();
+            (
+                w.window.clone(),
+                w.t("metadata.refresh.title"),
+                w.t("metadata.refresh.detail"),
+                w.t("metadata.refresh.cancel"),
+                w.t("metadata.refresh.update"),
+            )
+        };
+
         let dialog = gtk4::AlertDialog::builder()
             .modal(true)
-            .message("¿Actualizar todos los metadatos?")
-            .detail(
-                "Se consultará TVmaze (y AniList para anime) y se sobrescribirán el título, el año, la sinopsis, el póster y el banner de todos los medios indexados. Esta acción no se puede deshacer.",
-            )
-            .buttons(["Cancelar", "Actualizar"])
+            .message(&message)
+            .detail(&detail)
+            .buttons([cancel.as_str(), update.as_str()])
             .cancel_button(0)
             .default_button(0)
             .build();
 
         let this = this.clone();
-        let window = this.borrow().window.clone();
         dialog.choose(Some(&window), None::<&gio::Cancellable>, move |response| {
             if matches!(response, Ok(1)) {
                 Self::start_metadata_refresh(&this);
@@ -899,9 +927,9 @@ impl MainWindow {
     /// progreso en Ajustes sin bloquear la UI.
     fn start_metadata_refresh(this: &MainWindowRef) {
         if this.borrow().metadata_sync_running.get() {
-            this.borrow()
-                .settings_view
-                .set_metadata_status("Ya hay una sincronización de metadatos en curso.");
+            let w = this.borrow();
+            let text = w.t("status.metadata.already_running");
+            w.settings_view.set_metadata_status(&text);
             return;
         }
 
@@ -910,8 +938,8 @@ impl MainWindow {
         {
             let w = this.borrow();
             w.settings_view.set_metadata_refreshing(true);
-            w.settings_view
-                .set_metadata_status("Consultando TVmaze y actualizando metadatos...");
+            let text = w.t("status.metadata.refreshing");
+            w.settings_view.set_metadata_status(&text);
         }
 
         let (sender, receiver) = mpsc::channel();
@@ -928,8 +956,8 @@ impl MainWindow {
                         let w = this.borrow();
                         w.metadata_sync_running.set(false);
                         w.settings_view.set_metadata_refreshing(false);
-                        w.settings_view
-                            .set_metadata_status(&metadata_refresh_summary(&result));
+                        let summary = metadata_refresh_summary(&result, &w.translations);
+                        w.settings_view.set_metadata_status(&summary);
                     }
                     if result.updated > 0 {
                         Self::refresh_views(&this);
@@ -941,12 +969,10 @@ impl MainWindow {
                         let w = this.borrow();
                         w.metadata_sync_running.set(false);
                         w.settings_view.set_metadata_refreshing(false);
-                        w.settings_view
-                            .set_metadata_status("No se pudieron actualizar los metadatos.");
-                        w.show_error(
-                            "No se pudieron actualizar los metadatos",
-                            &error.to_string(),
-                        );
+                        let status = w.t("status.metadata.error_detail");
+                        w.settings_view.set_metadata_status(&status);
+                        let title = w.t("status.metadata.error_title");
+                        w.show_error(&title, &error.to_string());
                     }
                     glib::ControlFlow::Break
                 }
@@ -955,8 +981,8 @@ impl MainWindow {
                     let w = this.borrow();
                     w.metadata_sync_running.set(false);
                     w.settings_view.set_metadata_refreshing(false);
-                    w.settings_view
-                        .set_metadata_status("La actualización se interrumpió inesperadamente.");
+                    let status = w.t("status.metadata.interrupted");
+                    w.settings_view.set_metadata_status(&status);
                     glib::ControlFlow::Break
                 }
             }
@@ -995,31 +1021,34 @@ impl MainWindow {
 }
 
 /// Resumen legible del resultado de una actualización forzada de metadatos.
-fn metadata_refresh_summary(result: &RefreshMetadataResult) -> String {
+fn metadata_refresh_summary(
+    result: &RefreshMetadataResult,
+    translations: &TranslationsRef,
+) -> String {
+    let t = |key: &str| translations.borrow().t(key);
+
     if result.total == 0 {
-        return "No hay medios indexados que actualizar.".to_string();
+        return t("metadata.sync.no_media");
     }
 
-    let mut summary = format!(
-        "Metadatos actualizados en {} de {} medios.",
-        result.updated, result.total
-    );
+    let mut summary = t("metadata.sync.success")
+        .replacen("{}", &result.updated.to_string(), 1)
+        .replacen("{}", &result.total.to_string(), 1);
     if result.failed > 0 {
-        summary.push_str(&format!(
-            " {} no se pudieron actualizar (sin resultados en TVmaze o error de red).",
-            result.failed
-        ));
+        summary.push_str(&t("metadata.sync.failed").replacen("{}", &result.failed.to_string(), 1));
     }
     if result.poster_failed > 0 {
-        summary.push_str(&format!(
-            " {} pósters no se pudieron descargar; se conservó el anterior.",
-            result.poster_failed
+        summary.push_str(&t("metadata.sync.poster_failed").replacen(
+            "{}",
+            &result.poster_failed.to_string(),
+            1,
         ));
     }
     if result.banner_failed > 0 {
-        summary.push_str(&format!(
-            " {} banners no se pudieron descargar; se conservó el anterior.",
-            result.banner_failed
+        summary.push_str(&t("metadata.sync.banner_failed").replacen(
+            "{}",
+            &result.banner_failed.to_string(),
+            1,
         ));
     }
     summary

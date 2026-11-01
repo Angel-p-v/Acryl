@@ -97,4 +97,20 @@ mod tests {
         translations.set_language("en").expect("cambiar a inglés");
         assert_eq!(translations.t("settings.title"), "Settings");
     }
+
+    #[test]
+    fn diccionarios_es_y_en_tienen_las_mismas_claves() {
+        let es = Translations::load("es").expect("cargar español");
+        let en = Translations::load("en").expect("cargar inglés");
+
+        let mut es_keys: Vec<&str> = es.strings.keys().map(String::as_str).collect();
+        let mut en_keys: Vec<&str> = en.strings.keys().map(String::as_str).collect();
+        es_keys.sort_unstable();
+        en_keys.sort_unstable();
+
+        assert_eq!(
+            es_keys, en_keys,
+            "los diccionarios es y en deben tener las mismas claves"
+        );
+    }
 }

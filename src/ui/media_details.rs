@@ -163,7 +163,7 @@ impl MediaDetails {
             parent_id: None,
             banner,
             main_button_file_path,
-            main_button_label: "▶ Reproducir".to_string(),
+            main_button_label: t("button.play"),
             synopsis_label,
             tracks_button,
             play_button,
@@ -220,10 +220,10 @@ impl MediaDetails {
         self.back_button.set_label(&back_label);
 
         let type_label = match media.r#type.as_str() {
-            "series" => "Serie",
-            "anime" => "Anime",
-            "movie" => "Película",
-            other => other,
+            "series" => self.t("media.type.series"),
+            "anime" => self.t("media.type.anime"),
+            "movie" => self.t("media.type.movie"),
+            other => other.to_string(),
         };
         let info_label = match media.year {
             Some(year) => format!("{} · {}", type_label, year),
@@ -551,7 +551,7 @@ impl MediaDetails {
             let episode_number = match (f.season, f.episode) {
                 (Some(s), Some(e)) => format!("S{:02}E{:02}", s, e),
                 (None, Some(e)) => format!("E{:02}", e),
-                (Some(s), None) => format!("T{:02}", s),
+                (Some(s), None) => format!("{}{:02}", self.t("episode.season_abbr"), s),
                 (None, None) => String::new(),
             };
 
@@ -621,7 +621,7 @@ impl MediaDetails {
             let episode_number = match (f.season, f.episode) {
                 (Some(s), Some(e)) => format!("S{:02}E{:02}", s, e),
                 (None, Some(e)) => format!("E{:02}", e),
-                (Some(s), None) => format!("T{:02}", s),
+                (Some(s), None) => format!("{}{:02}", self.t("episode.season_abbr"), s),
                 (None, None) => String::new(),
             };
 
@@ -638,7 +638,7 @@ impl MediaDetails {
     /// cambiar de temporada).
     fn load_episodes_for_files(&self, files: &[crate::db::file_repo::MediaFile]) {
         if files.is_empty() {
-            let no_files_label = Label::new(Some("Sin episodios disponibles"));
+            let no_files_label = Label::new(Some(&self.t("content.no_episodes")));
             no_files_label.set_halign(gtk4::Align::Start);
             no_files_label.set_valign(gtk4::Align::Start);
             no_files_label.set_margin_top(24);
@@ -674,7 +674,7 @@ impl MediaDetails {
             let episode_number = match (f.season, f.episode) {
                 (Some(s), Some(e)) => format!("S{:02}E{:02}", s, e),
                 (None, Some(e)) => format!("E{:02}", e),
-                (Some(s), None) => format!("T{:02}", s),
+                (Some(s), None) => format!("{}{:02}", self.t("episode.season_abbr"), s),
                 (None, None) => String::new(),
             };
 

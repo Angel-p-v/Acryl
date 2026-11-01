@@ -104,6 +104,21 @@ impl FolderManager {
         self.folders_list.append(&row);
     }
 
+    /// Actualiza las etiquetas de los botones «Eliminar» de las carpetas ya
+    /// mostradas, para que el cambio de idioma se aplique sin reindexar.
+    fn refresh_row_labels(&self) {
+        let remove_label = self.t("dialog.remove_folder.delete");
+        let mut child = self.folders_list.first_child();
+        while let Some(row) = child {
+            if let Some(widget) = row.last_child()
+                && let Ok(button) = widget.downcast::<Button>()
+            {
+                button.set_label(&remove_label);
+            }
+            child = row.next_sibling();
+        }
+    }
+
     /// Añade una carpeta a la configuración, la guarda y lanza el indexado.
     /// Devuelve `true` si la carpeta se añadió correctamente.
     fn add_folder(&self, input: &str) -> bool {
@@ -165,7 +180,7 @@ impl FolderManager {
         let dialog = gtk4::AlertDialog::builder()
             .modal(true)
             .message(title)
-            .detail(&self.t("dialog.remove_folder.detail"))
+            .detail(self.t("dialog.remove_folder.detail"))
             .buttons([cancel_label.as_str(), delete_label.as_str()])
             .cancel_button(0)
             .default_button(0)
@@ -390,7 +405,17 @@ impl FolderManager {
 /// Vista de ajustes integrada (se muestra dentro del Stack de MainWindow).
 pub struct SettingsView {
     content: Box,
+    title: Label,
+    folders_title: Label,
+    folders_label: Label,
+    folder_entry: Entry,
+    browse_button: Button,
+    add_button: Button,
+    reindex_button: Button,
+    language_title: Label,
     language_combo: DropDown,
+    metadata_title: Label,
+    metadata_label: Label,
     save_button: Button,
     cancel_button: Button,
     metadata_button: Button,
@@ -400,6 +425,7 @@ pub struct SettingsView {
     folder_manager: FolderManager,
     on_save: Option<Rc<dyn Fn(AppConfig)>>,
     on_refresh_metadata: Option<Rc<dyn Fn()>>,
+    translations: TranslationsRef,
 }
 
 impl SettingsView {
@@ -606,9 +632,14 @@ impl SettingsView {
         // Botón Examinar: selector nativo de carpetas de GTK4.
         let entry_browse = folder_entry.clone();
         let window_browse = parent.upcast_ref::<gtk4::Window>().clone();
+        let translations_browse = translations.clone();
         browse_button.connect_clicked(move |_| {
             let dialog = gtk4::FileDialog::new();
-            dialog.set_title("Seleccionar carpeta de medios");
+            dialog.set_title(
+                &translations_browse
+                    .borrow()
+                    .t("settings.folders.dialog_title"),
+            );
             let entry = entry_browse.clone();
             dialog.select_folder(
                 Some(&window_browse),
@@ -636,7 +667,17 @@ impl SettingsView {
 
         Self {
             content,
+            title,
+            folders_title,
+            folders_label,
+            folder_entry,
+            browse_button,
+            add_button,
+            reindex_button,
+            language_title,
             language_combo,
+            metadata_title,
+            metadata_label,
             save_button,
             cancel_button,
             metadata_button,
@@ -646,12 +687,49 @@ impl SettingsView {
             folder_manager,
             on_save: None,
             on_refresh_metadata: None,
+            translations,
         }
     }
 
     /// Devuelve el widget Gtk.
     pub fn widget(&self) -> &Box {
         &self.content
+    }
+
+    /// Reescribe todas las etiquetas de la vista con el idioma actual, de modo
+    /// que el cambio de idioma se vea al instante sin reiniciar la aplicación.
+    pub fn refresh_texts(&self) {
+        let t = |key: &str| -> String { self.translations.borrow().t(key) };
+
+        self.title.set_label(&t("settings.title"));
+        self.folders_title.set_label(&t("settings.folders.title"));
+        self.folders_label
+            .set_label(&t("settings.folders.description"));
+        self.folder_entry
+            .set_placeholder_text(Some(&t("settings.folders.entry_placeholder")));
+        self.browse_button.set_label(&t("button.browse"));
+        self.add_button.set_label(&t("button.add_folder"));
+        self.reindex_button.set_label(&t("button.reindex"));
+        self.language_title.set_label(&t("settings.language.title"));
+
+        // Actualizar las opciones del desplegable de idioma conservando la
+        // selección actual del usuario.
+        let selected = self.language_combo.selected();
+        let options = [t("settings.language.es"), t("settings.language.en")];
+        let option_refs: Vec<&str> = options.iter().map(String::as_str).collect();
+        let model = gtk4::StringList::new(&option_refs);
+        self.language_combo.set_model(Some(&model));
+        self.language_combo.set_selected(selected.min(1));
+
+        self.metadata_title.set_label(&t("settings.metadata.title"));
+        self.metadata_label
+            .set_label(&t("settings.metadata.description"));
+        self.metadata_button
+            .set_label(&t("button.refresh_metadata"));
+        self.cancel_button.set_label(&t("button.cancel"));
+        self.save_button.set_label(&t("button.save"));
+
+        self.folder_manager.refresh_row_labels();
     }
 
     /// Establece el callback de guardar (se ejecuta al hacer clic en Guardar).
