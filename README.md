@@ -145,31 +145,7 @@ cd acryl
 ./scripts/install.sh
 ```
 
-#### Cómo instalar
 
-Acryl no tiene releases publicados. La única forma de instalarlo es clonando
-el repositorio y ejecutando el script de instalación:
-
-```bash
-git clone https://github.com/Angel-p-v/app-media-manager.git acryl
-cd acryl
-./scripts/install.sh
-```
-
-El script **instala todo lo necesario** para que la aplicación funcione:
-
-1. Detecta tu gestor de paquetes (`apt`, `pacman`, `dnf`, `zypper` o `apk`) e
-   instala las dependencias de sistema (`libgtk-4`, `libadwaita-1`,
-   `librsvg2`, `gdk-pixbuf2`, `mpv`, `pkg-config`). Usa `sudo` solo para este
-   paso.
-2. Instala Rust / Cargo (≥ 1.90) si falta o está desactualizado.
-3. Compila la aplicación con `cargo build --release`.
-4. Instala el binario en `~/.local/bin/acryl`.
-5. Crea la entrada `.desktop` en `~/.local/share/applications/` para que puedas
-   buscar y ejecutar Acryl desde el menú de aplicaciones.
-6. Instala el icono en `~/.local/share/icons/hicolor/scalable/apps/`.
-
-Al terminar, busca **Acryl** en el menú de aplicaciones o ejecuta `acryl`.
 
 > **Nota:** el binario y la entrada `.desktop` se instalan a nivel de usuario
 > (`~/.local`), sin necesidad de root para esos archivos. Solo se requiere
@@ -308,11 +284,11 @@ app-media-manager/
 │       ├── search_bar.rs     Barra de búsqueda
 │       ├── settings_window.rs Vista de ajustes
 │       └── poster.rs         Renderizado de pósters con gdk-pixbuf
-├── scripts/                  Scripts de instalación, desinstalación y actualización
+├── scripts/                  Scripts de instalación, desinstalación, actualización y diagnóstico
 │   ├── install.sh            Instalador (sin Node.js, sin privilegios de root por defecto)
 │   ├── uninstall.sh          Desinstalador (con opción --purge para borrar todo)
-│   └── update.sh             Actualizador (git pull + install en un solo paso)
-├── diagnostic/               Scripts de diagnóstico Wayland/Hyprland
+│   ├── update.sh             Actualizador (git pull + install en un solo paso)
+│   └── diagnose-*.sh         Scripts de diagnóstico Wayland/Hyprland
 ├── tests/                    Pruebas de integración (SQLite temporal, mpv)
 ├── docs/                     Documentación y ADRs
 │   └── adr/                  Decisiones de arquitectura
