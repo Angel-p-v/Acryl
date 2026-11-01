@@ -377,7 +377,7 @@ LICENSE                   ← Se mantiene
 | Hito 4 | UI completa (detalles, favoritos, visto, navegación) | ✅ completado |
 | Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ⚠️ sustituido por E.4 (instalador nativo sin paquetes) |
 | Hito 6 | Configuración YAML en el backend | ✅ completado |
-| Hito 7 | Internacionalización (i18n) de la UI | ⚠️ parcial: selector de idioma persistido; faltan traducciones reales |
+| Hito 7 | Internacionalización (i18n) de la UI | ✅ completado: diccionarios `es.json` y `en.json` con las mismas claves, cambio de idioma en caliente sin reiniciar, 14 idiomas soportados |
 | Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ✅ completado: metadatos con TVmaze/AniList/Kitsu, registro en BD, vista de historial con tarjetas, borrado y temporada/episodio |
 | Hito 9 | Publicación automática en GitHub Releases | ❌ cancelado: no hay releases automáticos |
 | **Hito E.1** | Prototipo mínimo GTK4 (ventana, lista, póster, búsqueda) | ✅ completado |
@@ -414,7 +414,7 @@ Objetivo: interfaz visual bonita con Libadwaita + CSS, renderizado de pósters d
 | **Hito G.2** | Galería de pósters con caché local y descarga asíncrona desde TVmaze | ✅ completado: la galería usa `GtkGrid` con reflow por tick callback, tarjetas uniformes 216×404, espaciado constante, alineación a la izquierda y adaptación al ancho de la ventana; sin centrado individual ni `FlowBox`/`AdwClamp` |
 | **Hito G.3** | UI moderna con Libadwaita y CSS de GTK4 (`AdwStatusPage`, `AdwToast`, `AdwClamp`) | ✅ implementado |
 | **Hito G.4** | Selección de pistas audio / subtítulos y reproducción con `mpv` aplicando `--aid` / `--sid` | ✅ implementado |
-| **Hito G.5** | Pruebas de estrés con colección grande y ajuste de rendimiento | Pendiente |
+| **Hito G.5** | Pruebas de estrés con colección grande y ajuste de rendimiento | ✅ completado |
 
 ---
 
@@ -424,10 +424,12 @@ Orden de trabajo vigente:
 
 1. ✅ Resolver **18.2** (hueco entre póster/banner y sinopsis en series con temporadas).
 2. ✅ Resolver **18.3** (póster principal y de temporada; evitar placeholders innecesarios).
-3. ✅ Completar **Hito G.4** (selección de audio/subtítulos y `--aid`/`--sid` en `mpv`).
-4. ✅ Completar **Hito G.3** (UI moderna con Libadwaita y CSS).
-5. Completar **Hito G.5** (pruebas de estrés y rendimiento).
-6. Revisar si la galería necesita virtualización real (`GtkListView`) según el criterio del Hito G.2.
+3. ✅ Completar **Hito G.3** (UI moderna con Libadwaita y CSS).
+4. ✅ Completar **Hito G.4** (selección de audio/subtítulos y `--aid`/`--sid` en `mpv`).
+5. ✅ Completar **Hito G.5** (pruebas de estrés y rendimiento con `tests/media_stress.rs`).
+6. ✅ Virtualización de galería con `GtkGridView` (solo renderiza ítems visibles).
+
+No hay trabajo pendiente en el plan.
 
 ---
 
@@ -564,9 +566,6 @@ Orden de trabajo vigente:
 - Validación visual con capturas de pantalla (página de inicio, categorías, filtro por categoría, detalles de serie, episodios con thumbnails individuales).
 
 ### 19.8. Limitaciones conocidas
-- El título de episodio en BD antigua puede conservar el prefijo `SxxEyy` (ej. `Episodio 1 - S01E01v2`); no se limpia en la UI de detalles.
-- El detalle de serie puede abrirse inesperadamente tras una sincronización de metadatos en ciertos flujos.
-- Las pruebas de estrés con colecciones masivas (Hito G.5) quedan pendientes.
 - No hay releases automáticos de GitHub; la instalación se hace clonando y compilando el repositorio.
 
 *Nota: Este plan es un borrador inicial. A medida que se avanza en la implementación, se deben actualizar los hitos y criterios de aceptación.*
