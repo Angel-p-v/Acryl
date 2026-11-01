@@ -12,18 +12,20 @@
 #![allow(deprecated)]
 
 use crate::core::metadata::ImageOption;
-use crate::core::poster_service::{PosterService, cached_path};
+use crate::core::poster_service::{cached_path, PosterService};
 use crate::ui::poster::poster_picture;
 use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
-use gtk4::{Align, Box, Button, Dialog, FlowBox, Image, Label, Orientation, Window};
+use gtk4::{
+    Align, Box, Button, Dialog, FlowBox, Image, Label, Orientation, Window,
+};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc;
 
 /// Tamaño de las miniaturas en el selector.
-const THUMB_SIZE: i32 = 120;
+const THUMB_SIZE: i32 = 100;
 
 /// Resultado de la selección del usuario.
 pub struct SelectorResult {
@@ -44,9 +46,6 @@ pub struct PosterSelector {
     remove_poster: Rc<Cell<bool>>,
     /// Indica si el usuario eligió eliminar el banner (marca "Sin banner").
     remove_banner: Rc<Cell<bool>>,
-    /// Mapa URL -> botón para actualizar miniaturas al terminar descargas.
-    #[allow(dead_code)]
-    url_to_btn: Rc<RefCell<HashMap<String, Button>>>,
 }
 
 impl PosterSelector {
@@ -55,7 +54,7 @@ impl PosterSelector {
     /// Las miniaturas se muestran inmediatamente con un marcador neutro. Las
     /// imágenes que no están en caché se descargan en un hilo secundario; al
     /// terminar cada descarga, se actualiza la miniatura correspondiente desde
-    /// el hilo principal de GTK mediante `glib::idle_add_local`.
+    /// el hilo principal de GTK mediante `glib::timeout_add_local`.
     ///
     /// - `poster_options`: opciones de póster desde la API (puede estar vacío).
     /// - `banner_options`: opciones de banner desde la API (puede estar vacío).
@@ -72,21 +71,22 @@ impl PosterSelector {
         dialog.set_title(Some("Elegir póster y banner"));
         dialog.set_modal(true);
         dialog.set_transient_for(Some(parent.upcast_ref::<Window>()));
-        dialog.set_default_size(700, 500);
+        // Tamaño compacto: suficiente para 3-4 miniaturas por fila.
+        dialog.set_default_size(560, 420);
+        dialog.set_resizable(false);
 
         let selected_poster = Rc::new(RefCell::new(None));
         let selected_banner = Rc::new(RefCell::new(None));
         let remove_poster = Rc::new(Cell::new(false));
         let remove_banner = Rc::new(Cell::new(false));
         let url_to_btn = Rc::new(RefCell::new(HashMap::new()));
-
         let content = dialog.content_area();
         content.set_orientation(Orientation::Vertical);
-        content.set_spacing(12);
-        content.set_margin_top(12);
-        content.set_margin_bottom(12);
-        content.set_margin_start(12);
-        content.set_margin_end(12);
+        content.set_spacing(8);
+        content.set_margin_top(8);
+        content.set_margin_bottom(8);
+        content.set_margin_start(8);
+        content.set_margin_end(8);
 
         // ---------- Sección: Póster ----------
         let poster_section = section_box("Póster");
@@ -232,7 +232,7 @@ impl PosterSelector {
                             )
                         {
                             // Reemplazar el contenido del botón con la imagen real.
-                            let box_ = Box::new(Orientation::Vertical, 6);
+                            let box_ = Box::new(Orientation::Vertical, 4);
                             box_.set_halign(Align::Center);
                             box_.set_valign(Align::Center);
 
@@ -243,7 +243,7 @@ impl PosterSelector {
                             lbl.set_halign(Align::Center);
                             lbl.set_xalign(0.5);
                             lbl.set_wrap(true);
-                            lbl.set_max_width_chars(12);
+                            lbl.set_max_width_chars(10);
                             lbl.add_css_class("thumbnail-label");
                             box_.append(&lbl);
 
@@ -252,8 +252,8 @@ impl PosterSelector {
                         }
                         glib::ControlFlow::Continue
                     }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
                 }
             });
         }
@@ -264,7 +264,6 @@ impl PosterSelector {
             selected_banner,
             remove_poster,
             remove_banner,
-            url_to_btn,
         }
     }
 
@@ -315,8 +314,8 @@ impl PosterSelector {
 
 /// Crea un contenedor de sección con título.
 fn section_box(title: &str) -> Box {
-    let section = Box::new(Orientation::Vertical, 8);
-    section.set_hexpand(true);
+    let section = Box::new(Orientation::Vertical, 6);
+    section.set_hexpand(false);
     section.set_vexpand(false);
 
     let label = Label::new(Some(title));
@@ -332,15 +331,15 @@ fn section_box(title: &str) -> Box {
 fn thumbnail_flow() -> FlowBox {
     let flow = FlowBox::new();
     flow.add_css_class("thumbnail-flow");
-    flow.set_hexpand(true);
+    flow.set_hexpand(false);
     flow.set_vexpand(false);
-    flow.set_max_children_per_line(5);
+    flow.set_max_children_per_line(4);
     flow.set_min_children_per_line(1);
-    flow.set_row_spacing(10);
-    flow.set_column_spacing(10);
-    flow.set_homogeneous(true);
+    flow.set_row_spacing(8);
+    flow.set_column_spacing(8);
+    flow.set_homogeneous(false);
     flow.set_selection_mode(gtk4::SelectionMode::None);
-    flow.set_margin_top(6);
+    flow.set_margin_top(4);
     flow
 }
 
@@ -350,11 +349,11 @@ fn thumbnail_button_placeholder(opt: &ImageOption) -> Button {
     let btn = Button::new();
     btn.set_hexpand(false);
     btn.set_vexpand(false);
-    btn.set_size_request(THUMB_SIZE, THUMB_SIZE + 40);
+    btn.set_size_request(THUMB_SIZE + 16, THUMB_SIZE + 56);
     btn.add_css_class("thumbnail-btn");
     btn.set_tooltip_text(Some(&opt.url));
 
-    let box_ = Box::new(Orientation::Vertical, 6);
+    let box_ = Box::new(Orientation::Vertical, 4);
     box_.set_halign(Align::Center);
     box_.set_valign(Align::Center);
 
@@ -364,7 +363,7 @@ fn thumbnail_button_placeholder(opt: &ImageOption) -> Button {
     lbl.set_halign(Align::Center);
     lbl.set_xalign(0.5);
     lbl.set_wrap(true);
-    lbl.set_max_width_chars(12);
+    lbl.set_max_width_chars(10);
     lbl.add_css_class("thumbnail-label");
     box_.append(&lbl);
 
@@ -377,15 +376,15 @@ fn thumbnail_button_remove(text: &str) -> Button {
     let btn = Button::new();
     btn.set_hexpand(false);
     btn.set_vexpand(false);
-    btn.set_size_request(THUMB_SIZE, THUMB_SIZE + 40);
+    btn.set_size_request(THUMB_SIZE + 16, THUMB_SIZE + 56);
     btn.add_css_class("thumbnail-btn");
 
-    let box_ = Box::new(Orientation::Vertical, 6);
+    let box_ = Box::new(Orientation::Vertical, 4);
     box_.set_halign(Align::Center);
     box_.set_valign(Align::Center);
 
     let icon = Image::from_icon_name("user-trash-symbolic");
-    icon.set_pixel_size(48);
+    icon.set_pixel_size(36);
     icon.set_halign(Align::Center);
     box_.append(&icon);
 
@@ -393,7 +392,7 @@ fn thumbnail_button_remove(text: &str) -> Button {
     lbl.set_halign(Align::Center);
     lbl.set_xalign(0.5);
     lbl.set_wrap(true);
-    lbl.set_max_width_chars(12);
+    lbl.set_max_width_chars(10);
     lbl.add_css_class("thumbnail-label");
     box_.append(&lbl);
 
@@ -403,24 +402,11 @@ fn thumbnail_button_remove(text: &str) -> Button {
 
 /// Añade un placeholder neutro (sin icono de interrogación) cuando no se
 /// puede mostrar la imagen. Solo muestra un rectángulo con el texto.
-fn placeholder_thumbnail(container: &Box, text: &str) {
+fn placeholder_thumbnail(container: &Box, _text: &str) {
     let rect = Box::new(Orientation::Vertical, 0);
     rect.set_size_request(THUMB_SIZE, THUMB_SIZE);
     rect.set_halign(Align::Center);
     rect.set_valign(Align::Center);
     rect.add_css_class("thumbnail-placeholder");
     container.append(&rect);
-
-    let lbl = Label::new(Some(text));
-    lbl.set_halign(Align::Center);
-    lbl.set_xalign(0.5);
-    lbl.set_wrap(true);
-    lbl.set_max_width_chars(12);
-    lbl.add_css_class("thumbnail-label");
-    container.append(&lbl);
-}
-
-/// Elimina de la caché el póster asociado a una URL.
-pub fn remove_cached_image(url: &str) -> std::io::Result<bool> {
-    crate::core::poster_service::remove_cached(url)
 }
