@@ -24,10 +24,12 @@ pub struct MainWindow {
     stack: Stack,
     search_bar: SearchBar,
     settings_button: Button,
+    categories_button: Button,
     media_list: MediaList,
     media_details: Rc<RefCell<MediaDetails>>,
     settings_view: SettingsView,
     library_status: Label,
+    empty_page: StatusPage,
     config: Rc<RefCell<crate::config::AppConfig>>,
     media_count: usize,
     db_path: String,
@@ -184,7 +186,6 @@ impl MainWindow {
         empty_page.set_vexpand(true);
         empty_page.set_hexpand(true);
         stack.add_titled(&empty_page, Some("empty"), "Vacía");
-
         // --- Página de categorías: selección y filtrado de la biblioteca ---
         let categories_page = Box::new(Orientation::Vertical, 0);
         categories_page.set_hexpand(true);
@@ -257,10 +258,12 @@ impl MainWindow {
             stack,
             search_bar,
             settings_button,
+            categories_button: Button::new(),
             media_list,
             media_details,
             settings_view,
             library_status,
+            empty_page,
             config: config_rc.clone(),
             media_count: 0,
             db_path: db_path.clone(),
@@ -300,6 +303,10 @@ impl MainWindow {
             Self::populate_categories_page(&this_cat);
         });
         nav_box.append(&categories_button);
+        {
+            let mut w = this.borrow_mut();
+            w.categories_button = categories_button;
+        }
 
         // Callback: botón "Ver todo" -> quita el filtro de categoría.
         let this_clear = this.clone();
@@ -559,17 +566,37 @@ impl MainWindow {
 
     /// Recarga el diccionario de traducciones para `language` y refresca las
     /// vistas visibles para que el cambio de idioma se aplique sin reiniciar.
-    ///
-    /// El borrow de `this` se acota y se libera antes de llamar a
-    /// `refresh_views` (que necesita `borrow_mut`), evitando
-    /// `RefCell already borrowed`.
     fn set_language(
         &mut self,
         language: &str,
     ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
         self.translations.borrow_mut().set_language(language)?;
         self.show_toast(&self.t("status.language_applied"));
+        self.refresh_ui_texts();
         Ok(())
+    }
+
+    /// Reescribe el texto de todos los widgets ya creados con el idioma actual.
+    /// Se llama después de cambiar el idioma para que los cambios se vean
+    /// sin reiniciar la aplicación.
+    fn refresh_ui_texts(&mut self) {
+        // Barra superior
+        self.settings_button.set_label(&self.t("button.settings"));
+        self.categories_button
+            .set_label(&self.t("button.categories"));
+        self.clear_category_button
+            .set_label(&self.t("button.clear_category"));
+
+        // Página vacía
+        self.empty_page.set_title(&self.t("empty.title"));
+        self.empty_page
+            .set_description(Some(&self.t("empty.description")));
+
+        // Indicador de biblioteca
+        Self::update_library_status(self);
+
+        // Placeholder del buscador
+        self.search_bar.set_placeholder(&self.translations);
     }
 
     /// Actualiza el indicador de carpetas y medios de la barra superior.

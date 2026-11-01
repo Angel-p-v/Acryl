@@ -57,6 +57,12 @@ impl SearchBar {
         self.results_label.set_label("");
     }
 
+    /// Actualiza el placeholder del campo de búsqueda al idioma actual.
+    pub fn set_placeholder(&self, translations: &TranslationsRef) {
+        self.entry
+            .set_placeholder_text(Some(&translations.borrow().t("search.placeholder")));
+    }
+
     pub fn on_select<F>(&mut self, f: F)
     where
         F: Fn(i64) + 'static,
