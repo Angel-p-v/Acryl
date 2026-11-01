@@ -484,6 +484,10 @@ impl MainWindow {
 
         stack.set_visible_child_name("list");
 
+        // Clonar stack antes de moverlo al struct, para conectar la señal
+        // de cambio de página visible y limpiar la selección de la galería.
+        let stack_for_signal = stack.clone();
+
         let this = Rc::new(RefCell::new(Self {
             window,
             stack,
@@ -525,6 +529,18 @@ impl MainWindow {
             history_back_button,
             history_clear_button,
         }));
+
+        // Al volver a la vista de la galería, limpiar la selección para que
+        // ninguna tarjeta quede resaltada con tono azul.
+        let this_for_stack = this.clone();
+        stack_for_signal.connect_notify_local(None, move |stack, _pspec| {
+            if let Some(name) = stack.visible_child_name()
+                && name == "list"
+            {
+                let w = this_for_stack.borrow();
+                w.media_list.clear_selection();
+            }
+        });
 
         this.borrow().window.present();
 
