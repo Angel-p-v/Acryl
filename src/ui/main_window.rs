@@ -557,10 +557,17 @@ impl MainWindow {
             // Eliminar medios de carpetas que ya no están en el config
             let _ = crate::core::library::cleanup_media_not_in_folders(&db_path_save, &folders);
 
-            // Aplicar el idioma en caliente y refrescar las vistas visibles.
-            {
-                let mut w = this_save.borrow_mut();
-                let _ = w.set_language(&language);
+            // Aplicar el idioma en caliente solo si realmente cambió, para no
+            // mostrar el toast de "idioma aplicado" innecesariamente.
+            let previous_language = {
+                let w = this_save.borrow();
+                w.config.borrow().language.clone()
+            };
+            if language != previous_language {
+                {
+                    let mut w = this_save.borrow_mut();
+                    let _ = w.set_language(&language);
+                }
             }
             Self::refresh_views(&this_save);
         });
