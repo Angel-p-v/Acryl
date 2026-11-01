@@ -3,6 +3,7 @@
 use crate::core::metadata::RefreshMetadataResult;
 use crate::db::media_repo::ListMediaOptions;
 use crate::db::{MediaRepository, close_db, open_db};
+use crate::ui::i18n::{Translations, load_translations};
 use crate::ui::media_details::MediaDetails;
 use crate::ui::media_list::MediaList;
 use crate::ui::search_bar::SearchBar;
@@ -53,6 +54,14 @@ impl MainWindow {
 
         let db_path = config.inner().db_path.clone();
         let config_path = config.path().to_path_buf();
+
+        let language = config.inner().language.clone();
+        let translations = load_translations(&language)
+            .unwrap_or_else(|_| Rc::new(RefCell::new(Translations::default())));
+        let t = {
+            let t_ref = translations.clone();
+            move |key: &str| -> String { t_ref.borrow().t(key) }
+        };
 
         let window = AdwApplicationWindow::builder()
             .application(app)
@@ -133,7 +142,7 @@ impl MainWindow {
         right_section.append(&library_status);
 
         // Botón de ajustes.
-        let settings_button = Button::with_label("⚙ Ajustes");
+        let settings_button = Button::with_label(&t("button.settings"));
         settings_button.set_halign(gtk4::Align::End);
         settings_button.set_hexpand(false);
         settings_button.set_valign(gtk4::Align::Center);
@@ -168,10 +177,8 @@ impl MainWindow {
 
         // Página vacía: AdwStatusPage cuando no hay medios indexados.
         let empty_page = StatusPage::new();
-        empty_page.set_title("Sin medios indexados");
-        empty_page.set_description(Some(
-            "Agrega una carpeta de videos en Ajustes para comenzar a indexar tu biblioteca.",
-        ));
+        empty_page.set_title(&t("empty.title"));
+        empty_page.set_description(Some(&t("empty.description")));
         empty_page.set_icon_name(Some("media-library-symbolic"));
         empty_page.set_vexpand(true);
         empty_page.set_hexpand(true);
@@ -182,7 +189,7 @@ impl MainWindow {
         categories_page.set_hexpand(true);
         categories_page.set_vexpand(true);
 
-        let categories_title = Label::new(Some("Categorías"));
+        let categories_title = Label::new(Some(&t("stack.categories")));
         categories_title.set_halign(gtk4::Align::Start);
         categories_title.set_margin_top(20);
         categories_title.set_margin_start(24);
@@ -204,7 +211,7 @@ impl MainWindow {
         categories_page.append(&categories_scrolled);
 
         // Botón para limpiar el filtro y mostrar todos los medios.
-        let clear_category_button = Button::with_label("Ver todo");
+        let clear_category_button = Button::with_label(&t("button.clear_category"));
         clear_category_button.add_css_class("flat-button");
         clear_category_button.set_halign(gtk4::Align::Start);
         clear_category_button.set_margin_start(24);
@@ -214,7 +221,11 @@ impl MainWindow {
 
         stack.add_titled(&categories_page, Some("categories"), "Categorías");
 
-        let media_details = Rc::new(RefCell::new(MediaDetails::new(&db_path, 0)));
+        let media_details = Rc::new(RefCell::new(MediaDetails::new(
+            &db_path,
+            0,
+            translations.clone(),
+        )));
         media_details.borrow_mut().set_db_path(&db_path);
 
         // La vista de detalles puede crecer con la sinopsis y los episodios:
@@ -271,7 +282,7 @@ impl MainWindow {
         logo_label.add_controller(logo_click);
 
         // Botón "Categorías": abre el selector de categorías para filtrar.
-        let categories_button = Button::with_label("Categorías");
+        let categories_button = Button::with_label(&t("button.categories"));
         categories_button.add_css_class("nav-button");
         categories_button.set_valign(gtk4::Align::Center);
         let this_cat = this.clone();
