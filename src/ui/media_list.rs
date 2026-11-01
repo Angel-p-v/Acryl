@@ -40,6 +40,7 @@ pub struct MediaList {
     store: gio::ListStore,
     /// Medios completos, indexados por la misma posición que el `store`.
     media: Rc<std::cell::RefCell<Vec<Media>>>,
+    selection: SingleSelection,
     on_media_select: SharedSelectCallback,
     scrolled: ScrolledWindow,
 }
@@ -133,6 +134,7 @@ impl MediaList {
             content,
             store,
             media: media_ref,
+            selection,
             on_media_select: on_select_ref,
             scrolled,
         }
@@ -145,6 +147,12 @@ impl MediaList {
 
     pub fn widget(&self) -> &Box {
         &self.content
+    }
+
+    /// Limpia la selección actual de la galería, para que ninguna tarjeta
+    /// quede con el tono de fondo de "seleccionada" al volver a esta vista.
+    pub fn clear_selection(&self) {
+        self.selection.set_selected(gtk4::INVALID_LIST_POSITION);
     }
 
     /// Reemplaza el contenido de la galería con la lista de medios dada.
