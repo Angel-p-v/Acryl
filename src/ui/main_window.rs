@@ -1046,8 +1046,9 @@ impl MainWindow {
                                 });
 
                                 // Refrescar la vista de detalles para mostrar las nuevas
-                                // imágenes. Estamos en el hilo principal de GTK.
+                                // imágenes inmediatamente, sin reiniciar la app.
                                 this_for_refresh.borrow().show_details(media_id2, None);
+                                this_for_refresh.borrow().widget().queue_draw();
                             });
 
                             glib::ControlFlow::Break

@@ -80,6 +80,7 @@ impl PosterSelector {
         let remove_poster = Rc::new(Cell::new(false));
         let remove_banner = Rc::new(Cell::new(false));
         let url_to_btn = Rc::new(RefCell::new(HashMap::new()));
+        let url_to_provider = Rc::new(RefCell::new(HashMap::new()));
         let content = dialog.content_area();
         content.set_orientation(Orientation::Vertical);
         content.set_spacing(8);
@@ -110,14 +111,18 @@ impl PosterSelector {
             let btn = thumbnail_button_placeholder(opt);
             // Registrar la URL para poder actualizar el botón después.
             url_to_btn.borrow_mut().insert(opt.url.clone(), btn.clone());
+            url_to_provider.borrow_mut().insert(opt.url.clone(), opt.provider.clone());
 
             {
                 let url = opt.url.clone();
+                let provider = opt.provider.clone();
                 let selected = selected_poster.clone();
                 let remove = remove_poster.clone();
                 btn.connect_clicked(move |_| {
+                    let provider = provider.clone();
                     *selected.borrow_mut() = Some(ImageOption {
                         image_type: "poster".to_string(),
+                        provider,
                         resolution: "original".to_string(),
                         url: url.clone(),
                     });
@@ -130,6 +135,7 @@ impl PosterSelector {
             {
                 *selected_poster.borrow_mut() = Some(ImageOption {
                     image_type: "poster".to_string(),
+                    provider: opt.provider.clone(),
                     resolution: "original".to_string(),
                     url: opt.url.clone(),
                 });
@@ -160,14 +166,18 @@ impl PosterSelector {
         for opt in banner_options {
             let btn = thumbnail_button_placeholder(opt);
             url_to_btn.borrow_mut().insert(opt.url.clone(), btn.clone());
+            url_to_provider.borrow_mut().insert(opt.url.clone(), opt.provider.clone());
 
             {
                 let url = opt.url.clone();
+                let provider = opt.provider.clone();
                 let selected = selected_banner.clone();
                 let remove = remove_banner.clone();
                 btn.connect_clicked(move |_| {
+                    let provider = provider.clone();
                     *selected.borrow_mut() = Some(ImageOption {
                         image_type: "banner".to_string(),
+                        provider,
                         resolution: "original".to_string(),
                         url: url.clone(),
                     });
@@ -179,6 +189,7 @@ impl PosterSelector {
             {
                 *selected_banner.borrow_mut() = Some(ImageOption {
                     image_type: "banner".to_string(),
+                    provider: opt.provider.clone(),
                     resolution: "original".to_string(),
                     url: opt.url.clone(),
                 });
@@ -219,6 +230,7 @@ impl PosterSelector {
 
             // Revisar el canal desde el hilo principal para actualizar miniaturas.
             let url_to_btn_for_idle = url_to_btn.clone();
+            let url_to_provider_for_idle = url_to_provider.clone();
             glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
                 match rx.try_recv() {
                     Ok(url) => {
@@ -239,7 +251,12 @@ impl PosterSelector {
                             let picture = poster_picture(&pixbuf, THUMB_SIZE, THUMB_SIZE);
                             box_.append(&picture);
 
-                            let lbl = Label::new(Some(&url));
+                            let provider = url_to_provider_for_idle
+                                .borrow()
+                                .get(&url)
+                                .cloned()
+                                .unwrap_or_default();
+                            let lbl = Label::new(Some(&provider));
                             lbl.set_halign(Align::Center);
                             lbl.set_xalign(0.5);
                             lbl.set_wrap(true);
@@ -375,7 +392,7 @@ fn thumbnail_button_placeholder(opt: &ImageOption) -> Button {
         placeholder_thumbnail(&box_);
     }
 
-    let lbl = Label::new(Some(&format!("{}\n{}", opt.image_type, opt.resolution)));
+    let lbl = Label::new(Some(&opt.provider));
     lbl.set_halign(Align::Center);
     lbl.set_xalign(0.5);
     lbl.set_wrap(true);

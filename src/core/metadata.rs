@@ -62,7 +62,9 @@ pub(crate) struct TvmazeEpisode {
 pub struct ImageOption {
     /// Tipo de imagen: "poster", "banner" o "background".
     pub image_type: String,
-    /// Resolución: "original" o "medium".
+    /// Proveedor de la imagen: "TVmaze", "Fanart.tv", etc.
+    pub provider: String,
+    /// Resolución: siempre "original".
     pub resolution: String,
     /// URL de la imagen.
     pub url: String,
@@ -734,6 +736,7 @@ pub async fn fetch_tvmaze_images(show_id: u64, client: &TvmazeClient) -> Vec<Ima
 
         options.push(ImageOption {
             image_type: image_type.clone(),
+            provider: "TVmaze".to_string(),
             resolution: "original".to_string(),
             url,
         });
@@ -790,6 +793,7 @@ pub async fn fetch_fanart_images(
             {
                 options.push(ImageOption {
                     image_type: "poster".to_string(),
+                    provider: "Fanart.tv".to_string(),
                     resolution: "original".to_string(),
                     url: url.to_string(),
                 });
@@ -809,6 +813,7 @@ pub async fn fetch_fanart_images(
             {
                 options.push(ImageOption {
                     image_type: "banner".to_string(),
+                    provider: "Fanart.tv".to_string(),
                     resolution: "original".to_string(),
                     url: url.to_string(),
                 });
@@ -828,6 +833,7 @@ pub async fn fetch_fanart_images(
             {
                 options.push(ImageOption {
                     image_type: "background".to_string(),
+                    provider: "Fanart.tv".to_string(),
                     resolution: "original".to_string(),
                     url: url.to_string(),
                 });
