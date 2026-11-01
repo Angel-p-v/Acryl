@@ -199,8 +199,6 @@ impl MainWindow {
 
         top_bar.set_end_widget(Some(&right_section));
 
-        content.append(&top_bar);
-
         // Barra secundaria (nivel 2): filtros activos, continuar viendo, vista y ordenamiento.
         // Oculta por defecto; se muestra solo cuando hay categoría/continuar.
         let top_bar_level2 = Box::new(Orientation::Horizontal, 8);
