@@ -45,7 +45,6 @@ const MAX_COLUMNS: u32 = 8;
 /// desde la izquierda del área de contenido.
 struct MediaCard {
     widget: Box,
-    translations: TranslationsRef,
 }
 
 impl MediaCard {
@@ -140,10 +139,7 @@ impl MediaCard {
         });
         card.add_controller(click);
 
-        Self {
-            widget: card,
-            translations,
-        }
+        Self { widget: card }
     }
 }
 
