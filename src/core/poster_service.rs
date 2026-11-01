@@ -28,9 +28,11 @@ fn ensure_cache_dir() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync
 
 /// Ruta de caché para un póster dado su URL o identificador.
 ///
-/// Busca primero en el directorio principal (`XDG_DATA_HOME/acryl/cache/posters/`)
-/// y, si no existe, en una ubicación alternativa (`XDG_DATA_HOME/cache/posters/`)
-/// para mantener compatibilidad con cachés creados en versiones anteriores.
+/// Busca en varias ubicaciones posibles para mantener compatibilidad con
+/// cachés creados en diferentes versiones o entornos:
+///   1. XDG_DATA_HOME/acryl/cache/posters/  (ruta principal)
+///   2. XDG_DATA_HOME/cache/posters/        (ruta sin directorio acryl/)
+///   3. ~/.local/share/acryl/cache/posters/ (ruta clásica sin XDG_DATA_HOME)
 pub fn poster_cache_path(poster_url: &str) -> PathBuf {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -47,17 +49,27 @@ pub fn poster_cache_path(poster_url: &str) -> PathBuf {
 
     let filename = format!("{}.{}", hash, ext);
 
-    // Ruta principal: XDG_DATA_HOME/acryl/cache/posters/
+    // 1. Ruta principal: XDG_DATA_HOME/acryl/cache/posters/
     let primary = poster_cache_dir().join(&filename);
     if primary.exists() {
         return primary;
     }
 
-    // Ruta alternativa: XDG_DATA_HOME/cache/posters/ (sin el directorio acryl/)
+    // 2. Ruta alternativa: XDG_DATA_HOME/cache/posters/ (sin directorio acryl/)
     if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-        let alt = PathBuf::from(xdg).join("cache/posters").join(&filename);
-        if alt.exists() {
-            return alt;
+        let alt1 = PathBuf::from(xdg).join("cache/posters").join(&filename);
+        if alt1.exists() {
+            return alt1;
+        }
+    }
+
+    // 3. Ruta clásica: ~/.local/share/acryl/cache/posters/ (sin XDG_DATA_HOME)
+    if let Ok(home) = std::env::var("HOME") {
+        let alt2 = PathBuf::from(home)
+            .join(".local/share/acryl/cache/posters")
+            .join(&filename);
+        if alt2.exists() {
+            return alt2;
         }
     }
 
