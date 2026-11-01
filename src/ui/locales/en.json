@@ -28,15 +28,23 @@
   "button.redetect": "🔄 Re-detect tracks",
 
   "back.list": "← Back to library",
+  "back.previous": "← Back",
   "back.series": "← Back to series",
   "back.anime": "← Back to anime",
+
+  "season.label_format": "Season {}",
+
+  "categories.subtitle": "Filter your library by genre or tag.",
+  "categories.empty": "No categories yet. They will be extracted from metadata when syncing.",
+  "categories.chip_format": "{} ({})",
+  "categories.filter_format": "Filtering by: {}",
 
   "search.placeholder": "Search by title...",
   "search.results": "{} results",
 
-  "status.no_folders": "No indexed folders",
-  "status.one_folder": "{} media · 1 folder",
-  "status.many_folders": "{} media · {} folders",
+  "status.no_media_indexed": "No media indexed",
+  "status.one_media_indexed": "1 media item",
+  "status.media_indexed_format": "{} media",
 
   "media.type.movie": "Movie",
   "media.type.series": "Series",
@@ -71,6 +79,7 @@
   "dialog.remove_folder.cancel": "Cancel",
   "dialog.remove_folder.delete": "Delete",
 
+  "tooltip.home": "Go to home",
   "tooltip.tracks": "Choose audio and subtitle tracks",
   "tooltip.redetect": "Run ffprobe again to read all tracks of the file",
 

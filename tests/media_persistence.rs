@@ -488,6 +488,153 @@ fn migracion_anade_banner_path_a_una_bd_existente() {
 }
 
 #[test]
+fn migracion_anade_origen_de_metadatos_y_marca_de_episodio() {
+    let (db_path, _dir) = temp_db();
+
+    {
+        let conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+        // Simula una base de datos anterior a la migración 10.
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS idx_media_files_episode_image_pending;
+             ALTER TABLE media DROP COLUMN metadata_source_id;
+             ALTER TABLE media DROP COLUMN categories_fetched_at;
+             ALTER TABLE media_files DROP COLUMN episode_image_checked_at;
+             DELETE FROM schema_migrations WHERE version = 10;",
+        )
+        .expect("simular BD antigua sin columnas de metadatos");
+    }
+
+    let conn = open_db(db_path.to_str().unwrap()).expect("reabrir BD");
+    let mut media_columns = Vec::new();
+    for column in conn
+        .prepare("PRAGMA table_info(media)")
+        .expect("preparar pragma media")
+        .query_map([], |row| row.get::<_, String>(1))
+        .expect("consultar columnas media")
+    {
+        media_columns.push(column.expect("columna media"));
+    }
+    assert!(media_columns.contains(&"metadata_source_id".to_string()));
+    assert!(media_columns.contains(&"categories_fetched_at".to_string()));
+
+    let file_columns: Vec<String> = conn
+        .prepare("PRAGMA table_info(media_files)")
+        .expect("preparar pragma media_files")
+        .query_map([], |row| row.get::<_, String>(1))
+        .expect("consultar columnas media_files")
+        .filter_map(Result::ok)
+        .collect();
+    assert!(file_columns.contains(&"episode_image_checked_at".to_string()));
+
+    let index_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'index' AND name = 'idx_media_files_episode_image_pending'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("comprobar índice");
+    assert_eq!(index_exists, 1);
+}
+
+#[test]
+fn categorias_pliegan_tildes_y_rechazan_nombres_vacios() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let mut repo = MediaRepository::new(&mut conn);
+    let accion = repo
+        .get_or_create_category("Acción")
+        .expect("crear Acción")
+        .expect("categoría válida");
+    let accion_sin_tilde = repo
+        .get_or_create_category("accion")
+        .expect("crear accion")
+        .expect("categoría válida");
+    let accion_con_espacios = repo
+        .get_or_create_category("  Acción  ")
+        .expect("crear Acción con espacios")
+        .expect("categoría válida");
+
+    assert_eq!(accion, accion_sin_tilde);
+    assert_eq!(accion, accion_con_espacios);
+    assert_eq!(
+        repo.get_or_create_category("   ").expect("nombre vacío"),
+        None,
+        "un nombre vacío no debe inventar una categoría"
+    );
+
+    let categories = repo.list_categories().expect("listar categorías");
+    assert_eq!(categories.len(), 1);
+    assert_eq!(categories[0].name, "Acción");
+    assert_eq!(categories[0].slug, "accion");
+}
+
+#[test]
+fn reindexar_resetea_la_imagen_de_episodio_si_cambia_la_posicion() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let media_id = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "series".to_string(),
+            title: "Show".to_string(),
+            sort_title: "show".to_string(),
+            year: None,
+            folder_path: "/media/show".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert media")
+        .id
+    };
+
+    let path = "/media/show/S01E01.mkv".to_string();
+    let file = |season: i32, episode: i32| MediaFileInput {
+        media_id,
+        season: Some(season),
+        episode: Some(episode),
+        title: Some(format!("S{season:02}E{episode:02}")),
+        file_path: path.clone(),
+        size_bytes: None,
+        mtime_ms: None,
+    };
+
+    {
+        let mut repo = FileRepository::new(&mut conn);
+        repo.upsert_many(&[file(1, 1)]).expect("insertar archivo");
+        repo.set_episode_image(&path, "https://example.com/ep1x1.jpg")
+            .expect("guardar imagen de episodio");
+    }
+
+    // Reindexar con la misma posición conserva la imagen ya descargada.
+    {
+        let mut repo = FileRepository::new(&mut conn);
+        repo.upsert_many(&[file(1, 1)]).expect("reindexar igual");
+        let files = repo.list_by_media(media_id).expect("listar archivos");
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].episode_image_path.as_deref(),
+            Some("https://example.com/ep1x1.jpg")
+        );
+        assert!(files[0].episode_image_checked_at.is_some());
+    }
+
+    // Si cambia la temporada/episodio, la imagen anterior deja de ser válida.
+    {
+        let mut repo = FileRepository::new(&mut conn);
+        repo.upsert_many(&[file(2, 1)])
+            .expect("reindexar con cambio");
+        let files = repo.list_by_media(media_id).expect("listar archivos");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].season, Some(2));
+        assert_eq!(files[0].episode, Some(1));
+        assert!(files[0].episode_image_path.is_none());
+        assert!(files[0].episode_image_checked_at.is_none());
+    }
+}
+
+#[test]
 fn update_metadata_actualiza_anio_poster_y_sinopsis() {
     let (db_path, _dir) = temp_db();
     let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
@@ -765,10 +912,12 @@ fn categorias_crear_listar_y_asociar() {
         let mut repo = MediaRepository::new(&mut conn);
         let accion = repo
             .get_or_create_category("Acción")
-            .expect("crear categoría Acción");
+            .expect("crear categoría Acción")
+            .expect("categoría válida");
         let animacion = repo
             .get_or_create_category("Animación")
-            .expect("crear categoría Animación");
+            .expect("crear categoría Animación")
+            .expect("categoría válida");
         repo.set_media_categories(media_id, &[accion, animacion])
             .expect("asociar categorías");
     }
@@ -797,7 +946,8 @@ fn categorias_crear_listar_y_asociar() {
         let mut repo = MediaRepository::new(&mut conn);
         let accion_otra = repo
             .get_or_create_category("Acción")
-            .expect("recrear categoría Acción");
+            .expect("recrear categoría Acción")
+            .expect("categoría válida");
         assert_eq!(
             todas.iter().find(|c| c.name == "Acción").unwrap().id,
             accion_otra,
@@ -841,10 +991,14 @@ fn filtrado_por_categoria_devuelve_solo_medios_asociados() {
     // Asociar categorías.
     {
         let mut repo = MediaRepository::new(&mut conn);
-        let accion = repo.get_or_create_category("Acción").expect("crear Acción");
+        let accion = repo
+            .get_or_create_category("Acción")
+            .expect("crear Acción")
+            .expect("categoría válida");
         let comedia = repo
             .get_or_create_category("Comedia")
-            .expect("crear Comedia");
+            .expect("crear Comedia")
+            .expect("categoría válida");
         repo.set_media_categories(m1, &[accion])
             .expect("asociar Acción a m1");
         repo.set_media_categories(m2, &[comedia])

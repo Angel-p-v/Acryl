@@ -28,15 +28,23 @@
   "button.redetect": "🔄 Volver a detectar pistas",
 
   "back.list": "← Volver a la lista",
+  "back.previous": "← Volver",
   "back.series": "← Volver a la serie",
   "back.anime": "← Volver al anime",
+
+  "season.label_format": "Temporada {}",
+
+  "categories.subtitle": "Filtra tu biblioteca por género o etiqueta.",
+  "categories.empty": "Aún no hay categorías. Se extraerán de los metadatos al sincronizar.",
+  "categories.chip_format": "{} ({})",
+  "categories.filter_format": "Filtrando por: {}",
 
   "search.placeholder": "Buscar por título...",
   "search.results": "{} resultados",
 
-  "status.no_folders": "Sin carpetas indexadas",
-  "status.one_folder": "{} medios · 1 carpeta",
-  "status.many_folders": "{} medios · {} carpetas",
+  "status.no_media_indexed": "Sin medios indexados",
+  "status.one_media_indexed": "1 medio",
+  "status.media_indexed_format": "{} medios",
 
   "media.type.movie": "Película",
   "media.type.series": "Serie",
@@ -71,6 +79,7 @@
   "dialog.remove_folder.cancel": "Cancelar",
   "dialog.remove_folder.delete": "Eliminar",
 
+  "tooltip.home": "Ir al inicio",
   "tooltip.tracks": "Elegir pista de audio y subtítulos",
   "tooltip.redetect": "Ejecuta ffprobe de nuevo para leer todas las pistas del archivo",
 

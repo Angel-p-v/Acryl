@@ -140,14 +140,21 @@ pub fn install_theme_css() {
             colors::SURFACE, radius::LARGE,
         ));
 
-        /* Barra superior */
+        /* Barra superior. El padding horizontal sustituye los márgenes
+         * manuales por elemento y mantiene alineadas las tres zonas. */
         css.push_str(&format!(
-            ".top-bar {{ background-color: {}; border-bottom: 1px solid {}; padding: 10px 0; }}\n",
+            ".top-bar {{ background-color: {}; border-bottom: 1px solid {}; padding: 10px 20px; }}\n",
             colors::TOP_BAR, colors::BORDER,
         ));
         css.push_str(".top-bar .app-title { font-weight: 800; font-size: 1.35rem; }\n");
+        css.push_str(
+            ".logo-button { background-color: transparent; border: none; padding: 4px 8px; min-height: 0; }\n",
+        );
+        css.push_str(
+            ".logo-button:hover { background-color: transparent; border: none; transform: none; }\n",
+        );
 
-        /* Navegación horizontal (Novedades / Popular / Simulcasts / Categorías) */
+        /* Navegación horizontal (Categorías) */
         css.push_str(&format!(
             ".nav-button {{ background-color: transparent; border: none; color: {}; font-size: 0.9rem; font-weight: 600; padding: 6px 12px; margin: 0 4px; border-radius: {}; min-height: 32px; }}\n",
             colors::TEXT_SECONDARY, radius::SMALL,
@@ -156,10 +163,44 @@ pub fn install_theme_css() {
             ".nav-button:hover {{ background-color: {}; color: {}; }}\n",
             colors::SURFACE, colors::TEXT_PRIMARY,
         ));
+        css.push_str(&format!(
+            ".nav-button.active {{ background-color: {}; color: {}; }}\n",
+            colors::ACCENT, colors::BTN_PRIMARY_TEXT,
+        ));
+
+        /* Título de página */
+        css.push_str(&format!(
+            ".page-title {{ font-size: 1.6rem; font-weight: 800; color: {}; }}\n",
+            colors::TEXT_PRIMARY,
+        ));
+
+        /* Barra de filtro activo sobre la galería */
+        css.push_str(&format!(
+            ".filter-bar {{ background-color: {}; border-bottom: 1px solid {}; padding: 10px 24px; }}\n",
+            colors::SURFACE, colors::BORDER,
+        ));
+        css.push_str(&format!(
+            ".filter-label {{ color: {}; font-weight: 600; font-size: 0.92rem; }}\n",
+            colors::TEXT_SECONDARY,
+        ));
+
+        /* Chips de categoría */
+        css.push_str(&format!(
+            ".category-chip {{ background-color: {}; border: 1px solid {}; color: {}; border-radius: 999px; padding: 8px 18px; min-height: 36px; }}\n",
+            colors::CARD, colors::BORDER, colors::TEXT_SECONDARY,
+        ));
+        css.push_str(&format!(
+            ".category-chip:hover {{ border-color: {}; color: {}; }}\n",
+            colors::BORDER_HOVER, colors::TEXT_PRIMARY,
+        ));
+        css.push_str(&format!(
+            ".category-chip.active {{ background-color: {}; border-color: {}; color: {}; }}\n",
+            colors::ACCENT, colors::ACCENT, colors::BTN_PRIMARY_TEXT,
+        ));
 
         /* Tarjeta de medio en galería */
         css.push_str(&format!(
-            ".media-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; transition: all {}; }}\n",
+            ".media-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; padding: 8px; transition: all {}; }}\n",
             colors::CARD, colors::BORDER, radius::LARGE, transition::NORMAL,
         ));
         css.push_str(&format!(
