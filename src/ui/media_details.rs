@@ -283,7 +283,14 @@ impl MediaDetails {
         self.synopsis_label
             .set_label(media.synopsis.as_deref().unwrap_or(""));
         self.banner.set_info(&media.title, &info_label);
-        self.banner.set_images(media.banner_path.as_deref(), None);
+        // Si no hay banner específico, usa el póster como banner de fallback.
+        // Esto evita que medios como Solo Leveling queden con el banner vacío.
+        let banner_url = media
+            .banner_path
+            .as_deref()
+            .filter(|url| !url.is_empty())
+            .or(media.poster_path.as_deref().filter(|url| !url.is_empty()));
+        self.banner.set_images(banner_url, None);
 
         if let Some(vote) = media.vote_average {
             self.vote_label.set_label(&format!("⭐ {:.1} / 10", vote));
