@@ -10,6 +10,7 @@ use crate::db::media_repo::ListMediaOptions;
 use crate::db::{MediaRepository, close_db, open_db};
 use reqwest::Client;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
 
@@ -694,6 +695,7 @@ pub async fn fetch_tvmaze_images(show_id: u64, client: &TvmazeClient) -> Vec<Ima
     };
 
     let mut options: Vec<ImageOption> = Vec::new();
+    let mut seen_urls: HashSet<String> = HashSet::new();
 
     for image in images {
         let image_type = match image.get("type").and_then(Value::as_str) {
@@ -721,6 +723,11 @@ pub async fn fetch_tvmaze_images(show_id: u64, client: &TvmazeClient) -> Vec<Ima
                 Some(u) => u.to_string(),
                 None => continue,
             };
+
+            // Evitar duplicados: si ya vimos esta URL, no la añadimos de nuevo.
+            if !seen_urls.insert(url.clone()) {
+                continue;
+            }
 
             options.push(ImageOption {
                 image_type: image_type.clone(),
