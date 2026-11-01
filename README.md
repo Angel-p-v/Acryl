@@ -271,35 +271,71 @@ sinopsis, póster y banner).
 
 ```
 app-media-manager/
-├── src/                      ← Rust puro (sin Tauri, sin WebView, sin Node.js)
-│   ├── main.rs               Punto de entrada de la aplicación GTK4
-│   ├── lib.rs                Biblioteca (config, core, db, ui)
-│   ├── config/               Gestión de configuración YAML
-│   ├── core/                 Lógica de negocio (library, metadata, player, poster_service)
-│   ├── db/                   SQLite, conexiones, repositorios, migraciones, FTS5
-│   └── ui/                   Interfaz GTK4 / Libadwaita
-│       ├── main_window.rs    Ventana principal
-│       ├── media_list.rs     Galería de medios con pósters
-│       ├── media_details.rs  Vista de detalles
-│       ├── search_bar.rs     Barra de búsqueda
-│       ├── settings_window.rs Vista de ajustes
-│       └── poster.rs         Renderizado de pósters con gdk-pixbuf
-├── scripts/                  Scripts de instalación, desinstalación y actualización
-│   ├── install.sh            Instalador (sin Node.js, sin privilegios de root por defecto)
+├── src/                      Código fuente Rust (sin Tauri, sin WebView, sin Node.js)
+│   ├── main.rs               Punto de entrada: crea la aplicación GTK4 y la ventana principal
+│   ├── lib.rs                Biblioteca pública: expone Config, core, db y ui
+│   ├── config/
+│   │   └── mod.rs            Gestión de configuración YAML (carga, guarda, valida AppConfig)
+│   ├── core/                 Lógica de negocio (capa de dominio, sin depender de UI ni BD)
+│   │   ├── mod.rs
+│   │   ├── library.rs        Indexado de carpetas, detección de medios, limpieza de huérfanos
+│   │   ├── metadata.rs       Sincronización de metadatos y pósters desde TVmaze / AniList
+│   │   ├── player.rs         Lanzamiento de mpv, argumentos, socket IPC, historial de reproducción
+│   │   └── poster_service.rb Caché y resolución de rutas de pósters descargados
+│   ├── db/                   Persistencia SQLite (conexión, repositorios, migraciones, FTS5)
+│   │   ├── mod.rs
+│   │   ├── connection.rs     Apertura de BD, PRAGMA, migraciones versionadas
+│   │   ├── file_repo.rs      Repositorio de archivos multimedia y pistas
+│   │   ├── media_repo.rs     Repositorio de medios, búsquedas FTS5, historial de reproducción
+│   │   └── migrations.rs     Migraciones versionadas del esquema (schema_migrations)
+│   └── ui/                   Interfaz GTK4 / Libadwaita (presentación pura)
+│       ├── mod.rs
+│       ├── main_window.rs    Ventana principal, navegación por Stack, galería, historial
+│       ├── media_list.rs     Galería virtualizada con GtkGridView y tarjetas de póster
+│       ├── media_details.rs  Vista de detalles de medio, episodios, selector de temporada
+│       ├── poster.rs         Renderizado de pósters y banners con gdk-pixbuf
+│       ├── search_bar.rs     Barra de búsqueda por título
+│       ├── settings_window.rs Vista de ajustes (carpetas, idioma, metadatos)
+│       ├── theme.rs          Tema visual Crunchyroll (CSS y paleta de colores)
+│       ├── track_dialog.rs   Selector de pistas de audio y subtítulos
+│       └── locales/          Diccionarios de traducción (es.json, en.json)
+├── scripts/                  Scripts de shell (instalación, desinstalación, actualización)
+│   ├── install.sh            Instalador: dependencias de sistema, Rust, build y .desktop
 │   ├── uninstall.sh          Desinstalador (con opción --purge para borrar todo)
-│   └── update.sh             Actualizador (git pull + install en un solo paso)
-├── diagnostic/               Scripts de diagnóstico Wayland/Hyprland
-├── tests/                    Pruebas de integración (SQLite temporal, mpv)
-├── docs/                     Documentación y ADRs
-│   └── adr/                  Decisiones de arquitectura
-├── icons/                    Recursos gráficos (icono, etc.)
-├── PLAN_DESKTOP.md           Plan de migración y hitos del proyecto
-├── AGENTS.md                 Instrucciones para el desarrollo
-├── CONTRIBUTING.md           Flujo de trabajo y Pull Requests
-├── SECURITY.md               Política de seguridad
+│   └── update.sh             Actualizador: git pull + recompila e reinstala
+├── diagnostic/               Scripts de diagnóstico Wayland / Hyprland (pantalla en blanco)
+│   ├── diagnose.sh           Diagnóstico general de sesión gráfica
+│   ├── diagnose-blank.sh     Diagnóstico de pantalla en blanco (v1, v2, v3)
+│   ├── diagnose-deep.sh      Diagnóstico profundo de gráficos y Wayland
+│   ├── diagnose-final.sh     Diagnóstico final consolidado
+│   ├── fix-blank-screen.sh   Scripts de corrección de pantalla en blanco
+│   └── fix-blank-screen-final.sh
+├── tests/                    Pruebas de integración con SQLite temporal y mpv real
+│   ├── media_persistence.rs  Pruebas de repositorios, migraciones y FTS5
+│   ├── media_stress.rs       Pruebas de rendimiento con miles de registros
+│   └── mpv_player.rs         Pruebas de integración con reproductor mpv
+├── docs/                     Documentación técnica y de arquitectura
+│   ├── README.md             Índice de documentación
+│   ├── adr/                  Decisiones de arquitectura (ADR-0017: migración a GTK4)
+│   │   └── 0017-migracion-gtk4-libadwaita.md
+│   ├── assets/               Recursos gráficos para la documentación
+│   └── plan-ui-visual-pistas-escala-masiva.md  Plan de UI visual y escalado
+├── icons/                    Recursos gráficos de la aplicación
+│   └── acryl.svg             Icono principal de Acryl
+├── target/                   Directorio de compilación de Cargo (generado, no se versiona)
+├── PLAN_DESKTOP.md           Plan de migración y hitos del proyecto (E.1-E.5)
+├── AGENTS.md                 Instrucciones obligatorias para agentes de IA y desarrolladores
+├── CONTRIBUTING.md           Flujo de trabajo, convenciones de commits y reglas de calidad
+├── SECURITY.md               Política de seguridad y cómo reportar vulnerabilidades
 ├── LICENSE                   Licencia MIT
 ├── README.md                 Este archivo
-└── Cargo.toml                Proyecto Rust único (edición 2024, rust 1.90)
+├── Cargo.toml                Manifiesto del proyecto Rust (edición 2024, rust ≥ 1.90)
+├── Cargo.lock                Archivo de bloqueo de dependencias (versiones fijadas)
+├── acryl.desktop             Entrada de menú de aplicaciones (instalada en ~/.local)
+├── .editorconfig             Estilo de editor (tabulación, fin de línea, charset)
+├── .gitignore                Archivos e directorios ignorados por Git
+├── .gitattributes            Atributos de Git para el repositorio
+└── CHANGELOG.md              Registro de cambios por versión
 ```
 
 ---
@@ -328,32 +364,37 @@ Acryl utiliza las siguientes dependencias principales. Todas son de código abie
 
 | Crate | Propósito | Licencia |
 |-------|-----------|----------|
-| `rusqlite` | Bindings a SQLite | MIT |
-| `serde` / `serde_json` / `serde_yaml` | Serialización | MIT |
-| `reqwest` | Cliente HTTP (TVmaze) | MIT / Apache-2.0 |
-| `libc` | Tipos C para FFI | MIT / Apache-2.0 |
-| `thiserror` | Errores tipados | MIT |
-| `log` | Facade de logging | MIT |
-| `pkg-config` | Detección de librerías | MIT |
+| `rusqlite` | Bindings a SQLite (con SQLite embebido) | MIT |
+| `serde` / `serde_json` / `serde_yaml` | Serialización y deserialización (config YAML, JSON) | MIT |
+| `reqwest` | Cliente HTTP (consulta a TVmaze / AniList) | MIT / Apache-2.0 |
+| `tokio` | Runtime asíncrono para peticiones HTTP | MIT / Apache-2.0 |
+| `glib` | Utilidades GObject y bucle de eventos de GTK | LGPL |
+| `urlencoding` | Codificación de URLs para búsquedas | MIT |
+| `env_logger` / `log` | Facade e implementación de logging | MIT / Apache-2.0 |
 
 ### UI (GTK4 / Libadwaita)
 
 | Crate | Propósito | Licencia |
 |-------|-----------|----------|
-| `gtk4` | Interfaz gráfica | LGPL |
-| `libadwaita` | Componentes de UI (Libadwaita) | LGPL |
-| `gdk-pixbuf` | Renderizado de imágenes (pósters) | LGPL |
-| `cairo` | Gráficos 2D | LGPL / MPL |
+| `gtk4` | Interfaz gráfica (GridView, Stack, widgets) | LGPL |
+| `libadwaita` | Componentes de UI (ApplicationWindow, Toast, etc.) | LGPL |
+| `gdk-pixbuf` | Decodificación y renderizado de imágenes (pósters) | LGPL |
 
-### Sistema
+### Desarrollo
+
+| Crate | Propósito | Licencia |
+|-------|-----------|----------|
+| `tempfile` | Directorios y archivos temporales para pruebas | MIT |
+
+### Sistema (paquetes de distribución Linux)
 
 | Paquete | Propósito | Licencia |
 |---------|-----------|----------|
-| `gtk4` | Interfaz gráfica | LGPL |
-| `mpv` | Reproducción de vídeo externa | GPLv2+ |
-| `libgtk-4` | Interfaz gráfica | LGPL |
-| `libadwaita-1` | Componentes de UI | LGPL |
+| `libgtk-4` / `gtk4` | Interfaz gráfica (GTK4) | LGPL |
+| `libadwaita-1` / `libadwaita` | Componentes de UI (Libadwaita) | LGPL |
+| `libgdk-pixbuf2` / `gdk-pixbuf` | Decodificación de imágenes | LGPL |
 | `librsvg2` | Renderizado SVG | LGPL |
+| `mpv` | Reproducción de vídeo externa (proceso separado) | GPLv2+ |
 
 > Todas las dependencias de terceros conservan sus licencias originales. Este proyecto se distribuye bajo la licencia **MIT**. Consulta `LICENSE` para más detalles.
 
