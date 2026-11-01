@@ -6,11 +6,23 @@
   "stack.categories": "Categories",
   "stack.details": "Details",
   "stack.settings": "Settings",
+  "stack.history": "History",
 
   "empty.title": "No media indexed",
   "empty.description": "Add a media folder in Settings to start indexing your library.",
 
+  "history.title": "Playback history",
+  "history.empty": "No playback history yet.",
+  "history.subtitle": "Movies, series and episodes you have played.",
+  "history.back": "← Back",
+  "history.clear": "🗑 Clear history",
+  "history.clear_confirm.title": "Clear all history?",
+  "history.clear_confirm.detail": "All playback records will be deleted. This action cannot be undone.",
+  "history.clear_confirm.delete": "Clear",
+  "history.cleared": "History cleared",
+
   "button.categories": "Categories",
+  "button.history": "History",
   "button.all_categories": "All categories",
   "button.clear_category": "Show all",
   "button.settings": "⚙ Settings",

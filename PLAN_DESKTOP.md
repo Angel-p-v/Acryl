@@ -377,7 +377,7 @@ LICENSE                   ← Se mantiene
 | Hito 5 | Empaquetado Linux (.deb, AppImage, .rpm) | ⚠️ sustituido por E.4 (instalador nativo sin paquetes) |
 | Hito 6 | Configuración YAML en el backend | ✅ completado |
 | Hito 7 | Internacionalización (i18n) de la UI | ⚠️ parcial: selector de idioma persistido; faltan traducciones reales |
-| Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ⚠️ parcial: metadatos con TVmaze/AniList/Kitsu y registro en BD; falta la vista de historial |
+| Hito 8 | Metadatos automáticos TMDB/TVDB + historial de reproducción | ✅ completado: metadatos con TVmaze/AniList/Kitsu, registro en BD, vista de historial con tarjetas, borrado y temporada/episodio |
 | Hito 9 | Publicación automática en GitHub Releases | ❌ cancelado: no hay releases automáticos |
 | **Hito E.1** | Prototipo mínimo GTK4 (ventana, lista, póster, búsqueda) | ✅ completado |
 | **Hito E.2** | UI completa GTK4 (detalles, favoritos, visto, navegación) | ✅ completado |
@@ -427,7 +427,6 @@ Orden de trabajo vigente:
 4. ✅ Completar **Hito G.3** (UI moderna con Libadwaita y CSS).
 5. Completar **Hito G.5** (pruebas de estrés y rendimiento).
 6. Revisar si la galería necesita virtualización real (`GtkListView`) según el criterio del Hito G.2.
-7. Completar la i18n real y la vista de historial de reproducción (Hitos 7 y 8).
 
 ---
 

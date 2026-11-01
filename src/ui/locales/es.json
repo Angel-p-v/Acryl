@@ -6,11 +6,23 @@
   "stack.categories": "Categorías",
   "stack.details": "Detalles",
   "stack.settings": "Ajustes",
+  "stack.history": "Historial",
 
   "empty.title": "Sin medios indexados",
   "empty.description": "Agrega una carpeta de videos en Ajustes para comenzar a indexar tu biblioteca.",
 
+  "history.title": "Historial de reproducción",
+  "history.empty": "Aún no hay reproducciones registradas.",
+  "history.subtitle": "Películas, series y episodios que has reproducido.",
+  "history.back": "← Volver",
+  "history.clear": "🗑 Borrar historial",
+  "history.clear_confirm.title": "¿Borrar todo el historial?",
+  "history.clear_confirm.detail": "Se eliminarán todos los registros de reproducción. Esta acción no se puede deshacer.",
+  "history.clear_confirm.delete": "Borrar",
+  "history.cleared": "Historial borrado",
+
   "button.categories": "Categorías",
+  "button.history": "Historial",
   "button.all_categories": "Todas las categorías",
   "button.clear_category": "Ver todo",
   "button.settings": "⚙ Ajustes",

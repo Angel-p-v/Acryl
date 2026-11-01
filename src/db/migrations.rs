@@ -207,6 +207,10 @@ CREATE INDEX IF NOT EXISTS idx_media_files_episode_image_pending
   ON media_files(episode_image_checked_at);
 "#;
 
+const PLAYBACK_HISTORY_FILE_PATH_SQL: &str = r#"
+ALTER TABLE playback_history ADD COLUMN file_path TEXT;
+"#;
+
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -257,5 +261,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 10,
         name: "media-metadata-source-and-episode-images",
         sql: MEDIA_METADATA_SOURCE_SQL,
+    },
+    Migration {
+        version: 11,
+        name: "playback-history-file-path",
+        sql: PLAYBACK_HISTORY_FILE_PATH_SQL,
     },
 ];
