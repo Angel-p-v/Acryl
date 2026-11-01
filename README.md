@@ -303,8 +303,7 @@ app-media-manager/
 │   ├── install.sh            Instalador: dependencias de sistema, Rust, build y .desktop
 │   ├── uninstall.sh          Desinstalador (con opción --purge para borrar todo)
 │   ├── update.sh             Actualizador: git pull + recompila e reinstala
-│   ├── acryl-health          Salud general: binario, dependencias, BD, logs, configuración
-│   └── acryl-display         Gráficos y pantalla: Wayland / Hyprland / X11, GTK, WebKit
+│   ├── acryl-check           Comprobación general: salud de la instalación y diagnóstico gráfico
 ├── tests/                    Pruebas de integración con SQLite temporal y mpv real
 │   ├── media_persistence.rs  Pruebas de repositorios, migraciones y FTS5
 │   ├── media_stress.rs       Pruebas de rendimiento con miles de registros

@@ -1,23 +1,28 @@
 #!/usr/bin/env bash
 #
-# scripts/acryl-health — Comprobación de salud general de Acryl
+# scripts/acryl-check — Comprobación general de Acryl
 #
-# Responde a: "¿Acryl está instalado y listo para usarse?"
+# Único script de diagnóstico. Responde a:
+#   - "¿Acryl está instalado y listo?"          (salud general)
+#   - "¿Por qué no se ve la ventana / pantalla en blanco?" (gráficos)
+#
 # Comprueba de forma completa:
-#   1. El ejecutable existe y es ejecutable
-#   2. Las librerías del sistema no faltan
-#   3. La base de datos SQLite tiene medios indexados
-#   4. Los logs no contienen errores críticos
-#   5. La entrada .desktop y la configuración están presentes
-#
-# Úsalo cuando Acryl no arranca, no se instaló correctamente,
-# no hay medios para mostrar o algo falla antes de abrir la ventana.
+#   1. Entorno de sesión (DISPLAY, WAYLAND_DISPLAY, XDG_SESSION_TYPE, etc.)
+#   2. Ejecutable de Acryl (existencia, permisos, librerías)
+#   3. Ejecución directa (timeout)
+#   4. Base de datos SQLite (medios indexados)
+#   5. Archivos de log de la aplicación
+#   6. Configuración YAML
+#   7. Entrada de menú .desktop
+#   8. Entorno gráfico (Wayland / Hyprland / X11)
+#   9. Pruebas de ejecución con diferentes backends GTK y WebKit
+#  10. Resumen y recomendaciones concretas para cada caso
 #
 # Uso:
-#   ./scripts/acryl-health                 # rutas por defecto (usuario)
-#   ./scripts/acryl-health --bin /ruta/a/acryl
-#   ./scripts/acryl-health --db  /ruta/a/acryl.db
-#   ./scripts/acryl-health --help
+#   ./scripts/acryl-check                 # rutas por defecto (usuario)
+#   ./scripts/acryl-check --bin /ruta/a/acryl
+#   ./scripts/acryl-check --db  /ruta/a/acryl.db
+#   ./scripts/acryl-check --help
 #
 set -euo pipefail
 
@@ -57,7 +62,7 @@ usage() {
     cat <<EOF
 Uso: $0 [opciones]
 
-Comprueba la salud general de la instalación de Acryl.
+Comprobación general de Acryl: salud de la instalación y diagnóstico gráfico.
 
 Opciones:
   --bin RUTA   Ruta al ejecutable de Acryl (por defecto: busca en rutas habituales)
@@ -65,7 +70,7 @@ Opciones:
   -h, --help   Muestra esta ayuda y sale
 
 Ejemplos:
-  $0                           # chequeo automático completo
+  $0                           # chequeo completo (salud + gráficos)
   $0 --bin ~/.local/bin/acryl  # usa este ejecutable
   $0 --db ~/.local/share/acryl/acryl.db  # usa esta base de datos
 EOF
@@ -87,14 +92,28 @@ done
 # Cabecera
 ###############################################################################
 echo "============================================================"
-echo "  Acryl Health — Comprobación de salud general"
+echo "  Acryl Check — Comprobación general de Acryl"
 echo "============================================================"
 echo
 
 ###############################################################################
-# 1. Ejecutable
+# 1. Entorno de sesión
 ###############################################################################
-info "1. Ejecutable de Acryl"
+info "1. Entorno de sesión gráfica"
+echo "  DISPLAY=${DISPLAY:-no definida}"
+echo "  WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-no definida}"
+echo "  XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-no definida}"
+echo "  XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-no definida}"
+echo "  GDK_BACKEND=${GDK_BACKEND:-no definida}"
+echo "  LIBGL_ALWAYS_SOFTWARE=${LIBGL_ALWAYS_SOFTWARE:-no definida}"
+echo "  WEBKIT_DISABLE_DMABUF_RENDERER=${WEBKIT_DISABLE_DMABUF_RENDERER:-no definida}"
+echo "  WEBKIT_DISABLE_COMPOSITING_MODE=${WEBKIT_DISABLE_COMPOSITING_MODE:-no definida}"
+echo
+
+###############################################################################
+# 2. Ejecutable de Acryl
+###############################################################################
+info "2. Ejecutable de Acryl"
 FOUND_BIN=""
 if [[ -n "$BIN_ARG" ]]; then
     if [[ -f "$BIN_ARG" && -x "$BIN_ARG" ]]; then
@@ -139,9 +158,9 @@ fi
 echo
 
 ###############################################################################
-# 2. Ejecución directa
+# 3. Ejecución directa
 ###############################################################################
-info "2. Ejecución directa (timeout 5 segundos)"
+info "3. Ejecución directa (timeout 5 segundos)"
 echo "  Comando: timeout 5 $FOUND_BIN"
 echo "------------------------------------------------------------"
 timeout 5 "$FOUND_BIN" 2>&1 || true
@@ -159,9 +178,9 @@ fi
 echo
 
 ###############################################################################
-# 3. Base de datos SQLite
+# 4. Base de datos SQLite
 ###############################################################################
-info "3. Base de datos SQLite y medios indexados"
+info "4. Base de datos SQLite y medios indexados"
 FOUND_DB=false
 if [[ -n "$DB_ARG" ]]; then
     if [[ -f "$DB_ARG" ]]; then
@@ -207,9 +226,9 @@ fi
 echo
 
 ###############################################################################
-# 4. Logs de la aplicación
+# 5. Logs de la aplicación
 ###############################################################################
-info "4. Archivos de log de Acryl"
+info "5. Archivos de log de Acryl"
 FOUND_LOG=false
 for dir in "${LOG_DIRS[@]}"; do
     if [[ -d "$dir" ]]; then
@@ -229,9 +248,9 @@ fi
 echo
 
 ###############################################################################
-# 5. Configuración YAML
+# 6. Configuración YAML
 ###############################################################################
-info "5. Configuración YAML ($CONFIG_FILE)"
+info "6. Configuración YAML ($CONFIG_FILE)"
 if [[ -f "$CONFIG_FILE" ]]; then
     ok "Archivo de configuración encontrado."
     if have grep; then
@@ -246,9 +265,9 @@ fi
 echo
 
 ###############################################################################
-# 6. Entrada .desktop
+# 7. Entrada .desktop
 ###############################################################################
-info "6. Entrada de menú .desktop"
+info "7. Entrada de menú .desktop"
 if [[ -f "$DESKTOP_FILE" ]]; then
     ok "Archivo .desktop encontrado: $DESKTOP_FILE"
 else
@@ -258,19 +277,75 @@ fi
 echo
 
 ###############################################################################
-# 7. Resumen y próximos pasos
+# 8. Diagnóstico gráfico (Wayland / Hyprland / X11)
 ###############################################################################
-echo "============================================================"
-echo "  Resumen"
-echo "============================================================"
+info "8. Diagnóstico gráfico y de pantalla"
 echo
 if [[ -z "$FOUND_BIN" ]]; then
-    echo "CRÍTICO: Acryl no está instalado. Ejecuta ./scripts/install.sh"
+    error "No se puede diagnosticar gráficos sin el ejecutable de Acryl."
+else
+    echo "  Entorno gráfico detectado:"
+    echo "    DISPLAY=${DISPLAY:-no definida}"
+    echo "    WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-no definida}"
+    echo "    XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-no definida}"
+    echo "    GDK_BACKEND=${GDK_BACKEND:-no definida}"
+    echo
+    echo "  Probando ejecución con diferentes configuraciones gráficas:"
+    echo "------------------------------------------------------------"
+
+    run_test() {
+        local label="$1"
+        shift
+        echo "  $label"
+        echo "  Comando: $*"
+        timeout 8 env "$@" "$FOUND_BIN" 2>&1 | head -20 || true
+        echo
+    }
+
+    run_test "Prueba 1: GDK_BACKEND=x11 (forzar X11 sobre Wayland)" GDK_BACKEND=x11
+    run_test "Prueba 2: WebKit sin renderizado DMABUF" GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1
+    run_test "Prueba 3: Renderizado OpenGL por software" LIBGL_ALWAYS_SOFTWARE=1 GDK_BACKEND=x11
+    run_test "Prueba 4: Combinación completa (X11 + software + sin DMABUF + sin composición)" GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1
+
+    echo "------------------------------------------------------------"
+    echo
+fi
+
+###############################################################################
+# 9. Resumen y recomendaciones
+###############################################################################
+echo "============================================================"
+echo "  Resumen y recomendaciones"
+echo "============================================================"
+echo
+
+if [[ -z "$FOUND_BIN" ]]; then
+    echo "CRÍTICO: Acryl no está instalado."
+    echo "  Ejecuta: ./scripts/install.sh"
 elif [[ "$FOUND_DB" == "false" ]]; then
     echo "AVISO: Acryl está instalado pero no hay medios indexados."
     echo "  Abre Acryl y configura al menos una carpeta de medios en Ajustes."
 else
-    echo "Salud general: todo parece correcto. Si la aplicación no se ve,"
-    echo "  el problema es de gráficos/pantalla: ejecuta ./scripts/acryl-display"
+    echo "Salud general: todo parece correcto."
+    echo
+    echo "Si la aplicación no se ve o muestra pantalla en blanco, el problema"
+    echo "es de gráficos (Wayland / Hyprland). Prueba en este orden:"
+    echo
+    echo "  1. Instalar XWayland:"
+    echo "     Arch:       sudo pacman -S xorg-xwayland"
+    echo "     Debian/Ub:  sudo apt install xserver-xorg-core"
+    echo
+    echo "  2. Usar sesión X11 en lugar de Wayland:"
+    echo "     Cierra sesión y selecciona 'X11' o 'Xorg' en el gestor de inicio."
+    echo
+    echo "  3. Variables de entorno (exportar antes de lanzar):"
+    echo "     export GDK_BACKEND=x11"
+    echo "     export WEBKIT_DISABLE_DMABUF_RENDERER=1"
+    echo "     export WEBKIT_DISABLE_COMPOSITING_MODE=1"
+    echo "     export LIBGL_ALWAYS_SOFTWARE=1"
+    echo "     ~/.local/bin/acryl"
+    echo
+    echo "El problema suele ser el entorno gráfico, no la aplicación."
+    echo "No es necesario reinstalar nada."
 fi
 echo

@@ -23,7 +23,7 @@ mantiene este archivo a partir de los commits convencionales.
 
 ### Refactor
 
-* **scripts:** sustituir los 8 scripts de diagnóstico antiguos por 2 scripts con nombres distintos (`acryl-health` y `acryl-display`)
+* **scripts:** sustituir los 8 scripts de diagnóstico antiguos por 1 script general (`acryl-check`)
 
 ## [0.2.0](https://github.com/Angel-p-v/Acryl/compare/v0.1.0...v0.2.0) (2026-10-29)
 

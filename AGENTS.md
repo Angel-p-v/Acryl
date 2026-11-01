@@ -82,8 +82,7 @@ app-media-manager/
 │   ├── install.sh          Instalador (sin Node.js, solo Rust + GTK)
 │   ├── uninstall.sh        Desinstalador
 │   ├── update.sh           Actualizador
-│   ├── acryl-health        Salud general del sistema
-│   └── acryl-display       Diagnóstico gráfico (Wayland/Hyprland/X11)
+│   ├── acryl-check         Comprobación general de salud y gráficos
 ├── docs/
 │   ├── adr/                Decisiones de arquitectura (ADR-0017: migración GTK4)
 │   ├── guides/             Guías de arquitectura, ejemplos, migración, performance, release
