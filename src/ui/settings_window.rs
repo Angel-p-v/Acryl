@@ -2,6 +2,7 @@
 
 use crate::config::AppConfig;
 use crate::core::library::{IndexResult, LibraryService};
+use crate::ui::i18n::TranslationsRef;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, DropDown, Entry, Label, Orientation, ScrolledWindow, Spinner, gio, glib};
 use std::cell::{Cell, RefCell};
@@ -72,9 +73,15 @@ struct FolderManager {
     index_status: Label,
     on_config_changed: Rc<RefCell<Option<ConfigCallback>>>,
     on_library_changed: Rc<RefCell<Option<LibraryCallback>>>,
+    translations: TranslationsRef,
 }
 
 impl FolderManager {
+    /// Traduce una clave de i18n al idioma actual.
+    fn t(&self, key: &str) -> String {
+        self.translations.borrow().t(key)
+    }
+
     fn append_folder_row(&self, folder: &str) {
         let row = Box::new(Orientation::Horizontal, 5);
         row.set_hexpand(true);
@@ -84,7 +91,7 @@ impl FolderManager {
         label.set_halign(gtk4::Align::Start);
         row.append(&label);
 
-        let remove_button = Button::with_label("Eliminar");
+        let remove_button = Button::with_label(&self.t("dialog.remove_folder.delete"));
         row.append(&remove_button);
 
         let manager = self.clone();
@@ -101,16 +108,16 @@ impl FolderManager {
     /// Devuelve `true` si la carpeta se añadió correctamente.
     fn add_folder(&self, input: &str) -> bool {
         if self.indexing.get() {
-            self.set_status("Espera a que termine la indexación en curso.");
+            self.set_status(&self.t("status.wait_indexing"));
             return false;
         }
 
         let Some(path) = normalize_folder_path(input) else {
             self.show_error(
-                "Ruta no válida",
-                "Selecciona una carpeta existente y accesible.",
+                &self.t("error.invalid_folder.title"),
+                &self.t("error.invalid_folder.detail"),
             );
-            self.set_status("La ruta indicada no es una carpeta válida.");
+            self.set_status(&self.t("error.invalid_folder.status"));
             return false;
         };
 
@@ -123,7 +130,7 @@ impl FolderManager {
                 .any(|folder| Path::new(folder) == path_buf)
             {
                 drop(config);
-                self.set_status("Esa carpeta ya está en la lista.");
+                self.set_status(&self.t("status.folder_exists"));
                 return false;
             }
             config.media_folders.push(path.clone());
@@ -134,31 +141,30 @@ impl FolderManager {
                 .borrow_mut()
                 .media_folders
                 .retain(|folder| folder != &path);
-            self.show_error("No se pudo guardar la configuración", &error.to_string());
+            self.show_error(&self.t("error.save_config.title"), &error.to_string());
             return false;
         }
 
         self.append_folder_row(&path);
         self.notify_config_changed();
-        self.start_indexing(vec![path], "Indexando la carpeta añadida...");
+        self.start_indexing(vec![path], &self.t("status.indexing_folder"));
         true
     }
 
     /// Pide confirmación y elimina la carpeta de la configuración y de la BD.
     fn remove_folder(&self, folder: &str, row: &Box) {
         if self.indexing.get() {
-            self.set_status("Espera a que termine la indexación antes de eliminar carpetas.");
+            self.set_status(&self.t("status.wait_remove"));
             return;
         }
 
+        let title_template = self.t("dialog.remove_folder.title_format");
+        let title = title_template.replace("{}", folder);
         let dialog = gtk4::AlertDialog::builder()
             .modal(true)
-            .message(format!("¿Eliminar la carpeta «{}»?", folder))
-            .detail(
-                "Se eliminarán de la biblioteca todos los medios indexados de esta carpeta. \
-                 Los archivos de vídeo de tu disco no se borrarán.",
-            )
-            .buttons(["Cancelar", "Eliminar"])
+            .message(title)
+            .detail(&self.t("dialog.remove_folder.detail"))
+            .buttons([&self.t("dialog.remove_folder.cancel"), &self.t("dialog.remove_folder.delete")])
             .cancel_button(0)
             .default_button(0)
             .build();
@@ -390,6 +396,7 @@ pub struct SettingsView {
     folder_manager: FolderManager,
     on_save: Option<Rc<dyn Fn(AppConfig)>>,
     on_refresh_metadata: Option<Rc<dyn Fn()>>,
+    translations: TranslationsRef,
 }
 
 impl SettingsView {
@@ -399,6 +406,7 @@ impl SettingsView {
         db_path: &str,
         config_path: &Path,
         parent: &P,
+        translations: TranslationsRef,
     ) -> Self {
         let content = Box::new(Orientation::Vertical, 10);
         content.set_margin_top(20);
@@ -563,6 +571,7 @@ impl SettingsView {
             index_status: index_status.clone(),
             on_config_changed: Rc::new(RefCell::new(None)),
             on_library_changed: Rc::new(RefCell::new(None)),
+            translations: translations.clone(),
         };
 
         // Cargar carpetas existentes.
@@ -631,6 +640,7 @@ impl SettingsView {
             folder_manager,
             on_save: None,
             on_refresh_metadata: None,
+            translations,
         }
     }
 

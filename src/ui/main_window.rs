@@ -117,7 +117,7 @@ impl MainWindow {
         right_section.set_margin_end(16);
 
         // Barra de búsqueda.
-        let search_bar = SearchBar::new(&db_path);
+        let search_bar = SearchBar::new(&db_path, translations.clone());
         search_bar.widget().set_hexpand(false);
         search_bar.widget().set_width_request(300);
         search_bar.widget().set_halign(gtk4::Align::Center);
@@ -149,7 +149,7 @@ impl MainWindow {
         stack.set_vexpand(true);
         content.append(&stack);
 
-        let media_list = MediaList::new();
+        let media_list = MediaList::new(translations.clone());
 
         // AdwClamp limita el ancho del contenido en pantallas anchas para que
         // las listas y pósters no se estiren desproporcionadamente.
@@ -527,9 +527,16 @@ impl MainWindow {
         let folder_count = config.media_folders.len();
 
         let text = match folder_count {
-            0 => "Sin carpetas indexadas".to_string(),
-            1 => format!("{} medios · 1 carpeta", w.media_count),
-            total => format!("{} medios · {} carpetas", w.media_count, total),
+            0 => w.t("status.no_folders"),
+            1 => {
+                let one = w.t("status.one_folder");
+                one.replacen("{}", &w.media_count.to_string(), 1)
+            }
+            total => {
+                let many = w.t("status.many_folders");
+                many.replacen("{}", &w.media_count.to_string(), 1)
+                    .replacen("{}", &total.to_string(), 1)
+            }
         };
         w.library_status.set_label(&text);
 
