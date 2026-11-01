@@ -957,7 +957,7 @@ impl MainWindow {
         const CARD_POSTER_HEIGHT: i32 = 300;
         const CARD_WIDTH: i32 = CARD_POSTER_WIDTH + 16;
         const CARD_HEIGHT: i32 = 404;
-        const COLUMNS: i32 = 4;
+        const COLUMNS: i32 = 6;
 
         for (index, entry) in history.iter().enumerate() {
             let card = Box::new(Orientation::Vertical, 6);
