@@ -284,11 +284,11 @@ app-media-manager/
 │       ├── search_bar.rs     Barra de búsqueda
 │       ├── settings_window.rs Vista de ajustes
 │       └── poster.rs         Renderizado de pósters con gdk-pixbuf
-├── scripts/                  Scripts de instalación, desinstalación, actualización y diagnóstico
+├── scripts/                  Scripts de instalación, desinstalación y actualización
 │   ├── install.sh            Instalador (sin Node.js, sin privilegios de root por defecto)
 │   ├── uninstall.sh          Desinstalador (con opción --purge para borrar todo)
-│   ├── update.sh             Actualizador (git pull + install en un solo paso)
-│   └── diagnose-*.sh         Scripts de diagnóstico Wayland/Hyprland
+│   └── update.sh             Actualizador (git pull + install en un solo paso)
+├── diagnostic/               Scripts de diagnóstico Wayland/Hyprland
 ├── tests/                    Pruebas de integración (SQLite temporal, mpv)
 ├── docs/                     Documentación y ADRs
 │   └── adr/                  Decisiones de arquitectura
