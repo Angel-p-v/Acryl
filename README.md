@@ -299,12 +299,12 @@ app-media-manager/
 │       ├── theme.rs          Tema visual Crunchyroll (CSS y paleta de colores)
 │       ├── track_dialog.rs   Selector de pistas de audio y subtítulos
 │       └── locales/          Diccionarios de traducción (es.json, en.json)
-├── scripts/                  Scripts de shell (instalación, desinstalación, actualización, diagnóstico)
+├── scripts/                  Scripts de shell (instalación, desinstalación, actualización)
 │   ├── install.sh            Instalador: dependencias de sistema, Rust, build y .desktop
 │   ├── uninstall.sh          Desinstalador (con opción --purge para borrar todo)
-│   ├── update.sh             Actualizador: git pull + recompila e reinstala
-│   ├── acryl-doctor          Diagnóstico general: binario, dependencias, BD, logs, entorno
-│   └── acryl-doctor-gfx      Diagnóstico gráfico: Wayland / Hyprland / X11, GTK backend, WebKit
+│   └── update.sh             Actualizador: git pull + recompila e reinstala
+├── diagnostic/               Scripts de diagnóstico (salud y gráficos)
+│   └── acryl-check.sh        Comprobación general: salud de instalación y diagnóstico gráfico
 ├── tests/                    Pruebas de integración con SQLite temporal y mpv real
 │   ├── media_persistence.rs  Pruebas de repositorios, migraciones y FTS5
 │   ├── media_stress.rs       Pruebas de rendimiento con miles de registros

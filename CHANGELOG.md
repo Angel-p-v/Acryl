@@ -23,7 +23,7 @@ mantiene este archivo a partir de los commits convencionales.
 
 ### Refactor
 
-* **scripts:** sustituir los 8 scripts de diagnóstico antiguos por 2 scripts profesionales en inglés (`acryl-doctor` y `acryl-doctor-gfx`)
+* **scripts:** sustituir los 8 scripts de diagnóstico antiguos por 1 script general (`diagnostic/acryl-check.sh`)
 
 ## [0.2.0](https://github.com/Angel-p-v/Acryl/compare/v0.1.0...v0.2.0) (2026-10-29)
 
