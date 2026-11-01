@@ -1,9 +1,10 @@
-//! Galería de medios virtualizada con GtkListView.
+//! Galería de medios virtualizada con GtkGridView.
 //!
-//! Usa `GtkListView` + `GListStore` (con `StringObject`) + `SignalListItemFactory`
+//! Usa `GtkGridView` + `GListStore` (con `StringObject`) + `SignalListItemFactory`
 //! para que solo se rendericen las tarjetas visibles, eliminando las advertencias
 //! de GTK al medir `GtkGrid` con miles de ítems y permitiendo scroll fluido con
-//! bibliotecas grandes.
+//! bibliotecas grandes. A diferencia de `GtkListView` (un ítem por fila),
+//! `GtkGridView` organiza los ítems en múltiples columnas como una rejilla.
 
 use crate::core::poster_service::cached_path;
 use crate::db::media_repo::Media;
@@ -12,7 +13,7 @@ use crate::ui::poster::{placeholder_widget, poster_picture};
 use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
 use gtk4::{
-    Box, Label, ListView, Orientation, ScrolledWindow, SignalListItemFactory, SingleSelection,
+    Box, GridView, Label, Orientation, ScrolledWindow, SignalListItemFactory, SingleSelection,
     StringObject, gio,
 };
 use std::rc::Rc;
@@ -24,6 +25,10 @@ const CARD_POSTER_HEIGHT: i32 = 300;
 /// Ancho y alto de la tarjeta completa (póster + padding + textos).
 const CARD_WIDTH: i32 = CARD_POSTER_WIDTH + 16;
 const CARD_HEIGHT: i32 = 404;
+
+/// Límites de columnas por fila.
+const MIN_COLUMNS: u32 = 1;
+const MAX_COLUMNS: u32 = 8;
 
 /// Callback de selección compartido.
 type SelectCallback = Rc<dyn Fn(i64)>;
@@ -107,16 +112,20 @@ impl MediaList {
             }
         });
 
-        let list_view = ListView::new(Some(selection.clone()), Some(factory_for_view));
-        list_view.set_hexpand(true);
-        list_view.set_vexpand(true);
+        // GridView organiza los ítems en múltiples columnas (rejilla),
+        // a diferencia de ListView que muestra un ítem por fila.
+        let grid_view = GridView::new(Some(selection.clone()), Some(factory_for_view));
+        grid_view.set_hexpand(true);
+        grid_view.set_vexpand(true);
+        grid_view.set_min_columns(MIN_COLUMNS);
+        grid_view.set_max_columns(MAX_COLUMNS);
 
         let scrolled = ScrolledWindow::new();
         scrolled.set_hexpand(true);
         scrolled.set_vexpand(true);
         scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
         scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
-        scrolled.set_child(Some(&list_view));
+        scrolled.set_child(Some(&grid_view));
 
         content.append(&scrolled);
 
