@@ -43,6 +43,7 @@ pub fn build_mpv_args_with_tracks(
         "--force-window=immediate".to_string(),
         format!("--input-ipc-server={}", socket_path),
         "--idle=yes".to_string(),
+        "--fullscreen".to_string(),
     ];
     append_track_args(&mut args, selection);
     args.push(file_path.to_string());
@@ -61,7 +62,10 @@ pub fn build_mpv_launch_args_with_tracks(
     file_path: &str,
     selection: TrackSelection,
 ) -> Vec<String> {
-    let mut args = vec!["--force-window=immediate".to_string()];
+    let mut args = vec![
+        "--force-window=immediate".to_string(),
+        "--fullscreen".to_string(),
+    ];
     append_track_args(&mut args, selection);
     args.push("--".to_string());
     args.push(file_path.to_string());
@@ -472,6 +476,7 @@ mod tests {
                 "--force-window=immediate",
                 "--input-ipc-server=/tmp/acryl-mpv-123.sock",
                 "--idle=yes",
+                "--fullscreen",
                 "/ruta/video.mkv",
             ]
         );
@@ -484,6 +489,7 @@ mod tests {
             args,
             vec![
                 "--force-window=immediate",
+                "--fullscreen",
                 "--",
                 "/ruta/con espacios/video.mkv",
             ]
@@ -502,6 +508,7 @@ mod tests {
             args,
             vec![
                 "--force-window=immediate",
+                "--fullscreen",
                 "--aid=2",
                 "--sid=1",
                 "--",
@@ -522,6 +529,7 @@ mod tests {
             args,
             vec![
                 "--force-window=immediate",
+                "--fullscreen",
                 "--sid=no",
                 "--",
                 "/ruta/video.mkv",
@@ -543,6 +551,7 @@ mod tests {
                 "--force-window=immediate",
                 "--input-ipc-server=/tmp/acryl.sock",
                 "--idle=yes",
+                "--fullscreen",
                 "--aid=1",
                 "--sid=2",
                 "/ruta/video.mkv",
@@ -551,13 +560,18 @@ mod tests {
     }
 
     #[test]
-    fn track_selection_automatica_no_anade_argumentos() {
+    fn track_selection_automatica_no_anade_argumentos_de_pista() {
         let selection = TrackSelection::default();
         assert!(selection.is_automatic());
         let args = build_mpv_launch_args_with_tracks("/ruta/video.mkv", selection);
         assert_eq!(
             args,
-            vec!["--force-window=immediate", "--", "/ruta/video.mkv",]
+            vec![
+                "--force-window=immediate",
+                "--fullscreen",
+                "--",
+                "/ruta/video.mkv",
+            ]
         );
     }
 
