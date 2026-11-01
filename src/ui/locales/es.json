@@ -42,9 +42,9 @@
   "search.placeholder": "Buscar por título...",
   "search.results": "{} resultados",
 
-  "status.no_folders": "Sin carpetas indexadas",
-  "status.one_folder": "{} medios · 1 carpeta",
-  "status.many_folders": "{} medios · {} carpetas",
+  "status.no_media_indexed": "Sin medios indexados",
+  "status.one_media_indexed": "1 medio",
+  "status.media_indexed_format": "{} medios",
 
   "media.type.movie": "Película",
   "media.type.series": "Serie",

@@ -699,25 +699,18 @@ impl MainWindow {
         self.settings_view.refresh_texts();
     }
 
-    /// Actualiza el indicador de carpetas y medios de la barra superior.
+    /// Actualiza el indicador de medios indexados de la barra superior.
+    /// Solo se muestra el número de medios; las carpetas indexadas quedan en
+    /// el tooltip para no recargar la barra superior.
     fn update_library_status(w: &MainWindow) {
         let config = w.config.borrow();
-        let folder_count = config.media_folders.len();
 
-        let text = match folder_count {
-            0 => w.t("status.no_folders"),
-            1 => {
-                let one = w.t("status.one_folder");
-                one.replacen("{}", &w.media_count.to_string(), 1)
-            }
-            total => {
-                let many = w.t("status.many_folders");
-                many.replacen("{}", &w.media_count.to_string(), 1).replacen(
-                    "{}",
-                    &total.to_string(),
-                    1,
-                )
-            }
+        let text = match w.media_count {
+            0 => w.t("status.no_media_indexed"),
+            1 => w.t("status.one_media_indexed"),
+            total => w
+                .t("status.media_indexed_format")
+                .replacen("{}", &total.to_string(), 1),
         };
         w.library_status.set_label(&text);
 

@@ -42,9 +42,9 @@
   "search.placeholder": "Search by title...",
   "search.results": "{} results",
 
-  "status.no_folders": "No indexed folders",
-  "status.one_folder": "{} media · 1 folder",
-  "status.many_folders": "{} media · {} folders",
+  "status.no_media_indexed": "No media indexed",
+  "status.one_media_indexed": "1 media item",
+  "status.media_indexed_format": "{} media",
 
   "media.type.movie": "Movie",
   "media.type.series": "Series",
