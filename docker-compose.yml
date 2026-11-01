@@ -45,10 +45,14 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Europe/Madrid
+      - SSL_CERT_DIR=/etc/ssl/certs
+      - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+      - DOTNET_SYSTEM_NET_HTTP_USESOCKETSHTTPHANDLER=0
     volumes:
       - /home/coronel/.config/radarr:/config
       - /home/coronel/Videos/downloads:/downloads
       - /home/coronel/Videos/media:/movies
+      - /etc/ssl/certs:/etc/ssl/certs:ro
     ports:
       - "7878:7878"
     restart: unless-stopped
