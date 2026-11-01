@@ -244,13 +244,12 @@ impl MainWindow {
 
         content.append(&top_bar_level2);
 
-        // Revealer para ocultar/mostrar la barra superior al hacer scroll en la galería.
+        // Revealer para ocultar/mostrar la barra superior al hacer scroll
         let top_bar_revealer = Revealer::new();
         top_bar_revealer.set_child(Some(&top_bar));
         // top_bar_level2 va fuera del revealer para que siempre sea accesible
         // cuando hay filtros, pero la barra principal puede ocultarse.
         content.append(&top_bar_revealer);
-        content.append(&top_bar_level2);
 
         let stack = Stack::new();
         stack.set_hexpand(true);
