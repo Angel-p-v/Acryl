@@ -283,7 +283,14 @@ impl MediaDetails {
         self.synopsis_label
             .set_label(media.synopsis.as_deref().unwrap_or(""));
         self.banner.set_info(&media.title, &info_label);
-        self.banner.set_images(media.banner_path.as_deref(), None);
+        // Si no hay banner específico, usa el póster como banner de fallback.
+        // Esto evita que medios como Solo Leveling queden con el banner vacío.
+        let banner_url = media
+            .banner_path
+            .as_deref()
+            .filter(|url| !url.is_empty())
+            .or(media.poster_path.as_deref().filter(|url| !url.is_empty()));
+        self.banner.set_images(banner_url, None);
 
         if let Some(vote) = media.vote_average {
             self.vote_label.set_label(&format!("⭐ {:.1} / 10", vote));
@@ -601,7 +608,7 @@ fn build_episode_card(
     on_play_episode: &SharedPlayEpisodeCallback,
 ) -> Box {
     let t = |key: &str| translations.borrow().t(key);
-    let (episode_label, episode_number) = episode_texts(file, translations);
+    let (_episode_label, episode_number) = episode_texts(file, translations);
 
     let card = Box::new(Orientation::Vertical, 6);
     card.add_css_class("episode-card");
@@ -648,17 +655,24 @@ fn build_episode_card(
     num_label.add_css_class("episode-number");
     card.append(&num_label);
 
-    if !episode_label.is_empty() {
-        let title_label = Label::new(Some(&episode_label));
-        title_label.set_halign(gtk4::Align::Center);
-        title_label.set_justify(gtk4::Justification::Center);
-        title_label.set_wrap(true);
-        title_label.set_max_width_chars(24);
-        title_label.set_lines(2);
-        title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-        title_label.add_css_class("episode-title");
-        card.append(&title_label);
-    }
+    // El título del episodio se muestra sin el prefijo de temporada/episodio,
+    // ya que ese dato ya aparece en el encabezado de la vista. Solo se muestra
+    // el nombre limpio del episodio (o el número si no hay título).
+    let file_title = file.title.as_deref().unwrap_or("").trim();
+    let title_text = if !file_title.is_empty() {
+        file_title.to_string()
+    } else {
+        episode_number.clone()
+    };
+    let title_label = Label::new(Some(&title_text));
+    title_label.set_halign(gtk4::Align::Center);
+    title_label.set_justify(gtk4::Justification::Center);
+    title_label.set_wrap(true);
+    title_label.set_max_width_chars(24);
+    title_label.set_lines(2);
+    title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    title_label.add_css_class("episode-title");
+    card.append(&title_label);
 
     let play_btn = Button::with_label("▶");
     play_btn.add_css_class("episode-play-btn");
@@ -666,7 +680,7 @@ fn build_episode_card(
     play_btn.set_tooltip_text(Some(&format!(
         "{} {}",
         t("button.play_episode"),
-        episode_label
+        title_text
     )));
     let file_path = file.file_path.clone();
     let callback = on_play_episode.borrow().clone();
