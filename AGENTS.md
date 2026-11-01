@@ -61,31 +61,47 @@ app-media-manager/
 │   ├── lib.rs              Biblioteca (config, core, db, ui)
 │   ├── config/             Gestión de configuración YAML (mod.rs)
 │   ├── core/               Lógica de negocio (library, metadata, player, poster_service, mod.rs)
+│   │   ├── library.rs      Indexado de carpetas, detección de medios, limpieza de huérfanos
+│   │   ├── metadata.rs     Sincronización de metadatos y pósters desde TVmaze / AniList
+│   │   ├── player.rs       Lanzamiento de mpv, argumentos, socket IPC, historial de reproducción
+│   │   ├── poster_service.rs Caché y descarga asíncrona de pósters
+│   │   └── mod.rs
 │   ├── db/                 SQLite, migraciones, repositorios, FTS5
 │   │   ├── connection.rs   Apertura de BD, migraciones, PRAGMA
-│   │   ├── file_repo.rs    Repositorio de archivos multimedia
-│   │   ├── media_repo.rs   Repositorio de medios y búsquedas
+│   │   ├── file_repo.rs    Repositorio de archivos multimedia y pistas
+│   │   ├── media_repo.rs   Repositorio de medios, búsquedas FTS5, historial de reproducción
 │   │   ├── migrations.rs   Migraciones versionadas (schema_migrations)
 │   │   └── mod.rs
 │   └── ui/                 Interfaz GTK4 / Libadwaita
 │       ├── mod.rs
-│       ├── main_window.rs  Ventana principal
-│       ├── media_list.rs   Lista de medios
-│       ├── media_details.rs Vista de detalles
-│       ├── search_bar.rs   Barra de búsqueda
-│       ├── settings_window.rs Vista de ajustes
-│       └── poster.rs       Renderizado de pósters con gdk-pixbuf
+│       ├── i18n.rs         Internacionalización (diccionarios es/en, cambio en caliente)
+│       ├── main_window.rs  Ventana principal, navegación por Stack, galería, historial
+│       ├── media_details.rs Vista de detalles de medio, episodios, selector de temporada
+│       ├── media_list.rs   Galería virtualizada con GtkGridView y tarjetas de póster
+│       ├── poster.rs       Renderizado de pósters y banners con gdk-pixbuf
+│       ├── search_bar.rs   Barra de búsqueda por título
+│       ├── settings_window.rs Vista de ajustes (carpetas, idioma, metadatos)
+│       ├── theme.rs        Tema visual (CSS y paleta de colores Crunchyroll)
+│       ├── track_dialog.rs Selector de pistas de audio y subtítulos
+│       └── locales/        Diccionarios de traducción (es.json, en.json)
 ├── tests/
 │   ├── media_persistence.rs Tests de integración con SQLite temporal
-│   └── mpv_player.rs       Tests de integración con mpv
+│   ├── media_stress.rs     Pruebas de rendimiento con miles de registros
+│   ├── mpv_player.rs       Tests de integración con reproductor mpv
+│   └── e2e_app.rs          Tests end-to-end de flujos críticos GTK4
 ├── scripts/
 │   ├── install.sh          Instalador (sin Node.js, solo Rust + GTK)
 │   ├── uninstall.sh        Desinstalador
 │   ├── update.sh           Actualizador
 │   └── diagnostic/acryl-check.sh  Comprobación general de salud y gráficos
 ├── docs/
-│   ├── adr/                Decisiones de arquitectura (ADR-0017: migración GTK4)
+│   ├── adr/                Decisiones de arquitectura (ADR-0017 a ADR-0020)
+│   │   ├── 0017-migracion-gtk4-libadwaita.md
+│   │   ├── 0018-virtualizacion-galeria-gtkgridview.md
+│   │   ├── 0019-deteccion-pistas-ffprobe-seleccion-mpv.md
+│   │   └── 0020-cache-poster-descarga-asincrona.md
 │   ├── guides/             Guías de arquitectura, ejemplos, migración, performance, release
+│   ├── plan-ui-visual-pistas-escala-masiva.md  Plan de UI visual y escalado
 │   └── README.md
 ├── PLAN_DESKTOP.md         Plan de migración y hitos (incluye hitos E.1-E.5)
 ├── AGENTS.md               Este archivo
@@ -96,6 +112,8 @@ app-media-manager/
 ├── Cargo.toml              Proyecto Rust único (edición 2024, rust 1.90)
 ├── Cargo.lock
 ├── CHANGELOG.md
+├── .github/workflows/ci.yml CI de GitHub Actions (fmt, clippy, test, audit, tarpaulin)
+├── acryl.desktop           Entrada de menú de aplicaciones
 └── icons/                  Recursos gráficos (icono, etc.)
 ```
 

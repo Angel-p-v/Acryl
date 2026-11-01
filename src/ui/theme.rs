@@ -73,16 +73,21 @@ pub mod transition {
 }
 
 /// Instala una sola vez los estilos globales del tema Crunchyroll.
+///
+/// Es idempotente: si la primera llamada falla (por ejemplo, porque GTK4 no
+/// está inicializado), no envenena el `Once` y una llamada posterior podrá
+/// reintentar la instalación.
 pub fn install_theme_css() {
     INSTALL_THEME_CSS.call_once(|| {
-        let provider = CssProvider::new();
-        let mut css = String::new();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let provider = CssProvider::new();
+            let mut css = String::new();
 
-        css.push_str(&format!(
-            "window {{ background-color: {}; color: {}; font-family: 'Inter', 'Roboto', 'Helvetica', 'Arial', sans-serif; }}\n",
-            colors::BG, colors::TEXT_PRIMARY,
-        ));
-        css.push_str("box { background-color: transparent; }\n");
+            css.push_str(&format!(
+                "window {{ background-color: {}; color: {}; font-family: 'Inter', 'Roboto', 'Helvetica', 'Arial', sans-serif; }}\n",
+                colors::BG, colors::TEXT_PRIMARY,
+            ));
+            css.push_str("box { background-color: transparent; }\n");
         css.push_str(&format!("label {{ color: {}; }}\n", colors::TEXT_PRIMARY));
         css.push_str(&format!("label.dim-label {{ color: {}; }}\n", colors::TEXT_MUTED));
         css.push_str(&format!(
@@ -401,5 +406,6 @@ pub fn install_theme_css() {
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
         }
-    });
+    }));
+});
 }
