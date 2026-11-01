@@ -299,17 +299,12 @@ app-media-manager/
 │       ├── theme.rs          Tema visual Crunchyroll (CSS y paleta de colores)
 │       ├── track_dialog.rs   Selector de pistas de audio y subtítulos
 │       └── locales/          Diccionarios de traducción (es.json, en.json)
-├── scripts/                  Scripts de shell (instalación, desinstalación, actualización)
+├── scripts/                  Scripts de shell (instalación, desinstalación, actualización, diagnóstico)
 │   ├── install.sh            Instalador: dependencias de sistema, Rust, build y .desktop
 │   ├── uninstall.sh          Desinstalador (con opción --purge para borrar todo)
-│   └── update.sh             Actualizador: git pull + recompila e reinstala
-├── diagnostic/               Scripts de diagnóstico Wayland / Hyprland (pantalla en blanco)
-│   ├── diagnose.sh           Diagnóstico general de sesión gráfica
-│   ├── diagnose-blank.sh     Diagnóstico de pantalla en blanco (v1, v2, v3)
-│   ├── diagnose-deep.sh      Diagnóstico profundo de gráficos y Wayland
-│   ├── diagnose-final.sh     Diagnóstico final consolidado
-│   ├── fix-blank-screen.sh   Scripts de corrección de pantalla en blanco
-│   └── fix-blank-screen-final.sh
+│   ├── update.sh             Actualizador: git pull + recompila e reinstala
+│   ├── acryl-doctor          Diagnóstico general: binario, dependencias, BD, logs, entorno
+│   └── acryl-doctor-gfx      Diagnóstico gráfico: Wayland / Hyprland / X11, GTK backend, WebKit
 ├── tests/                    Pruebas de integración con SQLite temporal y mpv real
 │   ├── media_persistence.rs  Pruebas de repositorios, migraciones y FTS5
 │   ├── media_stress.rs       Pruebas de rendimiento con miles de registros

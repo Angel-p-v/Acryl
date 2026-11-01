@@ -6,6 +6,25 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 versionado [SemVer](https://semver.org/lang/es/). A partir de `v1.0.0`, release-please
 mantiene este archivo a partir de los commits convencionales.
 
+## [0.2.1](https://github.com/Angel-p-v/Acryl/compare/v0.2.0...v0.2.1) (2026-11-01)
+
+### Features
+
+* **ui:** mpv se lanza en pantalla completa al reproducir cualquier medio ([#96](https://github.com/Angel-p-v/Acryl/pull/96))
+* **ui:** historial de reproducción muestra 6 tarjetas por fila en lugar de 4 ([#94](https://github.com/Angel-p-v/Acryl/pull/94))
+* **docs:** README actualizado con dependencias reales y estructura de repositorio rediseñada ([#99](https://github.com/Angel-p-v/Acryl/pull/99))
+* **docs:** eliminar sección de instalación duplicada y corregir rutas de scripts de diagnóstico ([#98](https://github.com/Angel-p-v/Acryl/pull/98))
+
+### Bug Fixes
+
+* **ui:** evitar que el video se abra dos veces al darle al play de un episodio ([#95](https://github.com/Angel-p-v/Acryl/pull/95))
+* **ui:** limpiar selección de galería al volver desde detalles para poder seleccionar la misma serie de nuevo ([#92](https://github.com/Angel-p-v/Acryl/pull/92))
+* **ui:** aplicar cambio de idioma en caliente sin necesidad de reiniciar la aplicación ([#93](https://github.com/Angel-p-v/Acryl/pull/93))
+
+### Refactor
+
+* **scripts:** sustituir los 8 scripts de diagnóstico antiguos por 2 scripts profesionales en inglés (`acryl-doctor` y `acryl-doctor-gfx`)
+
 ## [0.2.0](https://github.com/Angel-p-v/Acryl/compare/v0.1.0...v0.2.0) (2026-10-29)
 
 
