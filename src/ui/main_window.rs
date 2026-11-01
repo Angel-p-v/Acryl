@@ -563,7 +563,8 @@ impl MainWindow {
     /// ventana. Se usa para confirmar acciones al usuario sin bloquear la UI.
     fn show_toast(&self, message: &str) {
         let toast = Toast::new(message);
-        toast.set_timeout(3000);
+        // `AdwToast::set_timeout` se expresa en segundos (no en milisegundos).
+        toast.set_timeout(3);
         self.toast_overlay.add_toast(toast);
     }
 
