@@ -704,6 +704,16 @@ impl MainWindow {
             let folders = new_config.media_folders.clone();
             let language = new_config.language.clone();
             let config_path_clone = config_path_save.clone();
+            // Aplicar el idioma en caliente solo si realmente cambió, para no
+            // mostrar el toast de "idioma aplicado" innecesariamente. Se lee
+            // el idioma anterior ANTES de sobrescribir config con new_config,
+            // de lo contrario ambos serían iguales y set_language nunca se
+            // ejecutaría.
+            let previous_language = {
+                let w = this_save.borrow();
+                w.config.borrow().language.clone()
+            };
+
             let _ = crate::config::Config {
                 path: config_path_clone,
                 inner: new_config.clone(),
@@ -717,12 +727,6 @@ impl MainWindow {
             // Eliminar medios de carpetas que ya no están en el config
             let _ = crate::core::library::cleanup_media_not_in_folders(&db_path_save, &folders);
 
-            // Aplicar el idioma en caliente solo si realmente cambió, para no
-            // mostrar el toast de "idioma aplicado" innecesariamente.
-            let previous_language = {
-                let w = this_save.borrow();
-                w.config.borrow().language.clone()
-            };
             if language != previous_language {
                 {
                     let mut w = this_save.borrow_mut();
