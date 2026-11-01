@@ -443,20 +443,27 @@ impl MainWindow {
         history_subtitle.add_css_class("dim-label");
         history_header.append(&history_subtitle);
 
+        // Fila de acciones: "Volver" a la izquierda, "Borrar historial" a la derecha.
+        let history_actions = Box::new(Orientation::Horizontal, 0);
+        history_actions.set_hexpand(true);
+        history_actions.set_halign(gtk4::Align::Fill);
+        history_actions.set_valign(gtk4::Align::Start);
+        history_actions.set_margin_top(12);
+
         let history_back_button = Button::with_label(&t("history.back"));
         history_back_button.add_css_class("flat-button");
-        history_back_button.set_halign(gtk4::Align::Start);
-        history_back_button.set_valign(gtk4::Align::Start);
-        history_back_button.set_margin_top(12);
-        history_header.append(&history_back_button);
+        history_back_button.set_valign(gtk4::Align::Center);
+        history_actions.append(&history_back_button);
 
         let history_clear_button = Button::with_label(&t("history.clear"));
         history_clear_button.add_css_class("flat-button");
         history_clear_button.add_css_class("button.danger");
-        history_clear_button.set_halign(gtk4::Align::Start);
-        history_clear_button.set_valign(gtk4::Align::Start);
-        history_clear_button.set_margin_top(12);
-        history_header.append(&history_clear_button);
+        history_clear_button.set_valign(gtk4::Align::Center);
+        history_clear_button.set_hexpand(true);
+        history_clear_button.set_halign(gtk4::Align::End);
+        history_actions.append(&history_clear_button);
+
+        history_header.append(&history_actions);
 
         history_page.append(&history_header);
 
@@ -1267,7 +1274,7 @@ impl MainWindow {
     /// Restaura una vista concreta sin volver a añadirla al historial.
     fn restore_view(&self, view: &View) {
         match view {
-            View::Page(page) if page == "details" => self.show_list(),
+            View::Page(page) if page == "list" => self.show_list(),
             View::Page(page) => {
                 self.stack.set_visible_child_name(page);
             }
