@@ -1681,6 +1681,28 @@ impl MainWindow {
             .show(Some(&self.window));
     }
 
+    /// Método público para tests E2E: navega a los detalles de un medio.
+    pub fn show_details_for_test(
+        &self,
+        media_id: i64,
+        season: Option<crate::ui::media_details::SeasonSelection>,
+    ) -> bool {
+        self.show_details(media_id, season)
+    }
+
+    /// Método público para tests E2E: devuelve la traducción de una clave.
+    pub fn t_for_test(&self, key: &str) -> String {
+        self.t(key)
+    }
+
+    /// Método público para tests E2E: cambia el idioma en caliente.
+    pub fn set_language_for_test(
+        &mut self,
+        language: &str,
+    ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
+        self.set_language(language)
+    }
+
     pub fn widget(&self) -> &AdwApplicationWindow {
         &self.window
     }

@@ -281,7 +281,7 @@ app-media-manager/
 │   │   ├── library.rs        Indexado de carpetas, detección de medios, limpieza de huérfanos
 │   │   ├── metadata.rs       Sincronización de metadatos y pósters desde TVmaze / AniList
 │   │   ├── player.rs         Lanzamiento de mpv, argumentos, socket IPC, historial de reproducción
-│   │   └── poster_service.rb Caché y resolución de rutas de pósters descargados
+│   │   └── poster_service.rs Caché y descarga asíncrona de pósters
 │   ├── db/                   Persistencia SQLite (conexión, repositorios, migraciones, FTS5)
 │   │   ├── mod.rs
 │   │   ├── connection.rs     Apertura de BD, PRAGMA, migraciones versionadas
