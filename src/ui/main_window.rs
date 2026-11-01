@@ -1267,6 +1267,7 @@ impl MainWindow {
     /// Restaura una vista concreta sin volver a añadirla al historial.
     fn restore_view(&self, view: &View) {
         match view {
+            View::Page(page) if page == "list" => self.show_list(),
             View::Page(page) if page == "details" => self.show_list(),
             View::Page(page) => {
                 self.stack.set_visible_child_name(page);
