@@ -1048,6 +1048,11 @@ impl MainWindow {
                                 // Refrescar la vista de detalles para mostrar las nuevas
                                 // imágenes inmediatamente, sin reiniciar la app.
                                 this_for_refresh.borrow().show_details(media_id2, None);
+                                this_for_refresh
+                                    .borrow()
+                                    .media_details
+                                    .borrow_mut()
+                                    .refresh_banner();
                                 this_for_refresh.borrow().widget().queue_draw();
                             });
 

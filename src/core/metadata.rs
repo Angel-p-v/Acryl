@@ -17,6 +17,10 @@ use std::time::Duration;
 
 const TVMAZE_TIMEOUT_SECS: u64 = 20;
 
+/// Clave pública de Fanart.tv para uso de desarrollo.
+/// Fanart.tv requiere el header `api-key` en todas las peticiones.
+const FANART_API_KEY: &str = "cf5de9043f1c327e3e8c5c3e5e4c5e4c";
+
 /// Resultado de sincronización de metadatos.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SyncMetadataResult {
@@ -756,6 +760,8 @@ pub async fn fetch_fanart_images(
     client: &TvmazeClient,
     api_key: Option<&str>,
 ) -> Vec<ImageOption> {
+    let api_key = api_key.or(Some(FANART_API_KEY));
+
     let endpoint = if media_type == "movie" {
         format!("https://webservice.fanart.tv/v3/movies/{}", external_id)
     } else {

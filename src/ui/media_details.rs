@@ -504,6 +504,12 @@ impl MediaDetails {
         });
         self.on_choose_images = Some(cb);
     }
+
+    /// Fuerza el redibujado del banner para que se muestre la imagen actualizada
+    /// sin necesidad de reiniciar la aplicación.
+    pub fn refresh_banner(&mut self) {
+        self.banner.widget().queue_draw();
+    }
 }
 
 /// Representa un archivo de episodio en la rejilla. Mantiene el texto y el
