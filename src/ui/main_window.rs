@@ -46,6 +46,7 @@ pub struct MainWindow {
     empty_page: StatusPage,
     config: Rc<RefCell<crate::config::AppConfig>>,
     media_count: usize,
+    media_offset: i64,
     db_path: String,
     metadata_sync_running: Rc<Cell<bool>>,
     toast_overlay: ToastOverlay,
@@ -503,6 +504,7 @@ impl MainWindow {
             empty_page,
             config: config_rc.clone(),
             media_count: 0,
+            media_offset: 0,
             db_path: db_path.clone(),
             metadata_sync_running: Rc::new(Cell::new(false)),
             toast_overlay,
@@ -532,6 +534,28 @@ impl MainWindow {
             history_back_button,
             history_clear_button,
         }));
+
+        // Cuando una descarga de póster termina, refrescar la galería para
+        // mostrar la imagen descargada sin bloquear la UI.
+        // Paginación infinita: cargar más medios cuando el scroll llega al final.
+        // El callback se ejecuta en el hilo principal de GTK4, por lo que no
+        // necesita glib::idle_add.
+        this.borrow_mut().media_list.set_on_scroll_bottom({
+            let this = this.clone();
+            move || {
+                Self::load_more_media(&this);
+            }
+        });
+
+        // Revisar periódicamente si han terminado descargas de pósters y
+        // refrescar la galería para mostrarlas sin bloquear la UI.
+        let this_for_dl = this.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+            if this_for_dl.borrow().media_list.check_downloads() {
+                Self::load_media(&this_for_dl);
+            }
+            glib::ControlFlow::Continue
+        });
 
         // Al volver a la vista de la galería, limpiar la selección para que
         // ninguna tarjeta quede resaltada con tono azul.
@@ -857,6 +881,18 @@ impl MainWindow {
     /// activo. Solo cambia de página cuando la vista actual es la biblioteca;
     /// así una sincronización de metadatos no interrumpe Detalles o Ajustes.
     fn load_media(this: &MainWindowRef) {
+        // Reiniciar el offset para la carga inicial.
+        {
+            let mut w = this.borrow_mut();
+            w.media_offset = 0;
+        }
+        Self::load_media_page(this, 0);
+    }
+
+    /// Carga una página de medios con el `offset` indicado. Si `offset` es 0,
+    /// reemplaza el contenido de la galería; si es mayor, lo añade al final
+    /// (paginación infinita).
+    fn load_media_page(this: &MainWindowRef, offset: i64) {
         let (db_path, category_id) = {
             let w = this.borrow();
             (w.db_path.clone(), *w.current_category.borrow())
@@ -873,8 +909,8 @@ impl MainWindow {
             let mut repo = MediaRepository::new(&mut conn);
             let options = ListMediaOptions {
                 r#type: None,
-                limit: Some(500),
-                offset: Some(0),
+                limit: Some(100),
+                offset: Some(offset),
                 order_by: None,
             };
             match category_id {
@@ -885,15 +921,21 @@ impl MainWindow {
         };
         close_db(conn);
 
-        let media_count = media.len();
         let mut w = this.borrow_mut();
-        w.media_count = media_count;
-        w.media_list.set_media(media);
+        w.media_offset = offset + media.len() as i64;
+
+        if offset == 0 {
+            w.media_count = media.len();
+            w.media_list.set_media(media);
+        } else {
+            w.media_list.append_media(&media);
+        }
 
         let visible = w.stack.visible_child_name().map(|name| name.to_string());
         if matches!(visible.as_deref(), Some("list") | Some("empty")) {
             let filtered = w.current_category.borrow().is_some();
-            if media_count == 0 && !filtered {
+            let total_shown = w.media_offset;
+            if total_shown == 0 && !filtered {
                 w.stack.set_visible_child_name("empty");
             } else {
                 w.stack.set_visible_child_name("list");
@@ -902,6 +944,15 @@ impl MainWindow {
 
         w.update_filter_bar();
         Self::update_library_status(&w);
+    }
+
+    /// Carga la siguiente página de medios (paginación infinita por scroll).
+    fn load_more_media(this: &MainWindowRef) {
+        let offset = {
+            let w = this.borrow();
+            w.media_offset
+        };
+        Self::load_media_page(this, offset);
     }
 
     /// Carga el historial de reproducción desde la BD y lo muestra en la página
