@@ -154,6 +154,42 @@ pub fn install_theme_css() {
             ".logo-button:hover { background-color: transparent; border: none; transform: none; }\n",
         );
 
+        /* Barra secundaria (nivel 2): filtros activos, continuar, vista y orden */
+        css.push_str(&format!(
+            ".top-bar-level2 {{ background-color: {}; border-bottom: 1px solid {}; padding: 8px 20px; font-size: 0.88rem; }}\n",
+            colors::SURFACE, colors::BORDER,
+        ));
+
+        /* Chip removible de filtro activo */
+        css.push_str(&format!(
+            ".filter-chip {{ background-color: {}; border: 1px solid {}; color: {}; border-radius: 999px; padding: 6px 16px; min-height: 32px; font-weight: 600; }}\n",
+            colors::CARD, colors::BORDER, colors::TEXT_SECONDARY,
+        ));
+        css.push_str(&format!(
+            ".filter-chip:hover {{ border-color: {}; color: {}; background-color: {}; }}\n",
+            colors::BORDER_HOVER, colors::TEXT_PRIMARY, colors::SURFACE,
+        ));
+
+        /* Píldora "Continuar viendo" */
+        css.push_str(&format!(
+            ".continue-button {{ background-color: {}; border: 1px solid {}; color: {}; border-radius: 999px; padding: 6px 16px; min-height: 32px; font-weight: 600; }}\n",
+            colors::ACCENT, colors::ACCENT, colors::BTN_PRIMARY_TEXT,
+        ));
+        css.push_str(&format!(
+            ".continue-button:hover {{ background-color: {}; border-color: {}; }}\n",
+            colors::ACCENT_HOVER, colors::ACCENT,
+        ));
+
+        /* Botones de modo de vista (Grid/Lista) */
+        css.push_str(&format!(
+            ".view-mode-button {{ background-color: {}; border: 1px solid {}; color: {}; border-radius: {}; padding: 6px 12px; min-height: 32px; font-weight: 600; }}\n",
+            colors::CARD, colors::BORDER, colors::TEXT_SECONDARY, radius::SMALL,
+        ));
+        css.push_str(&format!(
+            ".view-mode-button:hover {{ border-color: {}; color: {}; background-color: {}; }}\n",
+            colors::BORDER_HOVER, colors::TEXT_PRIMARY, colors::SURFACE,
+        ));
+
         /* Navegación horizontal (Categorías) */
         css.push_str(&format!(
             ".nav-button {{ background-color: transparent; border: none; color: {}; font-size: 0.9rem; font-weight: 600; padding: 6px 12px; margin: 0 4px; border-radius: {}; min-height: 32px; }}\n",

@@ -42,6 +42,14 @@
   "search.placeholder": "Buscar por título...",
   "search.results": "{} resultados",
 
+  "topbar.filter_chip": "Filtrando por: {} ×",
+  "topbar.continue_watching": "▶ Continuar viendo",
+  "topbar.view_grid": "Grid",
+  "topbar.view_list": "Lista",
+  "topbar.sort_title": "Título",
+  "topbar.sort_year": "Año",
+  "topbar.sort_type": "Tipo",
+
   "status.no_media_indexed": "Sin medios indexados",
   "status.one_media_indexed": "1 medio",
   "status.media_indexed_format": "{} medios",

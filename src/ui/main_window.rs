@@ -6,10 +6,12 @@ use crate::db::{MediaRepository, close_db, open_db};
 use crate::ui::i18n::{Translations, TranslationsRef, load_translations};
 use crate::ui::media_details::{MediaDetails, SeasonSelection};
 use crate::ui::media_list::MediaList;
-use crate::ui::search_bar::SearchBar;
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
-use gtk4::{Box, Button, CenterBox, FlowBox, Label, Orientation, ScrolledWindow, Stack, gio, glib};
+use gtk4::{
+    Box, Button, CenterBox, FlowBox, Label, Orientation, Revealer, ScrolledWindow, SearchEntry,
+    Spinner, Stack, gio, glib,
+};
 use libadwaita::prelude::*;
 use libadwaita::{ApplicationWindow as AdwApplicationWindow, StatusPage, Toast, ToastOverlay};
 use std::cell::{Cell, RefCell};
@@ -32,8 +34,6 @@ enum View {
 pub struct MainWindow {
     window: AdwApplicationWindow,
     stack: Stack,
-    search_bar: SearchBar,
-    settings_button: Button,
     categories_button: Button,
     media_list: MediaList,
     media_details: Rc<RefCell<MediaDetails>>,
@@ -59,6 +59,30 @@ pub struct MainWindow {
     filter_bar: Box,
     filter_label: Label,
     filter_clear_button: Button,
+    /// Barra secundaria (nivel 2) con filtros activos, continuar viendo, vista y ordenamiento.
+    #[allow(dead_code)]
+    top_bar_level2: Box,
+    /// Chip removible "Filtrando por: X".
+    filter_chip: Button,
+    /// Píldora "▶ Continuar S01E04 - Black Torch".
+    continue_button: Button,
+    /// Botones de modo de vista (Grid/Lista).
+    view_grid_button: Button,
+    view_list_button: Button,
+    /// Etiqueta de ordenamiento (placeholder visual).
+    #[allow(dead_code)]
+    sort_label: Label,
+    /// Campo de búsqueda prominente en el centro de la barra superior.
+    search_entry: SearchEntry,
+    /// Spinner de sincronización de metadatos.
+    #[allow(dead_code)]
+    sync_spinner: Spinner,
+    /// Botón menú ☰ Ajustes.
+    settings_menu_button: Button,
+    /// Revealer para ocultar/mostrar la barra superior al hacer scroll
+    /// (reservado para comportamiento de colapso al desplazarse).
+    #[allow(dead_code)]
+    top_bar_revealer: Revealer,
     /// Pila de vistas visitadas. El último elemento es la pantalla a la que
     /// debe volver el botón «Volver» o la salida de Ajustes.
     history: RefCell<Vec<View>>,
@@ -102,10 +126,9 @@ impl MainWindow {
         toast_overlay.set_child(Some(&content));
         window.set_content(Some(&toast_overlay));
 
-        // Barra superior al estilo Crunchyroll: logo a la izquierda,
-        // navegación en el centro, acciones y búsqueda a la derecha.
-        // GtkCenterBox reparte las tres zonas sin márgenes manuales por
-        // elemento: el centro queda centrado respecto a la ventana.
+        // Barra superior al estilo streaming: logo a la izquierda, búsqueda
+        // prominente en el centro, acciones a la derecha. GtkCenterBox reparte
+        // las tres zonas sin márgenes manuales por elemento.
         let top_bar = CenterBox::new();
         top_bar.set_hexpand(true);
         top_bar.set_vexpand(false);
@@ -130,44 +153,104 @@ impl MainWindow {
         left_section.append(&logo_button);
         top_bar.set_start_widget(Some(&left_section));
 
-        // Sección centro: navegación principal. Solo Categorías; Novedades,
-        // Popular y Simulcasts se retiraron al no tener datos reales.
-        let nav_box = Box::new(Orientation::Horizontal, 0);
-        nav_box.set_halign(gtk4::Align::Center);
-        nav_box.set_valign(gtk4::Align::Center);
+        // Sección centro: búsqueda prominente (estilo Crunchyroll/Netflix).
+        let center_section = Box::new(Orientation::Horizontal, 0);
+        center_section.set_halign(gtk4::Align::Center);
+        center_section.set_valign(gtk4::Align::Center);
 
-        top_bar.set_center_widget(Some(&nav_box));
+        let search_entry = SearchEntry::new();
+        let placeholder_text = t("search.placeholder");
+        search_entry.set_placeholder_text(Some(placeholder_text.as_str()));
+        search_entry.set_hexpand(false);
+        search_entry.set_width_request(420);
+        search_entry.set_valign(gtk4::Align::Center);
+        center_section.append(&search_entry);
+        top_bar.set_center_widget(Some(&center_section));
 
-        // Sección derecha: búsqueda y acciones.
+        // Sección derecha: sincronización, categorías y menú de ajustes.
         let right_section = Box::new(Orientation::Horizontal, 12);
         right_section.set_halign(gtk4::Align::End);
         right_section.set_valign(gtk4::Align::Center);
 
-        // Barra de búsqueda.
-        let search_bar = SearchBar::new(&db_path, translations.clone());
-        search_bar.widget().set_hexpand(false);
-        search_bar.widget().set_width_request(280);
-        search_bar.widget().set_halign(gtk4::Align::Center);
-        search_bar.widget().set_valign(gtk4::Align::Center);
-        right_section.append(search_bar.widget());
+        // Indicador de sincronización de metadatos (spinner, solo visible si hay actividad).
+        let sync_spinner = Spinner::new();
+        sync_spinner.set_valign(gtk4::Align::Center);
+        sync_spinner.set_visible(false);
+        right_section.append(&sync_spinner);
 
-        // Indicador de biblioteca.
+        // Indicador de biblioteca (medio(s) indexado(s)).
         let library_status = Label::new(None);
         library_status.add_css_class("dim-label");
         library_status.set_valign(gtk4::Align::Center);
         right_section.append(&library_status);
 
-        // Botón de ajustes.
-        let settings_button = Button::with_label(&t("button.settings"));
-        settings_button.set_halign(gtk4::Align::End);
-        settings_button.set_hexpand(false);
-        settings_button.set_valign(gtk4::Align::Center);
-        settings_button.add_css_class("flat-button");
-        right_section.append(&settings_button);
+        // Botón "Categorías": abre el selector de categorías para filtrar.
+        let categories_button = Button::with_label(&t("button.categories"));
+        categories_button.add_css_class("nav-button");
+        categories_button.set_valign(gtk4::Align::Center);
+        right_section.append(&categories_button);
+
+        // Botón menú ☰ Ajustes (popover con opciones).
+        let settings_menu_button = Button::with_label("☰");
+        settings_menu_button.add_css_class("nav-button");
+        settings_menu_button.set_valign(gtk4::Align::Center);
+        settings_menu_button.set_tooltip_text(Some(&t("button.settings")));
+        right_section.append(&settings_menu_button);
 
         top_bar.set_end_widget(Some(&right_section));
 
-        content.append(&top_bar);
+        // Barra secundaria (nivel 2): filtros activos, continuar viendo, vista y ordenamiento.
+        // Oculta por defecto; se muestra solo cuando hay categoría/continuar.
+        let top_bar_level2 = Box::new(Orientation::Horizontal, 8);
+        top_bar_level2.add_css_class("top-bar-level2");
+        top_bar_level2.set_halign(gtk4::Align::Fill);
+        top_bar_level2.set_valign(gtk4::Align::Center);
+        top_bar_level2.set_visible(false);
+
+        // Chip removible "Filtrando por: X".
+        let filter_chip = Button::with_label(&t("topbar.filter_chip"));
+        filter_chip.add_css_class("filter-chip");
+        filter_chip.set_valign(gtk4::Align::Center);
+        top_bar_level2.append(&filter_chip);
+
+        // Píldora "▶ Continuar SxxExx - Título".
+        let continue_button = Button::with_label(&t("topbar.continue_watching"));
+        continue_button.add_css_class("continue-button");
+        continue_button.set_valign(gtk4::Align::Center);
+        continue_button.set_visible(false);
+        top_bar_level2.append(&continue_button);
+
+        // Separador visual.
+        let separator = Label::new(Some("·"));
+        separator.add_css_class("dim-label");
+        separator.set_valign(gtk4::Align::Center);
+        top_bar_level2.append(&separator);
+
+        // Botones de modo de vista: Grid / Lista.
+        let view_grid_button = Button::with_label(&t("topbar.view_grid"));
+        view_grid_button.add_css_class("view-mode-button");
+        view_grid_button.set_valign(gtk4::Align::Center);
+        top_bar_level2.append(&view_grid_button);
+
+        let view_list_button = Button::with_label(&t("topbar.view_list"));
+        view_list_button.add_css_class("view-mode-button");
+        view_list_button.set_valign(gtk4::Align::Center);
+        top_bar_level2.append(&view_list_button);
+
+        // Etiqueta de ordenamiento (placeholder visual).
+        let sort_label = Label::new(Some(&t("topbar.sort_title")));
+        sort_label.set_valign(gtk4::Align::Center);
+        top_bar_level2.append(&sort_label);
+
+        content.append(&top_bar_level2);
+
+        // Revealer para ocultar/mostrar la barra superior al hacer scroll
+        let top_bar_revealer = Revealer::new();
+        top_bar_revealer.set_child(Some(&top_bar));
+        top_bar_revealer.set_reveal_child(true);
+        // top_bar_level2 va fuera del revealer para que siempre sea accesible
+        // cuando hay filtros, pero la barra principal puede ocultarse.
+        content.append(&top_bar_revealer);
 
         let stack = Stack::new();
         stack.set_hexpand(true);
@@ -322,9 +405,7 @@ impl MainWindow {
         let this = Rc::new(RefCell::new(Self {
             window,
             stack,
-            search_bar,
-            settings_button,
-            categories_button: Button::new(),
+            categories_button,
             media_list,
             media_details,
             settings_view,
@@ -344,6 +425,16 @@ impl MainWindow {
             filter_bar,
             filter_label,
             filter_clear_button,
+            top_bar_level2,
+            filter_chip,
+            continue_button,
+            view_grid_button,
+            view_list_button,
+            sort_label,
+            search_entry,
+            sync_spinner,
+            settings_menu_button,
+            top_bar_revealer,
             history: RefCell::new(Vec::new()),
             current_category: Rc::new(RefCell::new(None)),
             current_category_name: Rc::new(RefCell::new(None)),
@@ -354,6 +445,31 @@ impl MainWindow {
         // Cargar medios iniciales (SQLite local, rápido).
         Self::load_media(&this);
 
+        // Nivel 2: chip de filtro removible.
+        let this_chip = this.clone();
+        this.borrow().filter_chip.connect_clicked(move |_| {
+            Self::clear_category_filter(&this_chip);
+        });
+
+        // Nivel 2: píldora "Continuar viendo".
+        let this_cont = this.clone();
+        this.borrow().continue_button.connect_clicked(move |_| {
+            let w = this_cont.borrow();
+            if w.media_count > 0 {
+                w.show_list();
+            }
+        });
+
+        // Nivel 2: botones de modo de vista.
+        let this_grid = this.clone();
+        this.borrow().view_grid_button.connect_clicked(move |_| {
+            let _ = this_grid;
+        });
+        let this_list = this.clone();
+        this.borrow().view_list_button.connect_clicked(move |_| {
+            let _ = this_list;
+        });
+
         // Logo: acceso directo al inicio desde cualquier vista. Limpia la
         // búsqueda y el filtro, sin reiniciar la aplicación ni recargar la
         // biblioteca si no hay filtro que retirar.
@@ -363,22 +479,15 @@ impl MainWindow {
         });
 
         // Botón "Categorías": abre el selector de categorías para filtrar.
-        let categories_button = Button::with_label(&t("button.categories"));
-        categories_button.add_css_class("nav-button");
-        categories_button.set_valign(gtk4::Align::Center);
+        // Ya se creó arriba en la sección derecha de la barra superior.
         let this_cat = this.clone();
-        categories_button.connect_clicked(move |_| {
+        this.borrow().categories_button.connect_clicked(move |_| {
             {
                 let w = this_cat.borrow();
                 w.stack.set_visible_child_name("categories");
             }
             Self::populate_categories_page(&this_cat);
         });
-        nav_box.append(&categories_button);
-        {
-            let mut w = this.borrow_mut();
-            w.categories_button = categories_button;
-        }
 
         // Callbacks: ambos botones "Ver todo" retiran el filtro activo.
         let this_clear = this.clone();
@@ -401,21 +510,29 @@ impl MainWindow {
             w.navigate_to_details(media_id);
         });
 
-        // Callback: al buscar y seleccionar un resultado, mostrar detalles.
+        // Callback: al cambiar el texto de búsqueda, filtrar medios por título.
         let this_clone = this.clone();
-        this.borrow_mut().search_bar.on_select(move |media_id| {
-            let w = this_clone.borrow();
-            w.navigate_to_details(media_id);
-        });
+        this.borrow_mut()
+            .search_entry
+            .connect_search_changed(move |entry| {
+                let query = entry.text().to_string();
+                if query.is_empty() {
+                    Self::load_media(&this_clone);
+                } else {
+                    Self::filter_media_by_text(&this_clone, &query);
+                }
+            });
 
-        // Callback: botón de Ajustes -> navega a la vista de ajustes dentro del
+        // Callback: botón de Ajustes (☰) -> navega a la vista de ajustes dentro del
         // Stack, guardando la vista exacta de origen para volver a ella.
         let this_clone = this.clone();
-        this.borrow_mut().settings_button.connect_clicked(move |_| {
-            let w = this_clone.borrow();
-            w.push_current_view();
-            w.stack.set_visible_child_name("settings");
-        });
+        this.borrow_mut()
+            .settings_menu_button
+            .connect_clicked(move |_| {
+                let w = this_clone.borrow();
+                w.push_current_view();
+                w.stack.set_visible_child_name("settings");
+            });
 
         // Callback: Guardar ajustes -> guarda en disco, limpia medios huérfanos
         // y vuelve a la lista. Aplica el idioma en caliente sin reiniciar.
@@ -663,11 +780,22 @@ impl MainWindow {
     /// sin reiniciar la aplicación.
     fn refresh_ui_texts(&mut self) {
         // Barra superior
-        self.settings_button.set_label(&self.t("button.settings"));
         self.categories_button
             .set_label(&self.t("button.categories"));
         self.clear_category_button
             .set_label(&self.t("button.clear_category"));
+
+        // Placeholder del buscador
+        let search_placeholder = self.t("search.placeholder");
+        self.search_entry
+            .set_placeholder_text(Some(search_placeholder.as_str()));
+
+        // Nivel 2: textos de filtros y vista
+        self.filter_chip.set_label(&self.t("topbar.filter_chip"));
+        self.continue_button
+            .set_label(&self.t("topbar.continue_watching"));
+        self.view_grid_button.set_label(&self.t("topbar.view_grid"));
+        self.view_list_button.set_label(&self.t("topbar.view_list"));
 
         // Página vacía
         self.empty_page.set_title(&self.t("empty.title"));
@@ -678,7 +806,9 @@ impl MainWindow {
         Self::update_library_status(self);
 
         // Placeholder del buscador
-        self.search_bar.set_placeholder(&self.translations);
+        let search_placeholder = self.t("search.placeholder");
+        self.search_entry
+            .set_placeholder_text(Some(search_placeholder.as_str()));
 
         // Página de categorías: textos fijos y chip "Todas las categorías"
         // (los nombres de categoría provienen de la BD y no se traducen).
@@ -842,7 +972,7 @@ impl MainWindow {
     fn go_home(this: &MainWindowRef) {
         let had_filter = {
             let w = this.borrow();
-            w.search_bar.clear_query();
+            w.search_entry.set_text("");
             let had_filter = w.current_category.borrow().is_some();
             w.current_category.replace(None);
             w.current_category_name.replace(None);
@@ -855,6 +985,59 @@ impl MainWindow {
             Self::load_media(this);
         }
         this.borrow().show_list();
+    }
+
+    /// Filtra los medios ya cargados en la galería por un fragmento de título.
+    /// Se usa para la búsqueda inmediata desde la barra superior sin consultar
+    /// nuevamente la base de datos.
+    fn filter_media_by_text(this: &MainWindowRef, query: &str) {
+        let all_media = {
+            let w = this.borrow();
+            // Como `media_list` no expone la lista completa, volvemos a leer
+            // de la BD con el filtro de texto.
+            drop(w);
+            Self::search_media_by_text(&this.borrow().db_path, query)
+        };
+
+        let mut w = this.borrow_mut();
+        let count = all_media.len();
+        let is_empty = all_media.is_empty();
+        w.media_count = count;
+        w.media_list.set_media(all_media);
+
+        let filtered = w.current_category.borrow().is_some();
+        if is_empty && !filtered {
+            w.stack.set_visible_child_name("empty");
+        } else {
+            w.stack.set_visible_child_name("list");
+        }
+
+        w.update_filter_bar();
+        Self::update_library_status(&w);
+    }
+
+    /// Busca medios por texto en la base de datos (título contiene el query).
+    fn search_media_by_text(db_path: &str, query: &str) -> Vec<crate::db::media_repo::Media> {
+        let mut conn = match open_db(db_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Error abriendo BD para búsqueda: {}", e);
+                return Vec::new();
+            }
+        };
+        let media = {
+            let mut repo = MediaRepository::new(&mut conn);
+            repo.search(
+                query,
+                crate::db::media_repo::SearchMediaOptions {
+                    r#type: None,
+                    limit: Some(500),
+                },
+            )
+            .unwrap_or_default()
+        };
+        close_db(conn);
+        media
     }
 
     /// Aplica o retira el filtro de categoría y vuelve a la biblioteca.
