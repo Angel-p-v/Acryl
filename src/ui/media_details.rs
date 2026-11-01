@@ -47,6 +47,9 @@ struct SeasonOption {
 type PlayEpisodeCallback = Rc<dyn Fn(String)>;
 type SharedPlayEpisodeCallback = Rc<RefCell<Option<PlayEpisodeCallback>>>;
 
+/// Callback compartido para elegir póster y banner.
+type ChooseImagesCallback = Rc<dyn Fn(Option<String>, Option<String>)>;
+
 /// Componente de vista de detalles.
 pub struct MediaDetails {
     box_: Box,
@@ -64,6 +67,7 @@ pub struct MediaDetails {
     play_button: Button,
     back_button: Button,
     vote_label: Label,
+    choose_images_button: Button,
     season_dropdown: DropDown,
     season_dropdown_model: gtk4::StringList,
     content_container: Box,
@@ -73,6 +77,7 @@ pub struct MediaDetails {
     on_back: Option<Rc<dyn Fn()>>,
     on_play_episode: SharedPlayEpisodeCallback,
     on_edit_tracks: Option<Rc<dyn Fn(String)>>,
+    on_choose_images: Option<ChooseImagesCallback>,
     translations: TranslationsRef,
 }
 
@@ -116,6 +121,11 @@ impl MediaDetails {
         tracks_button.add_css_class("flat-button");
         tracks_button.set_tooltip_text(Some(&t("tooltip.tracks")));
         buttons_box.append(&tracks_button);
+
+        let choose_images_button = Button::with_label(&t("button.choose_images"));
+        choose_images_button.add_css_class("flat-button");
+        choose_images_button.set_tooltip_text(Some(&t("tooltip.choose_images")));
+        buttons_box.append(&choose_images_button);
 
         let play_button = Button::with_label(&t("button.play"));
         play_button.add_css_class("hero-action-btn");
@@ -209,6 +219,7 @@ impl MediaDetails {
             play_button,
             back_button,
             vote_label,
+            choose_images_button,
             season_dropdown,
             season_dropdown_model,
             content_container,
@@ -218,6 +229,7 @@ impl MediaDetails {
             on_back: None,
             on_play_episode,
             on_edit_tracks: None,
+            on_choose_images: None,
             translations,
         }
     }
@@ -474,6 +486,18 @@ impl MediaDetails {
             }
         });
         self.on_edit_tracks = Some(cb);
+    }
+
+    pub fn on_choose_images<F>(&mut self, f: F)
+    where
+        F: Fn(Option<String>, Option<String>) + 'static,
+    {
+        let cb = Rc::new(f);
+        let cb_clone = cb.clone();
+        self.choose_images_button.connect_clicked(move |_| {
+            cb_clone(None, None);
+        });
+        self.on_choose_images = Some(cb);
     }
 }
 

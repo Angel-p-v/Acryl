@@ -1,6 +1,6 @@
 //! Ventana principal de Acryl con GTK4 / Libadwaita.
 
-use crate::core::metadata::RefreshMetadataResult;
+use crate::core::metadata::{ImageOption, RefreshMetadataResult, fetch_tvmaze_images};
 use crate::core::poster_service::cached_path;
 use crate::db::media_repo::ListMediaOptions;
 use crate::db::{MediaRepository, close_db, open_db};
@@ -8,6 +8,7 @@ use crate::ui::i18n::{Translations, TranslationsRef, load_translations};
 use crate::ui::media_details::{MediaDetails, SeasonSelection};
 use crate::ui::media_list::MediaList;
 use crate::ui::poster::{placeholder_widget, poster_picture};
+use crate::ui::poster_selector::PosterSelector;
 use crate::ui::settings_window::SettingsView;
 use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
@@ -869,6 +870,136 @@ impl MainWindow {
                         }
                     }),
                 );
+            });
+
+        // Callback: abrir el selector de póster y banner del medio actual.
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_choose_images(move |_, _| {
+                let this = this_clone.clone();
+
+                // Obtener media_id y db_path (el Ref se dropea al final del scope).
+                let (media_id, db_path) = {
+                    let w = this.borrow();
+                    (w.media_details.borrow().media_id(), w.db_path.clone())
+                };
+
+                // Obtener el medio actual para saber el show_id y las rutas actuales.
+                let (metadata_source_id, current_poster, current_banner) = {
+                    let mut conn = match open_db(&db_path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Error abriendo BD: {}", e);
+                            return;
+                        }
+                    };
+                    let mut repo = MediaRepository::new(&mut conn);
+                    let media = repo.find_by_id(media_id).unwrap_or(None);
+                    close_db(conn);
+                    match media {
+                        Some(m) => (m.metadata_source_id, m.poster_path, m.banner_path),
+                        None => return,
+                    }
+                };
+
+                let Some(show_id) = metadata_source_id.map(|id| id as u64) else {
+                    this.borrow()
+                        .show_toast(&this.borrow().t("metadata.sync.no_media"));
+                    return;
+                };
+
+                // Obtener las imágenes disponibles de TVmaze.
+                let poster_options: Vec<ImageOption>;
+                let banner_options: Vec<ImageOption>;
+                {
+                    let runtime = match tokio::runtime::Runtime::new() {
+                        Ok(rt) => rt,
+                        Err(_) => return,
+                    };
+                    let client = crate::core::metadata::TvmazeClient::new();
+                    let all_images = runtime.block_on(fetch_tvmaze_images(show_id, &client));
+                    poster_options = all_images
+                        .iter()
+                        .filter(|o| o.image_type == "poster")
+                        .cloned()
+                        .collect();
+                    banner_options = all_images
+                        .iter()
+                        .filter(|o| o.image_type == "banner" || o.image_type == "background")
+                        .cloned()
+                        .collect();
+                }
+
+                let current_poster_str = current_poster.as_deref();
+                let current_banner_str = current_banner.as_deref();
+
+                let selector = PosterSelector::new(
+                    &this.borrow().window,
+                    &poster_options,
+                    &banner_options,
+                    current_poster_str,
+                    current_banner_str,
+                );
+
+                selector.run(move |result| {
+                    if result.poster_path.is_none() && result.banner_path.is_none() {
+                        return;
+                    }
+
+                    let this2 = this.clone();
+                    let w2 = this2.borrow();
+
+                    let poster_url = result.poster_path.clone();
+                    let banner_url = result.banner_path.clone();
+                    let db_path2 = w2.db_path.clone();
+                    let media_id2 = media_id;
+
+                    let runtime = match tokio::runtime::Runtime::new() {
+                        Ok(rt) => rt,
+                        Err(_) => return,
+                    };
+
+                    // Clonar para usar después del block_on (evita problemas
+                    // de Send con glib::idle_add; estamos en el hilo principal
+                    // de GTK todo el tiempo).
+                    let this_for_refresh = this2.clone();
+
+                    runtime.block_on(async move {
+                        let poster_service = crate::core::poster_service::PosterService::new();
+
+                        if let Some(ref url) = poster_url {
+                            let _ = poster_service.download_async_force(url).await;
+                        }
+                        if let Some(ref url) = banner_url {
+                            let _ = poster_service.download_async_force(url).await;
+                        }
+
+                        let mut conn = match open_db(&db_path2) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                eprintln!("Error abriendo BD: {}", e);
+                                return;
+                            }
+                        };
+                        let mut repo = MediaRepository::new(&mut conn);
+                        if let Err(e) = repo.update_metadata(
+                            media_id2,
+                            None,
+                            poster_url.as_deref(),
+                            banner_url.as_deref(),
+                            None,
+                        ) {
+                            eprintln!("Error actualizando metadatos: {}", e);
+                        }
+                        close_db(conn);
+                    });
+
+                    // Refrescar la vista de detalles para mostrar las nuevas
+                    // imágenes. Estamos en el hilo principal de GTK.
+                    this_for_refresh.borrow().show_details(media_id2, None);
+                });
             });
 
         // Completar metadatos y pósters que falten sin bloquear la UI.

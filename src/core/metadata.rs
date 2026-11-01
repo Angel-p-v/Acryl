@@ -55,6 +55,17 @@ pub(crate) struct TvmazeEpisode {
     pub image_url: Option<String>,
 }
 
+/// Una imagen disponible para póster o banner, obtenida de la API de metadatos.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageOption {
+    /// Tipo de imagen: "poster", "banner" o "background".
+    pub image_type: String,
+    /// Resolución: "original" o "medium".
+    pub resolution: String,
+    /// URL de la imagen.
+    pub url: String,
+}
+
 /// Servicio de metadatos: sincroniza con TVmaze.
 pub struct MetadataService;
 
@@ -655,6 +666,71 @@ async fn fetch_tvmaze_banner(show_id: u64, client: &TvmazeClient) -> Option<Stri
         .ok()?;
 
     parse_tvmaze_banner(&response)
+}
+
+/// Obtiene todas las imágenes disponibles (póster y banner) de TVmaze para un show,
+/// incluyendo cada resolución disponible (original y medium).
+///
+/// Devuelve una `Vec<ImageOption>` con una entrada por cada combinación
+/// (tipo, resolución) que la API ofrezca. Si no hay `show_id` o la consulta falla,
+/// devuelve un vector vacío (no es un error).
+pub async fn fetch_tvmaze_images(show_id: u64, client: &TvmazeClient) -> Vec<ImageOption> {
+    let url = format!("https://api.tvmaze.com/shows/{}/images", show_id);
+
+    let response: Value = match client.client.get(&url).send().await {
+        Ok(r) => match r.error_for_status() {
+            Ok(r) => match r.json::<Value>().await {
+                Ok(v) => v,
+                Err(_) => return Vec::new(),
+            },
+            Err(_) => return Vec::new(),
+        },
+        Err(_) => return Vec::new(),
+    };
+
+    let images = match response.as_array() {
+        Some(arr) => arr,
+        None => return Vec::new(),
+    };
+
+    let mut options: Vec<ImageOption> = Vec::new();
+
+    for image in images {
+        let image_type = match image.get("type").and_then(Value::as_str) {
+            Some(t) if !t.is_empty() => t.to_string(),
+            _ => continue,
+        };
+
+        // Solo nos interesan pósters y banners/backgrounds.
+        if image_type != "poster" && image_type != "banner" && image_type != "background" {
+            continue;
+        }
+
+        let resolutions = match image.get("resolutions") {
+            Some(r) => r,
+            None => continue,
+        };
+
+        for resolution in ["original", "medium"] {
+            let url = match resolutions
+                .get(resolution)
+                .and_then(|res| res.get("url"))
+                .and_then(Value::as_str)
+                .filter(|u| !u.is_empty())
+            {
+                Some(u) => u.to_string(),
+                None => continue,
+            };
+
+            options.push(ImageOption {
+                image_type: image_type.clone(),
+                resolution: resolution.to_string(),
+                url,
+            });
+        }
+    }
+
+    options
 }
 
 /// Obtiene la lista de episodios de un show con sus imágenes individuales.
