@@ -104,7 +104,7 @@ impl MediaCard {
             "anime" => translations.borrow().t("media.type.anime"),
             "series" => translations.borrow().t("media.type.series"),
             "movie" => translations.borrow().t("media.type.movie"),
-            other => other,
+            other => other.to_string(),
         };
         let type_label = Label::new(Some(&type_label_text));
         type_label.set_halign(gtk4::Align::Start);
@@ -140,7 +140,10 @@ impl MediaCard {
         });
         card.add_controller(click);
 
-        Self { widget: card }
+        Self {
+            widget: card,
+            translations,
+        }
     }
 }
 
@@ -243,11 +246,5 @@ impl MediaList {
     {
         self.on_media_select = Some(Rc::new(f));
         self.refresh();
-    }
-}
-
-impl Default for MediaList {
-    fn default() -> Self {
-        Self::new()
     }
 }

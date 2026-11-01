@@ -160,11 +160,13 @@ impl FolderManager {
 
         let title_template = self.t("dialog.remove_folder.title_format");
         let title = title_template.replace("{}", folder);
+        let cancel_label = self.t("dialog.remove_folder.cancel");
+        let delete_label = self.t("dialog.remove_folder.delete");
         let dialog = gtk4::AlertDialog::builder()
             .modal(true)
             .message(title)
             .detail(&self.t("dialog.remove_folder.detail"))
-            .buttons([&self.t("dialog.remove_folder.cancel"), &self.t("dialog.remove_folder.delete")])
+            .buttons([cancel_label.as_str(), delete_label.as_str()])
             .cancel_button(0)
             .default_button(0)
             .build();
@@ -187,10 +189,13 @@ impl FolderManager {
         let deleted = match crate::core::library::remove_folder(&self.db_path, folder) {
             Ok(deleted) => deleted,
             Err(error) => {
-                self.show_error(
-                    "No se pudo eliminar la carpeta",
-                    &format!("{}: {}", folder, error),
-                );
+                let title = self.t("error.remove_folder.title");
+                let detail_template = self.t("error.remove_folder.detail_format");
+                let detail =
+                    detail_template
+                        .replacen("{}", folder, 1)
+                        .replacen("{}", &error.to_string(), 1);
+                self.show_error(&title, &detail);
                 return;
             }
         };
@@ -205,37 +210,36 @@ impl FolderManager {
                 .borrow_mut()
                 .media_folders
                 .push(folder.to_string());
-            self.show_error("No se pudo guardar la configuración", &error.to_string());
+            self.show_error(&self.t("error.save_config.title"), &error.to_string());
             return;
         }
 
         self.folders_list.remove(row);
-        self.set_status(&format!(
-            "Carpeta eliminada: {} medios retirados de la biblioteca.",
-            deleted
-        ));
+        let removed_template = self.t("status.folder_removed_format");
+        let text = removed_template.replacen("{}", &deleted.to_string(), 1);
+        self.set_status(&text);
         self.notify_config_changed();
         self.notify_library_changed();
     }
 
     fn reindex_all(&self) {
         if self.indexing.get() {
-            self.set_status("Ya hay una indexación en curso.");
+            self.set_status(&self.t("status.indexing_in_progress"));
             return;
         }
 
         let folders = self.config.borrow().media_folders.clone();
         if folders.is_empty() {
-            self.set_status("Añade al menos una carpeta para poder reindexar.");
+            self.set_status(&self.t("status.no_folders_to_reindex"));
             return;
         }
 
-        self.start_indexing(folders, "Reindexando todas las carpetas...");
+        self.start_indexing(folders, &self.t("status.reindexing"));
     }
 
     fn start_indexing(&self, folders: Vec<String>, message: &str) {
         if self.indexing.get() {
-            self.set_status("Ya hay una indexación en curso.");
+            self.set_status(&self.t("status.indexing_in_progress"));
             return;
         }
 
@@ -311,21 +315,21 @@ impl FolderManager {
         self.index_spinner.set_visible(false);
         self.set_buttons_sensitive(true);
 
-        let mut message = format!(
-            "Indexación completada: {} medios y {} archivos en {} de {} carpetas.",
-            summary.media_added,
-            summary.files_added,
-            summary.indexed_folders,
-            summary.total_folders
-        );
+        let completed_template = self.t("status.indexing_completed_format");
+        let mut message = completed_template
+            .replacen("{}", &summary.media_added.to_string(), 1)
+            .replacen("{}", &summary.files_added.to_string(), 1)
+            .replacen("{}", &summary.indexed_folders.to_string(), 1)
+            .replacen("{}", &summary.total_folders.to_string(), 1);
         if !summary.errors.is_empty() {
-            message.push_str(&format!(" {} carpetas fallaron.", summary.errors.len()));
+            let failed = self.t("status.folders_failed");
+            message.push_str(&failed.replacen("{}", &summary.errors.len().to_string(), 1));
         }
         self.set_status(&message);
 
         if !summary.errors.is_empty() {
             self.show_error(
-                "Algunas carpetas no se pudieron indexar",
+                &self.t("error.some_folders_failed.title"),
                 &summary.errors.join("\n"),
             );
         }
@@ -338,7 +342,7 @@ impl FolderManager {
         self.index_spinner.set_spinning(false);
         self.index_spinner.set_visible(false);
         self.set_buttons_sensitive(true);
-        self.set_status("La indexación se interrumpió inesperadamente.");
+        self.set_status(&self.t("status.indexing_interrupted"));
     }
 
     fn set_buttons_sensitive(&self, sensitive: bool) {
@@ -396,7 +400,6 @@ pub struct SettingsView {
     folder_manager: FolderManager,
     on_save: Option<Rc<dyn Fn(AppConfig)>>,
     on_refresh_metadata: Option<Rc<dyn Fn()>>,
-    translations: TranslationsRef,
 }
 
 impl SettingsView {
@@ -416,7 +419,9 @@ impl SettingsView {
         content.set_vexpand(true);
         content.set_hexpand(true);
 
-        let title = Label::new(Some("Ajustes"));
+        let t = |key: &str| -> String { translations.borrow().t(key) };
+
+        let title = Label::new(Some(&t("settings.title")));
         title.set_halign(gtk4::Align::Start);
         title.add_css_class("heading");
         content.append(&title);
@@ -425,15 +430,12 @@ impl SettingsView {
         let folders_section = Box::new(Orientation::Vertical, 10);
         folders_section.set_hexpand(true);
 
-        let folders_title = Label::new(Some("Rutas de medios"));
+        let folders_title = Label::new(Some(&t("settings.folders.title")));
         folders_title.set_halign(gtk4::Align::Start);
         folders_title.add_css_class("subheading");
         folders_section.append(&folders_title);
 
-        let folders_label = Label::new(Some(
-            "Carpetas donde se indexan los archivos multimedia:\n\
-             Elige una carpeta y pulsa Agregar o Enter. Se indexará en segundo plano.",
-        ));
+        let folders_label = Label::new(Some(&t("settings.folders.description")));
         folders_label.set_halign(gtk4::Align::Start);
         folders_label.set_wrap(true);
         folders_section.append(&folders_label);
@@ -453,22 +455,22 @@ impl SettingsView {
         add_box.set_hexpand(true);
 
         let folder_entry = Entry::new();
-        folder_entry.set_placeholder_text(Some("/ruta/a/tus/medios"));
+        folder_entry.set_placeholder_text(Some(&t("settings.folders.entry_placeholder")));
         folder_entry.set_hexpand(true);
         add_box.append(&folder_entry);
 
-        let browse_button = Button::with_label("Examinar...");
+        let browse_button = Button::with_label(&t("button.browse"));
         browse_button.set_hexpand(false);
         add_box.append(&browse_button);
 
-        let add_button = Button::with_label("Agregar carpeta");
+        let add_button = Button::with_label(&t("button.add_folder"));
         add_box.append(&add_button);
         folders_section.append(&add_box);
 
         let reindex_box = Box::new(Orientation::Horizontal, 10);
         reindex_box.set_hexpand(true);
 
-        let reindex_button = Button::with_label("Reindexar todas las carpetas");
+        let reindex_button = Button::with_label(&t("button.reindex"));
         reindex_button.set_halign(gtk4::Align::Start);
         reindex_box.append(&reindex_button);
 
@@ -489,12 +491,19 @@ impl SettingsView {
         let language_section = Box::new(Orientation::Vertical, 10);
         language_section.set_hexpand(true);
 
-        let language_title = Label::new(Some("Idioma"));
+        let language_title = Label::new(Some(&t("settings.language.title")));
         language_title.set_halign(gtk4::Align::Start);
         language_title.add_css_class("subheading");
         language_section.append(&language_title);
 
-        let language_combo = DropDown::from_strings(&["Español", "Inglés"]);
+        let language_options: Vec<String> =
+            vec![t("settings.language.es"), t("settings.language.en")];
+        let language_combo = DropDown::from_strings(
+            &language_options
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+        );
         language_combo.set_selected(if config.language == "es" { 0 } else { 1 });
         language_section.append(&language_combo);
 
@@ -502,15 +511,12 @@ impl SettingsView {
         let metadata_section = Box::new(Orientation::Vertical, 10);
         metadata_section.set_hexpand(true);
 
-        let metadata_title = Label::new(Some("Metadatos"));
+        let metadata_title = Label::new(Some(&t("settings.metadata.title")));
         metadata_title.set_halign(gtk4::Align::Start);
         metadata_title.add_css_class("subheading");
         metadata_section.append(&metadata_title);
 
-        let metadata_label = Label::new(Some(
-            "Vuelve a consultar TVmaze (y AniList para anime) y sobrescribe el título, el año, \
-             la sinopsis, el póster y el banner de todos los medios indexados.",
-        ));
+        let metadata_label = Label::new(Some(&t("settings.metadata.description")));
         metadata_label.set_halign(gtk4::Align::Start);
         metadata_label.set_wrap(true);
         metadata_section.append(&metadata_label);
@@ -518,7 +524,7 @@ impl SettingsView {
         let metadata_row = Box::new(Orientation::Horizontal, 10);
         metadata_row.set_hexpand(true);
 
-        let metadata_button = Button::with_label("Actualizar todos los metadatos");
+        let metadata_button = Button::with_label(&t("button.refresh_metadata"));
         metadata_button.set_halign(gtk4::Align::Start);
         metadata_row.append(&metadata_button);
 
@@ -545,10 +551,10 @@ impl SettingsView {
         button_box.set_halign(gtk4::Align::End);
         button_box.set_hexpand(true);
 
-        let cancel_button = Button::with_label("Volver");
+        let cancel_button = Button::with_label(&t("button.cancel"));
         button_box.append(&cancel_button);
 
-        let save_button = Button::with_label("Guardar");
+        let save_button = Button::with_label(&t("button.save"));
         save_button.add_css_class("suggested-action");
         button_box.append(&save_button);
 
@@ -640,7 +646,6 @@ impl SettingsView {
             folder_manager,
             on_save: None,
             on_refresh_metadata: None,
-            translations,
         }
     }
 

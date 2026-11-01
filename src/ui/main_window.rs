@@ -241,8 +241,13 @@ impl MainWindow {
 
         let config_rc = Rc::new(RefCell::new(config.inner().clone()));
 
-        let settings_view =
-            SettingsView::new(config.inner(), &db_path, config_path.as_path(), &window);
+        let settings_view = SettingsView::new(
+            config.inner(),
+            &db_path,
+            config_path.as_path(),
+            &window,
+            translations.clone(),
+        );
         stack.add_titled(settings_view.widget(), Some("settings"), "Ajustes");
 
         stack.set_visible_child_name("list");
@@ -360,7 +365,11 @@ impl MainWindow {
             let _ = crate::core::library::cleanup_media_not_in_folders(&db_path_save, &folders);
 
             // Aplicar el idioma en caliente y refrescar las vistas visibles.
-            let _ = Self::set_language(&this_save, &language);
+            {
+                let mut w = this_save.borrow_mut();
+                let _ = w.set_language(&language);
+            }
+            Self::refresh_views(&this_save);
         });
 
         // Callback: cambios inmediatos de carpetas (ya persistidos por la vista).
@@ -555,15 +564,11 @@ impl MainWindow {
     /// `refresh_views` (que necesita `borrow_mut`), evitando
     /// `RefCell already borrowed`.
     fn set_language(
-        this: &MainWindowRef,
+        &mut self,
         language: &str,
     ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
-        {
-            let w = this.borrow();
-            w.translations.borrow_mut().set_language(language)?;
-            w.show_toast(&w.t("status.language_applied"));
-        }
-        Self::refresh_views(this);
+        self.translations.borrow_mut().set_language(language)?;
+        self.show_toast(&self.t("status.language_applied"));
         Ok(())
     }
 
@@ -580,8 +585,11 @@ impl MainWindow {
             }
             total => {
                 let many = w.t("status.many_folders");
-                many.replacen("{}", &w.media_count.to_string(), 1)
-                    .replacen("{}", &total.to_string(), 1)
+                many.replacen("{}", &w.media_count.to_string(), 1).replacen(
+                    "{}",
+                    &total.to_string(),
+                    1,
+                )
             }
         };
         w.library_status.set_label(&text);
