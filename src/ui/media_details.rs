@@ -286,7 +286,7 @@ impl MediaDetails {
         // Solo se muestra banner si tiene uno propio. Nunca se usa el póster
         // como banner porque son formatos diferentes (póster vertical vs banner
         // horizontal 16:9) y se vería distorsionado.
-        self.banner.set_images(media.banner_path.as_deref(), None);
+        self.banner.set_images(media.banner_path.as_deref());
 
         if let Some(vote) = media.vote_average {
             self.vote_label.set_label(&format!("⭐ {:.1} / 10", vote));
