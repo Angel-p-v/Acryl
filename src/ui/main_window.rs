@@ -247,6 +247,7 @@ impl MainWindow {
         // Revealer para ocultar/mostrar la barra superior al hacer scroll
         let top_bar_revealer = Revealer::new();
         top_bar_revealer.set_child(Some(&top_bar));
+        top_bar_revealer.set_reveal_child(true);
         // top_bar_level2 va fuera del revealer para que siempre sea accesible
         // cuando hay filtros, pero la barra principal puede ocultarse.
         content.append(&top_bar_revealer);
