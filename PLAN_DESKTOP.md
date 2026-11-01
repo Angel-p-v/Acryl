@@ -566,6 +566,6 @@ No hay trabajo pendiente en el plan.
 - Validación visual con capturas de pantalla (página de inicio, categorías, filtro por categoría, detalles de serie, episodios con thumbnails individuales).
 
 ### 19.8. Limitaciones conocidas
-- No hay releases automáticos de GitHub; la instalación se hace clonando y compilando el repositorio.
+Ninguna.
 
 *Nota: Este plan es un borrador inicial. A medida que se avanza en la implementación, se deben actualizar los hitos y criterios de aceptación.*
