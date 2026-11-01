@@ -102,6 +102,10 @@ impl MediaList {
 
         // Selección: al hacer click en un ítem se dispara esta señal.
         let selection = SingleSelection::new(Some(store.clone()));
+        // Deshabilitar autoselect: GTK4 selecciona el primer ítem por defecto,
+        // lo que causa que una tarjeta quede resaltada al iniciar la app.
+        selection.set_autoselect(false);
+        selection.set_selected(gtk4::INVALID_LIST_POSITION);
         let on_select_sel = Rc::clone(&on_select_ref);
         let media_for_sel = Rc::clone(&media_ref);
         selection.connect_selection_changed(move |_selection, position, _n_items| {
