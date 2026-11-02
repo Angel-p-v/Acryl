@@ -993,10 +993,26 @@ impl MainWindow {
                                         crate::core::poster_service::PosterService::new();
 
                                     if let Some(ref url) = poster_url {
-                                        let _ = poster_service.download_async_force(url).await;
+                                        match poster_service.download_async_force(url).await {
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "Error descargando póster '{}': {}",
+                                                    url, e
+                                                );
+                                            }
+                                        }
                                     }
                                     if let Some(ref url) = banner_url {
-                                        let _ = poster_service.download_async_force(url).await;
+                                        match poster_service.download_async_force(url).await {
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "Error descargando banner '{}': {}",
+                                                    url, e
+                                                );
+                                            }
+                                        }
                                     }
 
                                     let mut conn = match open_db(&db_path2) {
@@ -1007,14 +1023,15 @@ impl MainWindow {
                                         }
                                     };
                                     let mut repo = MediaRepository::new(&mut conn);
-                                    if let Err(e) = repo.update_metadata(
+                                    if let Err(e) = repo.set_poster_banner(
                                         media_id2,
-                                        None,
                                         poster_url.as_deref(),
                                         banner_url.as_deref(),
-                                        None,
                                     ) {
-                                        eprintln!("Error actualizando metadatos: {}", e);
+                                        eprintln!(
+                                            "Error actualizando póster/banner: {}",
+                                            e
+                                        );
                                     }
                                     close_db(conn);
                                 });
