@@ -47,6 +47,9 @@ struct SeasonOption {
 type PlayEpisodeCallback = Rc<dyn Fn(String)>;
 type SharedPlayEpisodeCallback = Rc<RefCell<Option<PlayEpisodeCallback>>>;
 
+/// Callback compartido para elegir póster y banner.
+type ChooseImagesCallback = Rc<dyn Fn(Option<String>, Option<String>)>;
+
 /// Componente de vista de detalles.
 pub struct MediaDetails {
     box_: Box,
@@ -64,6 +67,7 @@ pub struct MediaDetails {
     play_button: Button,
     back_button: Button,
     vote_label: Label,
+    choose_images_button: Button,
     season_dropdown: DropDown,
     season_dropdown_model: gtk4::StringList,
     content_container: Box,
@@ -73,6 +77,7 @@ pub struct MediaDetails {
     on_back: Option<Rc<dyn Fn()>>,
     on_play_episode: SharedPlayEpisodeCallback,
     on_edit_tracks: Option<Rc<dyn Fn(String)>>,
+    on_choose_images: Option<ChooseImagesCallback>,
     translations: TranslationsRef,
 }
 
@@ -128,6 +133,16 @@ impl MediaDetails {
         vote_label.set_margin_start(16);
         vote_label.add_css_class("vote-average");
         buttons_box.append(&vote_label);
+
+        // Spacer para empujar el botón de elegir imágenes a la derecha del todo.
+        let spacer = Box::new(Orientation::Horizontal, 0);
+        spacer.set_hexpand(true);
+        buttons_box.append(&spacer);
+
+        let choose_images_button = Button::with_label(&t("button.choose_images"));
+        choose_images_button.add_css_class("flat-button");
+        choose_images_button.set_tooltip_text(Some(&t("tooltip.choose_images")));
+        buttons_box.append(&choose_images_button);
 
         let season_dropdown_model = gtk4::StringList::new(&[]);
         let season_dropdown = gtk4::DropDown::builder()
@@ -209,6 +224,7 @@ impl MediaDetails {
             play_button,
             back_button,
             vote_label,
+            choose_images_button,
             season_dropdown,
             season_dropdown_model,
             content_container,
@@ -218,6 +234,7 @@ impl MediaDetails {
             on_back: None,
             on_play_episode,
             on_edit_tracks: None,
+            on_choose_images: None,
             translations,
         }
     }
@@ -474,6 +491,24 @@ impl MediaDetails {
             }
         });
         self.on_edit_tracks = Some(cb);
+    }
+
+    pub fn on_choose_images<F>(&mut self, f: F)
+    where
+        F: Fn(Option<String>, Option<String>) + 'static,
+    {
+        let cb = Rc::new(f);
+        let cb_clone = cb.clone();
+        self.choose_images_button.connect_clicked(move |_| {
+            cb_clone(None, None);
+        });
+        self.on_choose_images = Some(cb);
+    }
+
+    /// Fuerza el redibujado del banner para que se muestre la imagen actualizada
+    /// sin necesidad de reiniciar la aplicación.
+    pub fn refresh_banner(&mut self) {
+        self.banner.widget().queue_draw();
     }
 }
 

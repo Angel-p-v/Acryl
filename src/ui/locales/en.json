@@ -32,7 +32,8 @@
   "button.browse": "Browse...",
   "button.reindex": "Reindex all folders",
   "button.refresh_metadata": "Refresh all metadata",
-  "button.tracks": "🎵 Tracks",
+  "button.tracks": "Tracks",
+  "button.choose_images": "Choose poster/banner",
   "button.play": "▶ Play",
   "button.continue_prefix": "▶ Continue",
   "button.continue_format": "▶ Continue {}",
@@ -101,6 +102,7 @@
 
   "tooltip.home": "Go to home",
   "tooltip.tracks": "Choose audio and subtitle tracks",
+  "tooltip.choose_images": "Choose a different poster or banner, or remove the current one",
   "tooltip.redetect": "Run ffprobe again to read all tracks of the file",
 
   "track.title": "Audio and subtitle tracks",

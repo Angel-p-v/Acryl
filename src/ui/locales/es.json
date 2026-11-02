@@ -32,7 +32,8 @@
   "button.browse": "Examinar...",
   "button.reindex": "Reindexar todas las carpetas",
   "button.refresh_metadata": "Actualizar todos los metadatos",
-  "button.tracks": "🎵 Pistas",
+  "button.tracks": "Pistas",
+  "button.choose_images": "Elegir póster/banner",
   "button.play": "▶ Reproducir",
   "button.continue_prefix": "▶ Continuar",
   "button.continue_format": "▶ Continuar {}",
@@ -101,6 +102,7 @@
 
   "tooltip.home": "Ir al inicio",
   "tooltip.tracks": "Elegir pista de audio y subtítulos",
+  "tooltip.choose_images": "Elegir un póster o banner diferente, o eliminar el actual",
   "tooltip.redetect": "Ejecuta ffprobe de nuevo para leer todas las pistas del archivo",
 
   "track.title": "Pistas de audio y subtítulos",

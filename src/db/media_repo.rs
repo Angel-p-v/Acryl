@@ -611,6 +611,26 @@ impl<'a> MediaRepository<'a> {
         Ok(())
     }
 
+    /// Establece el póster y/o banner de un medio directamente.
+    ///
+    /// A diferencia de `update_metadata`, este método permite establecer
+    /// `poster_path` o `banner_path` a `None` para borrar la imagen actual.
+    /// Los campos que se pasan como `None` se dejan sin cambiar (COALESCE).
+    pub fn set_poster_banner(
+        &mut self,
+        media_id: i64,
+        poster_path: Option<&str>,
+        banner_path: Option<&str>,
+    ) -> RusqliteResult<()> {
+        self.conn.execute(
+            "UPDATE media SET poster_path = ?1, banner_path = ?2,
+             updated_at = datetime('now')
+             WHERE id = ?3",
+            params![poster_path, banner_path, media_id],
+        )?;
+        Ok(())
+    }
+
     /// Guarda la puntuación obtenida de los metadatos (vote_average, 0-10).
     pub fn set_vote_average(
         &mut self,
