@@ -1829,4 +1829,87 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn search_candidates_quita_sufijos_comerciales_solo_en_peliculas() {
+        assert!(search_candidates("movie", "   ").is_empty());
+        assert_eq!(search_candidates("series", "One Piece"), vec!["One Piece"]);
+        assert_eq!(
+            search_candidates("movie", "Batman Movie"),
+            vec!["Batman Movie", "Batman"]
+        );
+        assert_eq!(
+            search_candidates("movie", "Matrix"),
+            vec!["Matrix"],
+            "sin sufijo comercial solo se ofrece el título original"
+        );
+    }
+
+    #[test]
+    fn normalize_title_quita_acentos_y_puntuacion() {
+        assert_eq!(
+            normalize_title("  El Señor de los Anillos: ¡Edición!  "),
+            "el senor de los anillos edicion"
+        );
+        assert_eq!(normalize_title("ÇA—VA"), "ca va");
+        assert_eq!(normalize_title(""), "");
+    }
+
+    #[test]
+    fn titles_match_admite_coincidencias_parciales_y_rechaza_vacios() {
+        assert!(!titles_match("", "cualquier cosa"));
+        assert!(!titles_match("algo", "!!!"));
+        assert!(titles_match("el senor", "El Señor de los Anillos"));
+        assert!(titles_match(
+            "el senor de los anillos",
+            "El Señor de los Anillos"
+        ));
+        assert!(!titles_match("otro titulo", "El Señor de los Anillos"));
+    }
+
+    #[test]
+    fn upscale_itunes_artwork_solo_cambia_el_tamano_conocido() {
+        assert_eq!(
+            upscale_itunes_artwork("https://is1.mzstatic.com/100x100bb.jpg"),
+            "https://is1.mzstatic.com/600x600bb.jpg"
+        );
+        assert_eq!(
+            upscale_itunes_artwork("https://is1.mzstatic.com/poster.jpg"),
+            "https://is1.mzstatic.com/poster.jpg"
+        );
+    }
+
+    #[test]
+    fn pick_kitsu_image_prefiere_original_y_salta_las_vacias() {
+        let attributes = serde_json::json!({
+            "posterImage": {
+                "original": "https://cdn.example/original.jpg",
+                "large": "https://cdn.example/large.jpg"
+            }
+        });
+        assert_eq!(
+            pick_kitsu_image(&attributes, "posterImage").as_deref(),
+            Some("https://cdn.example/original.jpg")
+        );
+
+        let attributes = serde_json::json!({
+            "posterImage": {
+                "original": "",
+                "medium": "https://cdn.example/medium.jpg"
+            }
+        });
+        assert_eq!(
+            pick_kitsu_image(&attributes, "posterImage").as_deref(),
+            Some("https://cdn.example/medium.jpg")
+        );
+
+        assert_eq!(
+            pick_kitsu_image(&serde_json::json!({}), "posterImage"),
+            None
+        );
+        assert_eq!(
+            pick_kitsu_image(&serde_json::json!({ "posterImage": {} }), "posterImage"),
+            None
+        );
+    }
 }

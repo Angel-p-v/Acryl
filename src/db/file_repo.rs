@@ -385,6 +385,201 @@ mod tests {
         );
     }
 
+    fn file(media_id: i64, season: i32, episode: i32, path: &str) -> MediaFileInput {
+        MediaFileInput {
+            media_id,
+            season: Some(season),
+            episode: Some(episode),
+            title: Some(format!("Episodio {episode}")),
+            file_path: path.to_string(),
+            size_bytes: Some(1024),
+            mtime_ms: Some(1_700_000_000_000),
+        }
+    }
+
+    #[test]
+    fn upsert_many_inserta_lista_y_actualiza_sin_duplicar() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        insert_media_and_file(&mut conn);
+
+        let files = vec![
+            file(1, 1, 1, "/tmp/pelicula/s01e01.mkv"),
+            file(1, 1, 2, "/tmp/pelicula/s01e02.mkv"),
+        ];
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            assert_eq!(repo.upsert_many(&files).expect("insertar archivos"), 2);
+            assert_eq!(repo.upsert_many(&[]).expect("lista vacía"), 0);
+        }
+
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            let listed = repo.list_by_media(1).expect("listar archivos");
+            assert_eq!(
+                listed.len(),
+                3,
+                "se conserva el archivo previo y los nuevos"
+            );
+            assert!(
+                listed
+                    .iter()
+                    .any(|f| f.file_path == "/tmp/pelicula/s01e01.mkv")
+            );
+            assert_eq!(
+                repo.media_id_for_file("/tmp/pelicula/s01e02.mkv")
+                    .expect("buscar medio del archivo"),
+                Some(1)
+            );
+            assert_eq!(
+                repo.media_id_for_file("/tmp/desconocido.mkv")
+                    .expect("buscar archivo inexistente"),
+                None
+            );
+        }
+
+        let replaced = vec![file(1, 1, 1, "/tmp/pelicula/s01e01.mkv")];
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            assert_eq!(repo.upsert_many(&replaced).expect("actualizar archivo"), 1);
+        }
+
+        let mut repo = FileRepository::new(&mut conn);
+        let listed = repo.list_by_media(1).expect("listar archivos");
+        assert_eq!(listed.len(), 3, "el upsert no duplica el archivo");
+    }
+
+    #[test]
+    fn list_by_show_incluye_las_temporadas_hijas() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path)
+             VALUES ('series', 'Serie', 'serie', '/tmp/serie')",
+            [],
+        )
+        .expect("insertar serie");
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path, parent_id)
+             VALUES ('series', 'Serie T1', 'serie t1', '/tmp/serie/t1', 1)",
+            [],
+        )
+        .expect("insertar temporada");
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path)
+             VALUES ('series', 'Otra serie', 'otra serie', '/tmp/otra')",
+            [],
+        )
+        .expect("insertar otra serie");
+
+        let files = vec![
+            file(1, 1, 1, "/tmp/serie/s01e01.mkv"),
+            file(2, 1, 2, "/tmp/serie/t1/s01e02.mkv"),
+            file(3, 1, 1, "/tmp/otra/s01e01.mkv"),
+        ];
+        let mut repo = FileRepository::new(&mut conn);
+        repo.upsert_many(&files).expect("insertar archivos");
+
+        let listed = repo.list_by_show(1).expect("listar archivos del show");
+        let paths: Vec<&str> = listed.iter().map(|f| f.file_path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["/tmp/serie/s01e01.mkv", "/tmp/serie/t1/s01e02.mkv"],
+            "incluye la temporada hija y excluye otros shows"
+        );
+    }
+
+    #[test]
+    fn la_imagen_del_episodio_se_conserva_solo_si_no_cambia_la_posicion() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        insert_media_and_file(&mut conn);
+
+        let path = "/tmp/pelicula/s01e01.mkv";
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            repo.upsert_many(&[file(1, 1, 1, path)])
+                .expect("insertar episodio");
+            assert_eq!(
+                repo.set_episode_image(path, "https://example.com/thumb.jpg")
+                    .expect("guardar imagen"),
+                1
+            );
+        }
+
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            let stored = repo
+                .list_by_media(1)
+                .expect("listar archivos")
+                .into_iter()
+                .find(|f| f.file_path == path)
+                .expect("episodio indexado");
+            assert_eq!(
+                stored.episode_image_path.as_deref(),
+                Some("https://example.com/thumb.jpg")
+            );
+            assert!(stored.episode_image_checked_at.is_some());
+        }
+
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            repo.upsert_many(&[file(1, 1, 1, path)])
+                .expect("reindexar el mismo episodio");
+        }
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            let stored = repo
+                .list_by_media(1)
+                .expect("listar archivos")
+                .into_iter()
+                .find(|f| f.file_path == path)
+                .expect("episodio indexado");
+            assert_eq!(
+                stored.episode_image_path.as_deref(),
+                Some("https://example.com/thumb.jpg"),
+                "reindexar la misma posición conserva la imagen"
+            );
+        }
+
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            repo.upsert_many(&[file(1, 1, 2, path)])
+                .expect("mover el archivo de episodio");
+        }
+        let mut repo = FileRepository::new(&mut conn);
+        let stored = repo
+            .list_by_media(1)
+            .expect("listar archivos")
+            .into_iter()
+            .find(|f| f.file_path == path)
+            .expect("episodio indexado");
+        assert_eq!(stored.episode_image_path, None);
+        assert_eq!(stored.episode_image_checked_at, None);
+    }
+
+    #[test]
+    fn mark_episode_image_checked_registra_la_comprobacion_sin_imagen() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        insert_media_and_file(&mut conn);
+
+        let mut repo = FileRepository::new(&mut conn);
+        assert_eq!(
+            repo.mark_episode_image_checked("/tmp/pelicula/video.mkv")
+                .expect("marcar comprobación"),
+            1
+        );
+        let stored = repo
+            .list_by_media(1)
+            .expect("listar archivos")
+            .into_iter()
+            .find(|f| f.file_path == "/tmp/pelicula/video.mkv")
+            .expect("archivo indexado");
+        assert_eq!(stored.episode_image_path, None);
+        assert!(stored.episode_image_checked_at.is_some());
+    }
+
     #[test]
     fn mark_streams_indexed_excluye_el_archivo_de_pendientes() {
         let (db_path, _dir) = temp_db();

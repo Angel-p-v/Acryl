@@ -109,3 +109,120 @@ pub fn resolve_db_path(db_path: &str) -> std::path::PathBuf {
         path.to_path_buf()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn migration(version: i32, name: &'static str, sql: &'static str) -> Migration {
+        Migration { version, name, sql }
+    }
+
+    fn memory_db() -> Connection {
+        Connection::open_in_memory().expect("abrir BD en memoria")
+    }
+
+    #[test]
+    fn resolve_db_path_respeta_rutas_absolutas_y_memoria() {
+        assert_eq!(
+            resolve_db_path("/tmp/acryl/test.db"),
+            std::path::PathBuf::from("/tmp/acryl/test.db")
+        );
+        assert_eq!(
+            resolve_db_path(":memory:"),
+            std::path::PathBuf::from(":memory:")
+        );
+
+        let relative = resolve_db_path("sub/acryl.db");
+        assert!(relative.is_absolute(), "las rutas relativas se anclan");
+        assert!(relative.ends_with("sub/acryl.db"));
+    }
+
+    #[test]
+    fn run_migrations_aplica_cada_version_una_sola_vez() {
+        let mut conn = memory_db();
+        let migrations = [
+            migration(1, "uno", "CREATE TABLE demo (id INTEGER);"),
+            migration(2, "dos", "ALTER TABLE demo ADD COLUMN name TEXT;"),
+        ];
+
+        run_migrations(&mut conn, &migrations, ":memory:").expect("aplicar migraciones");
+        run_migrations(&mut conn, &migrations, ":memory:").expect("reaplicar es idempotente");
+
+        let applied: i64 = conn
+            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .expect("contar migraciones");
+        assert_eq!(applied, 2);
+    }
+
+    #[test]
+    fn run_migration_tolera_tablas_y_columnas_ya_existentes() {
+        let mut conn = memory_db();
+        conn.execute_batch(
+            "CREATE TABLE demo (id INTEGER);
+             ALTER TABLE demo ADD COLUMN name TEXT;",
+        )
+        .expect("preparar esquema previo");
+
+        let duplicated = migration(
+            3,
+            "duplicada",
+            "CREATE TABLE demo (id INTEGER);
+             ALTER TABLE demo ADD COLUMN name TEXT;",
+        );
+        run_migration(&mut conn, &duplicated).expect("tolera errores idempotentes");
+    }
+
+    #[test]
+    fn run_migration_propaga_errores_no_idempotentes() {
+        let mut conn = memory_db();
+        let broken = migration(
+            4,
+            "rota",
+            "CREATE TABLE demo (id INTEGER);
+             ESTO NO ES SQL;",
+        );
+        assert!(run_migration(&mut conn, &broken).is_err());
+    }
+
+    #[test]
+    fn run_migration_no_reintenta_migraciones_con_triggers() {
+        let mut conn = memory_db();
+        conn.execute_batch("CREATE TABLE demo (id INTEGER);")
+            .expect("preparar tabla");
+        let trigger = migration(
+            5,
+            "trigger",
+            "CREATE TABLE demo (id INTEGER);
+             CREATE TRIGGER demo_trg AFTER INSERT ON demo BEGIN SELECT 1; END;",
+        );
+        assert!(
+            run_migration(&mut conn, &trigger).is_err(),
+            "no se divide el cuerpo de un trigger"
+        );
+    }
+
+    #[test]
+    fn is_idempotent_migration_error_detecta_los_mensajes_conocidos() {
+        let conn = memory_db();
+        conn.execute_batch("CREATE TABLE demo (id INTEGER);")
+            .expect("crear tabla");
+
+        let exists = conn
+            .execute_batch("CREATE TABLE demo (id INTEGER);")
+            .expect_err("la tabla ya existe");
+        assert!(is_idempotent_migration_error(&exists));
+
+        let duplicate = conn
+            .execute_batch("ALTER TABLE demo ADD COLUMN id INTEGER;")
+            .expect_err("la columna ya existe");
+        assert!(is_idempotent_migration_error(&duplicate));
+
+        let other = conn
+            .execute_batch("ESTO NO ES SQL;")
+            .expect_err("error de sintaxis");
+        assert!(!is_idempotent_migration_error(&other));
+    }
+}

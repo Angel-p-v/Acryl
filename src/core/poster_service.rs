@@ -250,4 +250,29 @@ mod tests {
     fn poster_service_nuevo_sin_panic() {
         let _service = PosterService::new();
     }
+
+    #[test]
+    fn poster_cache_path_usa_jpg_cuando_no_hay_extension() {
+        let path = poster_cache_path("https://example.com/sin-extension");
+        assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("jpg"));
+    }
+
+    #[test]
+    fn is_cached_es_falso_para_urls_sin_descarga() {
+        assert!(!is_cached(
+            "https://example.com/nunca-descargado-123456.jpg"
+        ));
+    }
+
+    #[test]
+    fn remove_cached_devuelve_falso_si_no_existe() {
+        let removed = remove_cached("https://example.com/nunca-descargado-654321.jpg")
+            .expect("eliminar de caché");
+        assert!(!removed);
+    }
+
+    #[test]
+    fn poster_service_default_equivale_a_new() {
+        let _service = PosterService::default();
+    }
 }
