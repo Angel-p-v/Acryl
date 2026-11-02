@@ -12,13 +12,11 @@
 #![allow(deprecated)]
 
 use crate::core::metadata::ImageOption;
-use crate::core::poster_service::{cached_path, PosterService};
+use crate::core::poster_service::{PosterService, cached_path};
 use crate::ui::poster::poster_picture;
 use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
-use gtk4::{
-    Align, Box, Button, Dialog, FlowBox, Image, Label, Orientation, Window,
-};
+use gtk4::{Align, Box, Button, Dialog, FlowBox, Image, Label, Orientation, Window};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -111,7 +109,9 @@ impl PosterSelector {
             let btn = thumbnail_button_placeholder(opt);
             // Registrar la URL para poder actualizar el botón después.
             url_to_btn.borrow_mut().insert(opt.url.clone(), btn.clone());
-            url_to_provider.borrow_mut().insert(opt.url.clone(), opt.provider.clone());
+            url_to_provider
+                .borrow_mut()
+                .insert(opt.url.clone(), opt.provider.clone());
 
             {
                 let url = opt.url.clone();
@@ -166,7 +166,9 @@ impl PosterSelector {
         for opt in banner_options {
             let btn = thumbnail_button_placeholder(opt);
             url_to_btn.borrow_mut().insert(opt.url.clone(), btn.clone());
-            url_to_provider.borrow_mut().insert(opt.url.clone(), opt.provider.clone());
+            url_to_provider
+                .borrow_mut()
+                .insert(opt.url.clone(), opt.provider.clone());
 
             {
                 let url = opt.url.clone();
@@ -378,8 +380,7 @@ fn thumbnail_button_placeholder(opt: &ImageOption) -> Button {
 
     // Si la imagen ya está en caché, mostrarla de inmediato.
     if let Some(cache_path) = cached_path(&opt.url) {
-        if let Ok(pixbuf) =
-            GtkPixbuf::from_file_at_scale(&cache_path, THUMB_SIZE, THUMB_SIZE, true)
+        if let Ok(pixbuf) = GtkPixbuf::from_file_at_scale(&cache_path, THUMB_SIZE, THUMB_SIZE, true)
         {
             let picture = poster_picture(&pixbuf, THUMB_SIZE, THUMB_SIZE);
             picture.set_hexpand(true);

@@ -1028,10 +1028,7 @@ impl MainWindow {
                                         poster_url.as_deref(),
                                         banner_url.as_deref(),
                                     ) {
-                                        eprintln!(
-                                            "Error actualizando póster/banner: {}",
-                                            e
-                                        );
+                                        eprintln!("Error actualizando póster/banner: {}", e);
                                     }
                                     close_db(conn);
                                 });
