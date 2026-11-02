@@ -16,6 +16,10 @@ use std::time::Duration;
 
 const TVMAZE_TIMEOUT_SECS: u64 = 20;
 
+/// Límite propio de los proveedores auxiliares del selector. Evita que una
+/// API lenta retrase la apertura del diálogo más de lo razonable.
+const EXTRA_PROVIDER_TIMEOUT_SECS: u64 = 8;
+
 /// Resultado de sincronización de metadatos.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SyncMetadataResult {
@@ -617,6 +621,7 @@ async fn fetch_anilist_banner(title: &str, client: &TvmazeClient) -> Option<Stri
         .client
         .post("https://graphql.anilist.co")
         .json(&body)
+        .timeout(Duration::from_secs(EXTRA_PROVIDER_TIMEOUT_SECS))
         .send()
         .await
         .ok()?
@@ -669,6 +674,425 @@ async fn fetch_tvmaze_banner(show_id: u64, client: &TvmazeClient) -> Option<Stri
         .ok()?;
 
     parse_tvmaze_banner(&response)
+}
+
+/// Obtiene las imágenes disponibles para el selector desde todas las fuentes
+/// gratuitas y sin clave que correspondan al tipo de medio.
+///
+/// TVmaze aporta póster y banner para series y películas; AniList, Kitsu y
+/// Jikan aportan imágenes de anime; iTunes aporta póster para películas y
+/// series. Las opciones se deduplican por URL normalizada para no saturar la
+/// vista con la misma imagen repetida.
+pub async fn fetch_available_images(
+    media_type: &str,
+    title: &str,
+    show_id: Option<u64>,
+    client: &TvmazeClient,
+) -> Vec<ImageOption> {
+    let mut options = Vec::new();
+
+    if let Some(show_id) = show_id {
+        options.extend(fetch_tvmaze_images(show_id, client).await);
+    }
+
+    if media_type == "anime" {
+        let (anilist, kitsu, jikan) = tokio::join!(
+            fetch_anilist_images(title, client),
+            fetch_kitsu_images(title, client),
+            fetch_jikan_images(title, client),
+        );
+        options.extend(anilist);
+        options.extend(kitsu);
+        options.extend(jikan);
+    } else {
+        options.extend(fetch_itunes_images(media_type, title, client).await);
+    }
+
+    dedupe_image_options(options)
+}
+
+/// Elimina opciones con la misma URL, ignorando diferencias de esquema, query,
+/// fragmento y barra final. No altera el orden de aparición.
+fn dedupe_image_options(options: Vec<ImageOption>) -> Vec<ImageOption> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::with_capacity(options.len());
+
+    for option in options {
+        if option.url.is_empty() {
+            continue;
+        }
+        if seen.insert(image_url_key(&option.url)) {
+            deduped.push(option);
+        }
+    }
+
+    deduped
+}
+
+/// Clave estable para comparar URLs de imágenes sin depender del esquema,
+/// parámetros de consulta, fragmentos ni barras finales.
+fn image_url_key(url: &str) -> String {
+    let without_fragment = url.split('#').next().unwrap_or(url);
+    let without_query = without_fragment
+        .split('?')
+        .next()
+        .unwrap_or(without_fragment);
+    let without_scheme = without_query
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(without_query);
+    without_scheme.trim_end_matches('/').to_ascii_lowercase()
+}
+
+/// Obtiene el póster y el banner de AniList (GraphQL público, sin clave).
+async fn fetch_anilist_images(title: &str, client: &TvmazeClient) -> Vec<ImageOption> {
+    let body = serde_json::json!({
+        "query": "query ($search: String) { Media(search: $search, type: ANIME) { coverImage { extraLarge large } bannerImage } }",
+        "variables": { "search": title }
+    });
+
+    let response = match client
+        .client
+        .post("https://graphql.anilist.co")
+        .json(&body)
+        .timeout(Duration::from_secs(EXTRA_PROVIDER_TIMEOUT_SECS))
+        .send()
+        .await
+    {
+        Ok(response) => match response.error_for_status() {
+            Ok(response) => match response.json::<Value>().await {
+                Ok(value) => value,
+                Err(_) => return Vec::new(),
+            },
+            Err(_) => return Vec::new(),
+        },
+        Err(_) => return Vec::new(),
+    };
+
+    parse_anilist_images(&response)
+}
+
+fn parse_anilist_images(response: &Value) -> Vec<ImageOption> {
+    let Some(media) = response.get("data").and_then(|data| data.get("Media")) else {
+        return Vec::new();
+    };
+
+    let mut options = Vec::new();
+    let cover = media
+        .get("coverImage")
+        .and_then(|cover| {
+            cover
+                .get("extraLarge")
+                .and_then(Value::as_str)
+                .filter(|url| !url.is_empty())
+                .or_else(|| {
+                    cover
+                        .get("large")
+                        .and_then(Value::as_str)
+                        .filter(|url| !url.is_empty())
+                })
+        })
+        .map(str::to_string);
+    if let Some(url) = cover {
+        options.push(ImageOption {
+            image_type: "poster".to_string(),
+            provider: "AniList".to_string(),
+            resolution: "original".to_string(),
+            url,
+        });
+    }
+
+    if let Some(url) = media
+        .get("bannerImage")
+        .and_then(Value::as_str)
+        .filter(|url| !url.is_empty())
+    {
+        options.push(ImageOption {
+            image_type: "banner".to_string(),
+            provider: "AniList".to_string(),
+            resolution: "original".to_string(),
+            url: url.to_string(),
+        });
+    }
+
+    options
+}
+
+/// Obtiene el póster y el banner de Kitsu (API pública, sin clave).
+async fn fetch_kitsu_images(title: &str, client: &TvmazeClient) -> Vec<ImageOption> {
+    let url = format!(
+        "https://kitsu.io/api/edge/anime?filter%5Btext%5D={}&page%5Blimit%5D=1",
+        urlencoding::encode(title)
+    );
+
+    let response = match client
+        .client
+        .get(&url)
+        .header("Accept", "application/vnd.api+json")
+        .timeout(Duration::from_secs(EXTRA_PROVIDER_TIMEOUT_SECS))
+        .send()
+        .await
+    {
+        Ok(response) => match response.error_for_status() {
+            Ok(response) => match response.json::<Value>().await {
+                Ok(value) => value,
+                Err(_) => return Vec::new(),
+            },
+            Err(_) => return Vec::new(),
+        },
+        Err(_) => return Vec::new(),
+    };
+
+    parse_kitsu_images(&response)
+}
+
+fn parse_kitsu_images(response: &Value) -> Vec<ImageOption> {
+    let Some(attributes) = response
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|data| data.first())
+        .and_then(|anime| anime.get("attributes"))
+    else {
+        return Vec::new();
+    };
+
+    let mut options = Vec::new();
+    if let Some(url) = pick_kitsu_image(attributes, "posterImage") {
+        options.push(ImageOption {
+            image_type: "poster".to_string(),
+            provider: "Kitsu".to_string(),
+            resolution: "original".to_string(),
+            url,
+        });
+    }
+    if let Some(url) = pick_kitsu_image(attributes, "coverImage") {
+        options.push(ImageOption {
+            image_type: "banner".to_string(),
+            provider: "Kitsu".to_string(),
+            resolution: "original".to_string(),
+            url,
+        });
+    }
+
+    options
+}
+
+fn pick_kitsu_image(attributes: &Value, key: &str) -> Option<String> {
+    let image = attributes.get(key)?;
+    ["original", "large", "medium"]
+        .into_iter()
+        .find_map(|size| {
+            image
+                .get(size)
+                .and_then(Value::as_str)
+                .filter(|url| !url.is_empty())
+                .map(str::to_string)
+        })
+}
+
+/// Obtiene el póster de Jikan (API no oficial de MyAnimeList, sin clave).
+async fn fetch_jikan_images(title: &str, client: &TvmazeClient) -> Vec<ImageOption> {
+    let url = format!(
+        "https://api.jikan.moe/v4/anime?q={}&limit=1&sfw=true",
+        urlencoding::encode(title)
+    );
+
+    let response = match client
+        .client
+        .get(&url)
+        .timeout(Duration::from_secs(EXTRA_PROVIDER_TIMEOUT_SECS))
+        .send()
+        .await
+    {
+        Ok(response) => match response.error_for_status() {
+            Ok(response) => match response.json::<Value>().await {
+                Ok(value) => value,
+                Err(_) => return Vec::new(),
+            },
+            Err(_) => return Vec::new(),
+        },
+        Err(_) => return Vec::new(),
+    };
+
+    parse_jikan_images(&response)
+}
+
+fn parse_jikan_images(response: &Value) -> Vec<ImageOption> {
+    let Some(anime) = response
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|data| data.first())
+    else {
+        return Vec::new();
+    };
+
+    let mut options = Vec::new();
+    let poster = anime
+        .get("images")
+        .and_then(|images| images.get("jpg").or_else(|| images.get("webp")))
+        .and_then(|image| {
+            image
+                .get("large_image_url")
+                .and_then(Value::as_str)
+                .filter(|url| !url.is_empty())
+                .or_else(|| {
+                    image
+                        .get("image_url")
+                        .and_then(Value::as_str)
+                        .filter(|url| !url.is_empty())
+                })
+        })
+        .map(str::to_string);
+    if let Some(url) = poster {
+        options.push(ImageOption {
+            image_type: "poster".to_string(),
+            provider: "Jikan".to_string(),
+            resolution: "original".to_string(),
+            url,
+        });
+    }
+
+    if let Some(url) = anime
+        .get("trailer")
+        .and_then(|trailer| trailer.get("images"))
+        .and_then(|images| {
+            images
+                .get("maximum_image_url")
+                .and_then(Value::as_str)
+                .filter(|url| !url.is_empty())
+        })
+    {
+        options.push(ImageOption {
+            image_type: "banner".to_string(),
+            provider: "Jikan".to_string(),
+            resolution: "original".to_string(),
+            url: url.to_string(),
+        });
+    }
+
+    options
+}
+
+/// Obtiene pósteres de iTunes Search API (gratuita y sin clave) para películas
+/// y series. Solo se aceptan resultados cuyo título coincide con el del medio
+/// para no ofrecer imágenes de producciones distintas.
+async fn fetch_itunes_images(
+    media_type: &str,
+    title: &str,
+    client: &TvmazeClient,
+) -> Vec<ImageOption> {
+    let entity = if media_type == "movie" {
+        "movie"
+    } else {
+        "tvShow"
+    };
+    let url = format!(
+        "https://itunes.apple.com/search?term={}&entity={}&limit=10",
+        urlencoding::encode(title),
+        entity
+    );
+
+    let response = match client
+        .client
+        .get(&url)
+        .timeout(Duration::from_secs(EXTRA_PROVIDER_TIMEOUT_SECS))
+        .send()
+        .await
+    {
+        Ok(response) => match response.error_for_status() {
+            Ok(response) => match response.json::<Value>().await {
+                Ok(value) => value,
+                Err(_) => return Vec::new(),
+            },
+            Err(_) => return Vec::new(),
+        },
+        Err(_) => return Vec::new(),
+    };
+
+    parse_itunes_images(&response, title)
+}
+
+fn parse_itunes_images(response: &Value, title: &str) -> Vec<ImageOption> {
+    let Some(results) = response.get("results").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+
+    let expected = normalize_title(title);
+    let mut seen = HashSet::new();
+    let mut options = Vec::new();
+
+    for result in results {
+        let matches_title = ["trackName", "collectionName"]
+            .into_iter()
+            .filter_map(|key| result.get(key).and_then(Value::as_str))
+            .any(|candidate| titles_match(&expected, candidate));
+        if !matches_title {
+            continue;
+        }
+
+        let Some(artwork) = result
+            .get("artworkUrl100")
+            .and_then(Value::as_str)
+            .filter(|url| !url.is_empty())
+        else {
+            continue;
+        };
+
+        let url = upscale_itunes_artwork(artwork);
+        if !seen.insert(image_url_key(&url)) {
+            continue;
+        }
+
+        options.push(ImageOption {
+            image_type: "poster".to_string(),
+            provider: "iTunes".to_string(),
+            resolution: "original".to_string(),
+            url,
+        });
+
+        // No inundar el selector con muchas variantes del mismo resultado.
+        if options.len() >= 3 {
+            break;
+        }
+    }
+
+    options
+}
+
+fn normalize_title(title: &str) -> String {
+    title
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'á' | 'à' | 'ä' | 'â' => 'a',
+            'é' | 'è' | 'ë' | 'ê' => 'e',
+            'í' | 'ì' | 'ï' | 'î' => 'i',
+            'ó' | 'ò' | 'ö' | 'ô' => 'o',
+            'ú' | 'ù' | 'ü' | 'û' => 'u',
+            'ñ' => 'n',
+            'ç' => 'c',
+            c if c.is_alphanumeric() => c,
+            _ => ' ',
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn titles_match(expected: &str, candidate: &str) -> bool {
+    if expected.is_empty() {
+        return false;
+    }
+    let candidate = normalize_title(candidate);
+    !candidate.is_empty()
+        && (candidate == expected || candidate.contains(expected) || expected.contains(&candidate))
+}
+
+/// La API de iTunes devuelve miniaturas de 100×100; se solicita una versión
+/// mayor manteniendo la misma ruta del CDN.
+fn upscale_itunes_artwork(url: &str) -> String {
+    url.replace("100x100bb", "600x600bb")
 }
 
 /// Obtiene todas las imágenes disponibles (póster y banner) de TVmaze para un show,
@@ -1081,6 +1505,168 @@ mod tests {
             Some("https://media.kitsu.app/anime/46231/cover_image.jpg")
         );
         assert_eq!(parse_kitsu_banner(&json!({"data": []})), None);
+    }
+
+    #[test]
+    fn parse_anilist_images_extrae_poster_y_banner() {
+        let response = json!({
+            "data": {
+                "Media": {
+                    "coverImage": {
+                        "extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx1-cover.jpg",
+                        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx1-cover.jpg"
+                    },
+                    "bannerImage": "https://s4.anilist.co/file/anilistcdn/media/anime/banner/1.jpg"
+                }
+            }
+        });
+
+        let options = parse_anilist_images(&response);
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].image_type, "poster");
+        assert_eq!(options[0].provider, "AniList");
+        assert!(options[0].url.ends_with("bx1-cover.jpg"));
+        assert_eq!(options[1].image_type, "banner");
+        assert!(options[1].url.ends_with("banner/1.jpg"));
+
+        let only_large = json!({
+            "data": {
+                "Media": {
+                    "coverImage": {"large": "https://example.com/large.jpg"},
+                    "bannerImage": null
+                }
+            }
+        });
+        let options = parse_anilist_images(&only_large);
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].url, "https://example.com/large.jpg");
+
+        assert!(parse_anilist_images(&json!({"data": {"Media": null}})).is_empty());
+        assert!(parse_anilist_images(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn parse_kitsu_images_extrae_poster_y_cover() {
+        let response = json!({
+            "data": [{
+                "attributes": {
+                    "posterImage": {
+                        "original": "https://media.kitsu.app/anime/1/poster-original.jpg",
+                        "large": "https://media.kitsu.app/anime/1/poster-large.jpg"
+                    },
+                    "coverImage": {
+                        "original": "https://media.kitsu.app/anime/1/cover-original.jpg"
+                    }
+                }
+            }]
+        });
+
+        let options = parse_kitsu_images(&response);
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].image_type, "poster");
+        assert_eq!(options[0].provider, "Kitsu");
+        assert!(options[0].url.ends_with("poster-original.jpg"));
+        assert_eq!(options[1].image_type, "banner");
+        assert!(options[1].url.ends_with("cover-original.jpg"));
+
+        assert!(parse_kitsu_images(&json!({"data": []})).is_empty());
+        assert!(parse_kitsu_images(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn parse_jikan_images_extrae_poster_y_banner_del_trailer() {
+        let response = json!({
+            "data": [{
+                "images": {
+                    "jpg": {
+                        "image_url": "https://cdn.myanimelist.net/images/anime/1.jpg",
+                        "large_image_url": "https://cdn.myanimelist.net/images/anime/1l.jpg"
+                    }
+                },
+                "trailer": {
+                    "images": {
+                        "maximum_image_url": "https://img.youtube.com/vi/abc/maxresdefault.jpg"
+                    }
+                }
+            }]
+        });
+
+        let options = parse_jikan_images(&response);
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].image_type, "poster");
+        assert_eq!(options[0].provider, "Jikan");
+        assert!(options[0].url.ends_with("1l.jpg"));
+        assert_eq!(options[1].image_type, "banner");
+
+        assert!(parse_jikan_images(&json!({"data": []})).is_empty());
+    }
+
+    #[test]
+    fn parse_itunes_images_filtra_por_titulo_y_mejora_la_resolucion() {
+        let response = json!({
+            "results": [
+                {
+                    "trackName": "Otra película",
+                    "artworkUrl100": "https://example.com/otra/100x100bb.jpg"
+                },
+                {
+                    "trackName": "Mi Película",
+                    "artworkUrl100": "https://example.com/mi/100x100bb.jpg"
+                },
+                {
+                    "trackName": "Mi Película",
+                    "artworkUrl100": "https://example.com/mi/100x100bb.jpg"
+                }
+            ]
+        });
+
+        let options = parse_itunes_images(&response, "Mi Pelicula");
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].provider, "iTunes");
+        assert_eq!(options[0].url, "https://example.com/mi/600x600bb.jpg");
+
+        assert!(parse_itunes_images(&response, "Inexistente").is_empty());
+        assert!(parse_itunes_images(&json!({}), "Mi Pelicula").is_empty());
+    }
+
+    #[test]
+    fn dedupe_image_options_ignora_esquema_query_y_barra_final() {
+        let options = vec![
+            image_option("poster", "TVmaze", "https://example.com/poster.jpg"),
+            image_option(
+                "poster",
+                "AniList",
+                "http://EXAMPLE.com/poster.jpg?size=large",
+            ),
+            image_option("poster", "Kitsu", "https://example.com/otro.jpg"),
+            image_option("poster", "Vacio", ""),
+        ];
+
+        let deduped = dedupe_image_options(options);
+        assert_eq!(deduped.len(), 2);
+        assert_eq!(deduped[0].provider, "TVmaze");
+        assert_eq!(deduped[1].provider, "Kitsu");
+    }
+
+    #[test]
+    fn image_url_key_normaliza_la_url() {
+        assert_eq!(
+            image_url_key("https://Example.com/a/b.jpg?x=1#frag"),
+            "example.com/a/b.jpg"
+        );
+        assert_eq!(
+            image_url_key("http://example.com/a/b.jpg/"),
+            "example.com/a/b.jpg"
+        );
+    }
+
+    fn image_option(image_type: &str, provider: &str, url: &str) -> ImageOption {
+        ImageOption {
+            image_type: image_type.to_string(),
+            provider: provider.to_string(),
+            resolution: "original".to_string(),
+            url: url.to_string(),
+        }
     }
 
     #[test]
