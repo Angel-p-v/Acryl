@@ -12,6 +12,7 @@ target/
 # Tests y cobertura
 coverage/
 .nyc_output/
+cobertura.xml
 
 # Logs
 logs/
