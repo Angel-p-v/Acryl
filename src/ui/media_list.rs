@@ -90,18 +90,17 @@ impl MediaList {
             let translations_for_bind = translations_clone.clone();
             let on_select_for_bind = Rc::clone(&on_select_ref);
             move |_, list_item| {
-                // Obtener el StringObject del modelo a través de la propiedad "item"
-                // del GtkListItem, y usarlo para encontrar el Media correspondiente.
-                let item_obj: glib::Object =
-                    <glib::Object as glib::object::ObjectExt>::property(list_item, "item");
-                let title: String =
-                    <glib::Object as glib::object::ObjectExt>::property(&item_obj, "string");
+                // El modelo (`store`) y el vector `media` están alineados por
+                // posición, así que usamos la posición del ListItem en lugar
+                // del título: dos medios pueden compartir título y el título no
+                // identifica de forma única una tarjeta.
+                let position: u32 = list_item.property("position");
+                let position = position as usize;
 
                 let media = media_for_bind.borrow();
-                let item = media
-                    .iter()
-                    .find(|m| m.title == title)
-                    .expect("medio no encontrado en la lista");
+                let Some(item) = media.get(position) else {
+                    return;
+                };
 
                 // Obtener el widget child (Box) del ListItem a través de la propiedad "child".
                 let child: Option<gtk4::Widget> =
@@ -285,18 +284,22 @@ impl MediaList {
     /// tarjetas visibles. Así el cambio se refleja sin recargar la galería ni
     /// reiniciar la aplicación.
     pub fn update_media_poster(&self, media_id: i64, poster_path: Option<&str>) {
-        {
+        let (position, title) = {
             let mut media = self.media.borrow_mut();
-            let Some(item) = media.iter_mut().find(|item| item.id == media_id) else {
+            let Some(position) = media.iter().position(|item| item.id == media_id) else {
                 return;
             };
-            item.poster_path = poster_path.map(str::to_string);
-        }
+            media[position].poster_path = poster_path.map(str::to_string);
+            (position, media[position].title.clone())
+        };
 
-        let total = self.store.n_items();
-        if total > 0 {
-            self.store.items_changed(0, total, total);
-        }
+        // No basta con emitir `items_changed`: GtkGridView reutiliza el widget
+        // de un ítem cuando el modelo le devuelve el mismo objeto (mismo
+        // puntero) y `GtkListItem` ignora la actualización, por lo que la
+        // fábrica no vuelve a ejecutar `bind` y la tarjeta conserva la imagen
+        // anterior. Sustituir el ítem por una instancia nueva obliga a crear y
+        // vincular una tarjeta nueva con el póster actualizado.
+        replace_store_item(&self.store, position as u32, StringObject::new(&title));
         self.start_poster_downloads();
     }
 
@@ -324,6 +327,17 @@ impl MediaList {
     {
         *self.on_media_select.borrow_mut() = Some(Rc::new(f));
     }
+}
+
+/// Sustituye el ítem del modelo en `position` por una instancia nueva del
+/// mismo título.
+///
+/// GtkGridView solo vuelve a ejecutar el `bind` de la fábrica cuando cambia el
+/// objeto devuelto por el modelo. Emitir `items_changed` conservando el mismo
+/// objeto no sirve: `GtkListItem` descarta la actualización porque el puntero
+/// del ítem no ha cambiado y la tarjeta sigue mostrando la imagen anterior.
+fn replace_store_item(store: &gio::ListStore, position: u32, replacement: impl IsA<glib::Object>) {
+    store.splice(position, 1, &[replacement]);
 }
 
 /// Rellena una tarjeta ya creada con los datos de un `Media`.
@@ -436,4 +450,55 @@ fn build_card_widget() -> Box {
     card.append(&year_label);
 
     card
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regresión: la galería no refrescaba el póster tras el selector.
+    ///
+    /// `GtkGridView` reutiliza el widget de un ítem cuando el modelo devuelve el
+    /// mismo objeto y `GtkListItem` ignora la actualización, así que el `bind`
+    /// de la fábrica no se ejecutaba. El ítem debe sustituirse por una instancia
+    /// nueva para que la tarjeta se vuelva a crear.
+    ///
+    /// Se usa un objeto de GIO (`SimpleAction`) en lugar de `StringObject` para
+    /// que la prueba no dependa de `gtk::init()` ni de un display.
+    #[test]
+    fn replace_store_item_fuerza_un_objeto_nuevo() {
+        let store = gio::ListStore::new::<gio::SimpleAction>();
+        let before = gio::SimpleAction::new("uno", None);
+        store.append(&before);
+
+        replace_store_item(&store, 0, gio::SimpleAction::new("uno", None));
+
+        let after = store
+            .item(0)
+            .expect("el modelo conserva el ítem sustituido");
+        assert_eq!(store.n_items(), 1, "el número de ítems no cambia");
+        assert_ne!(before, after, "el ítem debe ser una instancia nueva");
+        let name: String = after.property("name");
+        assert_eq!(name, "uno", "se conserva el contenido de la tarjeta");
+    }
+
+    #[test]
+    fn replace_store_item_conserva_el_orden() {
+        let store = gio::ListStore::new::<gio::SimpleAction>();
+        for name in ["uno", "dos", "tres"] {
+            store.append(&gio::SimpleAction::new(name, None));
+        }
+
+        replace_store_item(&store, 1, gio::SimpleAction::new("dos", None));
+
+        let names: Vec<String> = (0..store.n_items())
+            .map(|position| {
+                store
+                    .item(position)
+                    .expect("posición válida del modelo")
+                    .property("name")
+            })
+            .collect();
+        assert_eq!(names, vec!["uno", "dos", "tres"]);
+    }
 }
