@@ -5,6 +5,7 @@ pub mod main_window;
 pub mod media_details;
 pub mod media_list;
 pub mod poster;
+pub mod poster_selector;
 pub mod search_bar;
 pub mod settings_window;
 pub mod theme;

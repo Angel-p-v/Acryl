@@ -32,7 +32,8 @@
   "button.browse": "Browse...",
   "button.reindex": "Reindex all folders",
   "button.refresh_metadata": "Refresh all metadata",
-  "button.tracks": "🎵 Tracks",
+  "button.tracks": "Tracks",
+  "button.choose_images": "Choose poster/banner",
   "button.play": "▶ Play",
   "button.continue_prefix": "▶ Continue",
   "button.continue_format": "▶ Continue {}",
@@ -101,6 +102,7 @@
 
   "tooltip.home": "Go to home",
   "tooltip.tracks": "Choose audio and subtitle tracks",
+  "tooltip.choose_images": "Choose a different poster or banner, or remove the current one",
   "tooltip.redetect": "Run ffprobe again to read all tracks of the file",
 
   "track.title": "Audio and subtitle tracks",
@@ -129,6 +131,7 @@
 
   "toast.indexing_completed": "Indexing completed",
   "toast.tracks_saved": "Tracks saved",
+  "toast.images_updated": "Poster/banner updated",
 
   "metadata.refresh.title": "Refresh all metadata?",
   "metadata.refresh.detail": "Will query TVmaze (and AniList for anime) and overwrite title, year, synopsis, poster and banner of all indexed media. This action cannot be undone.",
@@ -143,6 +146,7 @@
   "metadata.sync.banner_failed": " {} banners could not be downloaded; previous one kept.",
 
   "error.play_episode": "Could not play the episode",
+  "error.images_update": "The poster or banner could not be updated",
   "error.invalid_folder.title": "Invalid path",
   "error.invalid_folder.detail": "Select an existing and accessible folder.",
   "error.invalid_folder.status": "The indicated path is not a valid folder.",

@@ -1,6 +1,6 @@
 //! Ventana principal de Acryl con GTK4 / Libadwaita.
 
-use crate::core::metadata::RefreshMetadataResult;
+use crate::core::metadata::{ImageOption, RefreshMetadataResult};
 use crate::core::poster_service::cached_path;
 use crate::db::media_repo::ListMediaOptions;
 use crate::db::{MediaRepository, close_db, open_db};
@@ -8,6 +8,7 @@ use crate::ui::i18n::{Translations, TranslationsRef, load_translations};
 use crate::ui::media_details::{MediaDetails, SeasonSelection};
 use crate::ui::media_list::MediaList;
 use crate::ui::poster::{placeholder_widget, poster_picture};
+use crate::ui::poster_selector::{ImageChoice, PosterSelector};
 use crate::ui::settings_window::SettingsView;
 use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
@@ -32,6 +33,40 @@ enum View {
         media_id: i64,
         season: Option<SeasonSelection>,
     },
+}
+
+/// Cambios de póster/banner resueltos en segundo plano.
+///
+/// El `Option` exterior indica si el campo cambia; el interior, el nuevo valor
+/// (`None` significa eliminar la imagen actual).
+#[derive(Debug, Default)]
+struct ImageUpdateOutcome {
+    poster: Option<Option<String>>,
+    banner: Option<Option<String>>,
+    failed: bool,
+}
+
+/// Descarga la imagen elegida y devuelve el cambio que debe persistirse.
+/// Devuelve `None` si el usuario no tocó esa imagen o si la descarga falló.
+fn resolve_image_choice(
+    runtime: &tokio::runtime::Runtime,
+    service: &crate::core::poster_service::PosterService,
+    choice: ImageChoice,
+    label: &str,
+    failed: &mut bool,
+) -> Option<Option<String>> {
+    match choice {
+        ImageChoice::Keep => None,
+        ImageChoice::Remove => Some(None),
+        ImageChoice::Set(url) => match runtime.block_on(service.download_async(&url)) {
+            Ok(_) => Some(Some(url)),
+            Err(error) => {
+                eprintln!("No se pudo descargar el {} '{}': {}", label, url, error);
+                *failed = true;
+                None
+            }
+        },
+    }
 }
 
 pub struct MainWindow {
@@ -869,6 +904,237 @@ impl MainWindow {
                         }
                     }),
                 );
+            });
+
+        // Callback: abrir el selector de póster y banner del medio actual.
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_choose_images(move || {
+                let this = this_clone.clone();
+
+                // Obtener media_id y db_path (el Ref se dropea al final del scope).
+                let (media_id, db_path) = {
+                    let w = this.borrow();
+                    (w.media_details.borrow().media_id(), w.db_path.clone())
+                };
+
+                // Datos del medio necesarios para consultar las fuentes de imágenes.
+                let (metadata_source_id, media_type, title) = {
+                    let mut conn = match open_db(&db_path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Error abriendo BD: {}", e);
+                            return;
+                        }
+                    };
+                    let mut repo = MediaRepository::new(&mut conn);
+                    let media = repo.find_by_id(media_id).unwrap_or(None);
+                    close_db(conn);
+                    match media {
+                        Some(m) => (m.metadata_source_id, m.r#type, m.title),
+                        None => return,
+                    }
+                };
+
+                let show_id = metadata_source_id.map(|id| id as u64);
+
+                // Canal para recibir las opciones desde el hilo secundario.
+                let (tx, rx) = mpsc::channel::<Vec<ImageOption>>();
+
+                // Consultar las APIs en un hilo secundario (solo datos Send).
+                std::thread::spawn(move || {
+                    let rt = match tokio::runtime::Runtime::new() {
+                        Ok(rt) => rt,
+                        Err(_) => return,
+                    };
+                    let client = crate::core::metadata::TvmazeClient::new();
+                    let all_images = rt.block_on(crate::core::metadata::fetch_available_images(
+                        &media_type,
+                        &title,
+                        show_id,
+                        &client,
+                    ));
+                    let _ = tx.send(all_images);
+                });
+
+                // Revisar el canal desde el hilo principal de GTK para mostrar el
+                // diálogo tan pronto como las imágenes estén listas, sin bloquear.
+                let this_for_dialog = this.clone();
+                let rx_for_idle = rx;
+                glib::idle_add_local(move || {
+                    match rx_for_idle.try_recv() {
+                        Ok(all_images) => {
+                            let poster_options: Vec<ImageOption> = all_images
+                                .iter()
+                                .filter(|o| o.image_type == "poster")
+                                .cloned()
+                                .collect();
+                            let banner_options: Vec<ImageOption> = all_images
+                                .iter()
+                                .filter(|o| {
+                                    o.image_type == "banner" || o.image_type == "background"
+                                })
+                                .cloned()
+                                .collect();
+
+                            let this_for_dialog_borrow = this_for_dialog.clone();
+                            let window = {
+                                let w = this_for_dialog_borrow.borrow();
+                                w.window.clone()
+                            };
+                            let selector = PosterSelector::new(
+                                &window,
+                                &poster_options,
+                                &banner_options,
+                            );
+
+                            let this_for_run = this_for_dialog.clone();
+                            selector.run(move |result| {
+                                if result.poster == ImageChoice::Keep
+                                    && result.banner == ImageChoice::Keep
+                                {
+                                    return;
+                                }
+
+                                let (db_path2, season) = {
+                                    let w = this_for_run.borrow();
+                                    (
+                                        w.db_path.clone(),
+                                        w.media_details.borrow().season_selection(),
+                                    )
+                                };
+
+                                let poster_choice = result.poster;
+                                let banner_choice = result.banner;
+                                let media_id2 = media_id;
+                                let (tx, rx) = mpsc::channel::<ImageUpdateOutcome>();
+
+                                // Descargar y persistir en segundo plano para no bloquear
+                                // el hilo principal de GTK.
+                                std::thread::spawn(move || {
+                                    let mut outcome = ImageUpdateOutcome::default();
+                                    let runtime = match tokio::runtime::Runtime::new() {
+                                        Ok(rt) => rt,
+                                        Err(error) => {
+                                            eprintln!(
+                                                "No se pudo crear el runtime para actualizar imágenes: {}",
+                                                error
+                                            );
+                                            outcome.failed = true;
+                                            let _ = tx.send(outcome);
+                                            return;
+                                        }
+                                    };
+                                    let service =
+                                        crate::core::poster_service::PosterService::new();
+                                    let poster = resolve_image_choice(
+                                        &runtime,
+                                        &service,
+                                        poster_choice,
+                                        "póster",
+                                        &mut outcome.failed,
+                                    );
+                                    let banner = resolve_image_choice(
+                                        &runtime,
+                                        &service,
+                                        banner_choice,
+                                        "banner",
+                                        &mut outcome.failed,
+                                    );
+
+                                    let mut conn = match open_db(&db_path2) {
+                                        Ok(conn) => conn,
+                                        Err(error) => {
+                                            eprintln!("Error abriendo BD: {}", error);
+                                            outcome.failed = true;
+                                            let _ = tx.send(outcome);
+                                            return;
+                                        }
+                                    };
+                                    let mut repo = MediaRepository::new(&mut conn);
+                                    let mut poster_applied = true;
+                                    let mut banner_applied = true;
+                                    if let Some(value) = poster.as_ref()
+                                        && let Err(error) =
+                                            repo.set_poster(media_id2, value.as_deref())
+                                    {
+                                        eprintln!("Error actualizando el póster: {}", error);
+                                        outcome.failed = true;
+                                        poster_applied = false;
+                                    }
+                                    if let Some(value) = banner.as_ref()
+                                        && let Err(error) =
+                                            repo.set_banner(media_id2, value.as_deref())
+                                    {
+                                        eprintln!("Error actualizando el banner: {}", error);
+                                        outcome.failed = true;
+                                        banner_applied = false;
+                                    }
+                                    close_db(conn);
+
+                                    outcome.poster = poster_applied.then_some(poster).flatten();
+                                    outcome.banner = banner_applied.then_some(banner).flatten();
+                                    let _ = tx.send(outcome);
+                                });
+
+                                // Refrescar la galería y los detalles desde el hilo
+                                // principal cuando termine la descarga.
+                                let this_for_ui = this_for_run.clone();
+                                glib::timeout_add_local(
+                                    Duration::from_millis(100),
+                                    move || match rx.try_recv() {
+                                        Ok(outcome) => {
+                                            let w = this_for_ui.borrow();
+                                            if let Some(ref poster_path) = outcome.poster {
+                                                w.media_list.update_media_poster(
+                                                    media_id,
+                                                    poster_path.as_deref(),
+                                                );
+                                            }
+
+                                            let still_current = w
+                                                .stack
+                                                .visible_child_name()
+                                                .as_deref()
+                                                == Some("details")
+                                                && w.media_details.borrow().media_id() == media_id;
+                                            if (outcome.poster.is_some()
+                                                || outcome.banner.is_some())
+                                                && still_current
+                                            {
+                                                w.show_details(media_id, season);
+                                                w.media_details
+                                                    .borrow_mut()
+                                                    .refresh_banner();
+                                            }
+
+                                            if outcome.poster.is_some() || outcome.banner.is_some()
+                                            {
+                                                w.show_toast(&w.t("toast.images_updated"));
+                                            } else if outcome.failed {
+                                                w.show_toast(&w.t("error.images_update"));
+                                            }
+
+                                            glib::ControlFlow::Break
+                                        }
+                                        Err(mpsc::TryRecvError::Empty) => {
+                                            glib::ControlFlow::Continue
+                                        }
+                                        Err(mpsc::TryRecvError::Disconnected) => {
+                                            glib::ControlFlow::Break
+                                        }
+                                    },
+                                );
+                            });
+
+                            glib::ControlFlow::Break
+                        }
+                        Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                        Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+                    }
+                });
             });
 
         // Completar metadatos y pósters que falten sin bloquear la UI.

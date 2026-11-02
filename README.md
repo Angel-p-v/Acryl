@@ -42,7 +42,7 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 | 📚 **Biblioteca local** | Indexa películas, series y anime en una base de datos SQLite con búsqueda FTS5 |
 | 🔍 **Búsqueda rápida** | Busca por título con filtrado por tipo y paginación |
 | 🏷️ **Categorías** | Filtra la biblioteca por géneros/etiquetas obtenidos de los metadatos (TVmaze) |
-| 🖼️ **Pósteres, banners y metadatos** | Descarga pósteres, sinopsis y puntuación (vote_average) desde TVmaze; banners anchos desde TVmaze/AniList. Imágenes individuales por episodio. |
+| 🖼️ **Pósteres, banners y metadatos** | Descarga pósteres, sinopsis y puntuación (vote_average) desde TVmaze; el selector combina TVmaze, AniList, Kitsu, Jikan e iTunes (todos gratuitos y sin clave) y elimina imágenes repetidas. Imágenes individuales por episodio. |
 | ▶️ **Reproducción con mpv** | Abre el episodio seleccionado en `mpv` en pantalla completa (ventana independiente) |
 | ⚙️ **Configuración YAML** | Ajustes persistentes en archivo YAML (idioma, ruta de base de datos, reproductor predeterminado) |
 | 🌐 **Idiomas** | Interfaz disponible en español e inglés |
@@ -95,7 +95,7 @@ graph TD
 2. La UI llama directamente a funciones Rust del backend.
 3. El backend consulta **una única base de datos SQLite** (`acryl.db`) y devuelve los resultados a la UI.
 4. Para la reproducción, el backend lanza `mpv` como proceso externo (`std::process::Command`) en su propia ventana; `mpv` gestiona play, pausa, seek, volumen y pistas.
-5. Los metadatos se sincronizan en segundo plano con TVmaze (API pública, sin API key) para obtener pósteres y sinopsis automáticamente. Para el banner ancho de la vista de detalles se consultan las imágenes `background`/`banner` de TVmaze y, en anime, el banner de AniList (con Kitsu como respaldo). Desde Ajustes se puede forzar una actualización completa que sobrescribe los metadatos de todos los medios indexados.
+5. Los metadatos se sincronizan en segundo plano con TVmaze (API pública, sin API key) para obtener pósteres y sinopsis automáticamente. Para el banner ancho de la vista de detalles se consultan las imágenes `background`/`banner` de TVmaze y, en anime, el banner de AniList (con Kitsu como respaldo). El selector de póster/banner combina además AniList, Kitsu, Jikan e iTunes, y descarta duplicados por URL y por huella visual. Desde Ajustes se puede forzar una actualización completa que sobrescribe los metadatos de todos los medios indexados.
 
 ### Principios de diseño
 
@@ -279,7 +279,7 @@ app-media-manager/
 │   ├── core/                 Lógica de negocio (capa de dominio, sin depender de UI ni BD)
 │   │   ├── mod.rs
 │   │   ├── library.rs        Indexado de carpetas, detección de medios, limpieza de huérfanos
-│   │   ├── metadata.rs       Sincronización de metadatos y pósters desde TVmaze / AniList
+│   │   ├── metadata.rs       Sincronización de metadatos e imágenes desde TVmaze, AniList, Kitsu, Jikan e iTunes
 │   │   ├── player.rs         Lanzamiento de mpv, argumentos, socket IPC, historial de reproducción
 │   │   └── poster_service.rs Caché y descarga asíncrona de pósters
 │   ├── db/                   Persistencia SQLite (conexión, repositorios, migraciones, FTS5)
@@ -294,6 +294,7 @@ app-media-manager/
 │       ├── media_list.rs     Galería virtualizada con GtkGridView y tarjetas de póster
 │       ├── media_details.rs  Vista de detalles de medio, episodios, selector de temporada
 │       ├── poster.rs         Renderizado de pósters y banners con gdk-pixbuf
+│       ├── poster_selector.rs Selector de póster/banner con deduplicación visual
 │       ├── search_bar.rs     Barra de búsqueda por título
 │       ├── settings_window.rs Vista de ajustes (carpetas, idioma, metadatos)
 │       ├── theme.rs          Tema visual Crunchyroll (CSS y paleta de colores)
