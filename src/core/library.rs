@@ -1564,7 +1564,10 @@ pub fn index_missing_streams(
         .map(|status| !status.success())
         .unwrap_or(true)
     {
-        return Err("ffprobe no está disponible".into());
+        // ffprobe es opcional: si no está disponible, no se extraen streams
+        // pero la indexación de medios continúa sin problemas.
+        eprintln!("ffprobe no está disponible; se omite la extracción de streams.");
+        return Ok(0);
     }
 
     let mut conn = open_db(db_path)?;
