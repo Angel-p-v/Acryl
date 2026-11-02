@@ -1,10 +1,13 @@
 //! Componentes de imagen: pósters y banner hero de la vista de detalles.
 //!
 //! El banner sigue el diseño de Crunchyroll:
-//! - Ancho completo, altura fija (450px).
+//! - Ancho completo y altura proporcional a la imagen, con un máximo para que
+//!   el hero no ocupe toda la ventana; si la proporción no coincide, la imagen
+//!   se recorta para llenar el ancho.
 //! - Degradado oscuro en la parte inferior para que el texto sea legible.
 //! - Título y subtítulo superpuestos a la imagen.
-//! - Si no hay banner, se muestra un color de fondo del tema.
+//! - Si no hay banner, se muestra un color de fondo del tema con una altura
+//!   mínima para que la cabecera no colapse.
 
 use crate::core::poster_service::cached_path;
 use crate::ui::theme;
@@ -16,8 +19,12 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use std::rc::Rc;
 use std::sync::Once;
 
-/// Altura del banner hero de la vista de detalles (Crunchyroll usa banners altos).
-const BANNER_HEIGHT: i32 = 620;
+/// Altura máxima del banner: por encima de este valor la imagen se recorta
+/// para llenar el ancho, en lugar de ocupar toda la ventana.
+const BANNER_MAX_HEIGHT: i32 = 620;
+
+/// Altura de reserva del banner cuando el medio no tiene imagen.
+const BANNER_FALLBACK_HEIGHT: i32 = BANNER_MAX_HEIGHT;
 
 /// Tamaño máximo con el que se carga la imagen del banner.
 const BANNER_IMAGE_MAX_WIDTH: i32 = 1920;
@@ -27,6 +34,125 @@ const BANNER_IMAGE_MAX_HEIGHT: i32 = 1080;
 const BANNER_RADIUS: f64 = 0.0; // Crunchyroll usa esquinas cuadradas en el banner hero
 
 static INSTALL_POSTER_CSS: Once = Once::new();
+
+mod banner_layout {
+    use super::{BANNER_FALLBACK_HEIGHT, banner_height_for_width};
+    use gtk4::glib;
+    use gtk4::prelude::*;
+    use gtk4::subclass::prelude::*;
+    use std::cell::Cell;
+
+    glib::wrapper! {
+        pub struct BannerLayout(ObjectSubclass<imp::BannerLayout>)
+            @extends gtk4::LayoutManager;
+    }
+
+    impl BannerLayout {
+        pub fn new() -> Self {
+            glib::Object::builder().build()
+        }
+
+        /// Actualiza la proporción del banner.
+        pub fn set_aspect(&self, aspect: Option<f64>) {
+            self.imp().aspect.set(aspect);
+        }
+    }
+
+    impl Default for BannerLayout {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    mod imp {
+        use super::*;
+
+        #[derive(Default)]
+        pub struct BannerLayout {
+            pub aspect: Cell<Option<f64>>,
+        }
+
+        #[glib::object_subclass]
+        impl ObjectSubclass for BannerLayout {
+            const NAME: &'static str = "AcrylBannerLayout";
+            type Type = super::BannerLayout;
+            type ParentType = gtk4::LayoutManager;
+        }
+
+        impl ObjectImpl for BannerLayout {}
+
+        impl LayoutManagerImpl for BannerLayout {
+            fn request_mode(&self, _widget: &gtk4::Widget) -> gtk4::SizeRequestMode {
+                // La altura depende del ancho disponible.
+                gtk4::SizeRequestMode::HeightForWidth
+            }
+
+            fn measure(
+                &self,
+                widget: &gtk4::Widget,
+                orientation: gtk4::Orientation,
+                for_size: i32,
+            ) -> (i32, i32, i32, i32) {
+                if orientation == gtk4::Orientation::Vertical {
+                    // La altura sigue al ancho hasta el máximo: el banner
+                    // llena el ancho disponible y nunca colapsa.
+                    let height = match self.aspect.get() {
+                        Some(aspect) => banner_height_for_width(for_size, aspect),
+                        None => BANNER_FALLBACK_HEIGHT,
+                    };
+                    return (height, height, -1, -1);
+                }
+                widget
+                    .first_child()
+                    .map_or((0, 0, -1, -1), |child| child.measure(orientation, for_size))
+            }
+
+            fn allocate(&self, widget: &gtk4::Widget, width: i32, height: i32, baseline: i32) {
+                let mut child = widget.first_child();
+                while let Some(current) = child {
+                    current.allocate(width, height, baseline, None);
+                    child = current.next_sibling();
+                }
+            }
+        }
+    }
+}
+
+/// Contenedor del banner que fija su altura según la proporción de la imagen.
+///
+/// Se usa un `LayoutManager` propio porque un `GtkBox` normal mide la altura
+/// natural del hijo, pero su mínimo es 0: en la vista de detalles, donde el
+/// contenido supera la altura de la ventana, el banner acababa colapsando.
+struct BannerFrame {
+    container: gtk4::Box,
+    layout: banner_layout::BannerLayout,
+}
+
+impl BannerFrame {
+    fn new() -> Self {
+        let container = gtk4::Box::new(Orientation::Vertical, 0);
+        let layout = banner_layout::BannerLayout::new();
+        container.set_layout_manager(Some(layout.clone()));
+        Self { container, layout }
+    }
+
+    fn append(&self, child: &impl IsA<gtk4::Widget>) {
+        self.container.append(child);
+    }
+
+    fn set_aspect(&self, aspect: Option<f64>) {
+        self.layout.set_aspect(aspect);
+        self.container.queue_resize();
+    }
+
+    fn queue_resize(&self) {
+        self.container.queue_resize();
+    }
+
+    fn widget(&self) -> &gtk4::Box {
+        &self.container
+    }
+}
 
 /// Instala los estilos de los pósters y el banner hero.
 pub fn install_poster_css() {
@@ -196,6 +322,7 @@ impl Default for BannerPalette {
 /// En las vistas de detalle se muestra exclusivamente el banner como imagen
 /// principal; el póster vertical ya no se duplica junto al banner.
 pub struct Banner {
+    frame: BannerFrame,
     overlay: Overlay,
     picture: Picture,
     drawing: DrawingArea,
@@ -215,6 +342,8 @@ impl Banner {
         picture.set_hexpand(true);
         picture.set_vexpand(true);
         picture.set_can_shrink(true);
+        // `Cover` llena todo el ancho disponible; la altura se limita con
+        // `BANNER_MAX_HEIGHT` para que el hero no ocupe toda la ventana.
         picture.set_content_fit(gtk4::ContentFit::Cover);
         picture.set_alternative_text(Some("Banner del medio"));
         picture.set_visible(false);
@@ -231,11 +360,18 @@ impl Banner {
         let overlay = Overlay::new();
         overlay.set_child(Some(&drawing));
         overlay.set_hexpand(true);
-        overlay.set_vexpand(false);
-        overlay.set_valign(gtk4::Align::Start);
-        overlay.set_size_request(-1, BANNER_HEIGHT);
+        overlay.set_vexpand(true);
+        overlay.set_valign(gtk4::Align::Fill);
         overlay.set_overflow(Overflow::Hidden);
         overlay.add_css_class("banner");
+
+        // El contenedor calcula la altura mínima a partir del ancho y de la
+        // proporción de la imagen. Sin ese mínimo la cabecera colapsa cuando
+        // el resto de la vista de detalles necesita más altura que la ventana.
+        let frame = BannerFrame::new();
+        frame.widget().set_hexpand(true);
+        frame.widget().set_vexpand(false);
+        frame.append(&overlay);
 
         overlay.add_overlay(&picture);
         overlay.set_measure_overlay(&picture, true);
@@ -265,6 +401,7 @@ impl Banner {
         overlay.add_overlay(&text_box);
 
         Self {
+            frame,
             overlay,
             picture,
             drawing,
@@ -275,8 +412,8 @@ impl Banner {
         }
     }
 
-    pub fn widget(&self) -> &Overlay {
-        &self.overlay
+    pub fn widget(&self) -> &gtk4::Box {
+        self.frame.widget()
     }
 
     pub fn set_info(&mut self, title: &str, subtitle: &str) {
@@ -302,13 +439,20 @@ impl Banner {
 
         match banner {
             Some(pixbuf) => {
+                let aspect = f64::from(pixbuf.width()) / f64::from(pixbuf.height());
                 let texture = gtk4::gdk::Texture::for_pixbuf(&pixbuf);
                 self.picture.set_paintable(Some(&texture));
                 self.picture.set_visible(true);
+                // El contenedor ajusta la altura (con un máximo) a la
+                // proporción de la imagen.
+                self.frame.set_aspect(Some(aspect));
+                self.frame.queue_resize();
                 // Forzar redibujado inmediato para que el nuevo banner se vea
                 // sin necesidad de reiniciar la aplicación.
+                self.picture.queue_resize();
                 self.picture.queue_draw();
                 self.drawing.queue_draw();
+                self.overlay.queue_resize();
                 self.overlay.queue_draw();
             }
             None => {
@@ -316,10 +460,13 @@ impl Banner {
                 // de un degradado vacío. El póster y el banner son formatos
                 // diferentes (vertical vs horizontal) y nunca se usan como
                 // sustituto del otro.
+                self.frame.set_aspect(None);
                 self.picture.set_paintable(gtk4::gdk::Texture::NONE);
                 self.picture.set_visible(false);
+                self.frame.queue_resize();
                 *self.palette.borrow_mut() = BannerPalette::default();
                 self.drawing.queue_draw();
+                self.overlay.queue_resize();
                 self.overlay.queue_draw();
             }
         }
@@ -335,6 +482,18 @@ impl Default for Banner {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Altura que debe reservar el banner para mostrar la imagen entera.
+///
+/// Sin un ancho válido (aún no asignado) o con una proporción inválida se usa
+/// la altura de reserva, de modo que la cabecera nunca colapse. La altura se
+/// limita a `BANNER_MAX_HEIGHT` para que el hero no ocupe toda la ventana.
+fn banner_height_for_width(width: i32, aspect: f64) -> i32 {
+    if width <= 0 || !aspect.is_finite() || aspect <= 0.0 {
+        return BANNER_FALLBACK_HEIGHT;
+    }
+    ((f64::from(width) / aspect).round() as i32).clamp(1, BANNER_MAX_HEIGHT)
 }
 
 /// Dibuja el fondo del banner: degradado oscuro y círculos translúcidos.
@@ -391,4 +550,41 @@ fn rounded_rectangle(
 
 fn escape_markup(text: &str) -> String {
     gtk4::glib::markup_escape_text(text).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn banner_height_respeta_la_proporcion_y_limita_la_altura() {
+        // A 873 px de ancho, 16:9 son 491 px y caben por debajo del máximo.
+        assert_eq!(banner_height_for_width(873, 16.0 / 9.0), 491);
+        // En ventanas anchas la altura se limita para no ocupar toda la vista.
+        assert_eq!(banner_height_for_width(1200, 16.0 / 9.0), BANNER_MAX_HEIGHT);
+        assert_eq!(banner_height_for_width(1920, 16.0 / 9.0), BANNER_MAX_HEIGHT);
+        // Las imágenes más panorámicas conservan su altura proporcional.
+        assert_eq!(banner_height_for_width(1200, 3.0), 400);
+    }
+
+    #[test]
+    fn banner_height_usa_la_reserva_sin_ancho_o_proporcion_validos() {
+        assert_eq!(
+            banner_height_for_width(0, 16.0 / 9.0),
+            BANNER_FALLBACK_HEIGHT
+        );
+        assert_eq!(
+            banner_height_for_width(-1, 16.0 / 9.0),
+            BANNER_FALLBACK_HEIGHT
+        );
+        assert_eq!(banner_height_for_width(1200, 0.0), BANNER_FALLBACK_HEIGHT);
+        assert_eq!(
+            banner_height_for_width(1200, f64::NAN),
+            BANNER_FALLBACK_HEIGHT
+        );
+        assert_eq!(
+            banner_height_for_width(1200, f64::INFINITY),
+            BANNER_FALLBACK_HEIGHT
+        );
+    }
 }

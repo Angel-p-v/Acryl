@@ -447,9 +447,13 @@ fn image_fingerprint(pixbuf: &GtkPixbuf) -> Option<u64> {
 }
 
 /// Indica si la huella se parece a otra ya vista (misma imagen con pequeñas
-/// diferencias de compresión o tamaño).
+/// diferencias de compresión, recorte o tamaño).
+///
+/// Los proveedores sirven la misma carátula con recompresiones y recortes
+/// distintos, así que se toleran hasta 5 bits de diferencia sobre 64. Un par
+/// de pósteres realmente diferentes queda muy por encima de ese umbral.
 fn is_duplicate_fingerprint(seen: &mut HashSet<u64>, fingerprint: u64) -> bool {
-    const MAX_DISTANCE: u32 = 3;
+    const MAX_DISTANCE: u32 = 5;
 
     if seen
         .iter()
@@ -514,5 +518,20 @@ mod tests {
         assert!(is_duplicate_fingerprint(&mut seen, 0b1010));
         assert!(is_duplicate_fingerprint(&mut seen, 0b1011));
         assert!(!is_duplicate_fingerprint(&mut seen, u64::MAX));
+    }
+
+    #[test]
+    fn fingerprint_tolera_recompresiones_de_hasta_cinco_bits() {
+        let mut seen = HashSet::new();
+        seen.insert(0u64);
+
+        assert!(
+            !is_duplicate_fingerprint(&mut seen, 0b111111),
+            "seis bits de diferencia siguen siendo otra imagen"
+        );
+        assert!(
+            is_duplicate_fingerprint(&mut seen, 0b11111),
+            "cinco bits de diferencia se consideran la misma imagen"
+        );
     }
 }
