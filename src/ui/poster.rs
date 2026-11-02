@@ -1,10 +1,12 @@
 //! Componentes de imagen: pósters y banner hero de la vista de detalles.
 //!
 //! El banner sigue el diseño de Crunchyroll:
-//! - Ancho completo, altura fija (450px).
+//! - Ancho completo y altura derivada de la proporción real de la imagen, de
+//!   modo que el banner se vea entero sin recortes.
 //! - Degradado oscuro en la parte inferior para que el texto sea legible.
 //! - Título y subtítulo superpuestos a la imagen.
-//! - Si no hay banner, se muestra un color de fondo del tema.
+//! - Si no hay banner, se muestra un color de fondo del tema con una altura
+//!   mínima para que la cabecera no colapse.
 
 use crate::core::poster_service::cached_path;
 use crate::ui::theme;
@@ -16,8 +18,8 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use std::rc::Rc;
 use std::sync::Once;
 
-/// Altura del banner hero de la vista de detalles (Crunchyroll usa banners altos).
-const BANNER_HEIGHT: i32 = 620;
+/// Altura de reserva del banner cuando el medio no tiene imagen.
+const BANNER_FALLBACK_HEIGHT: i32 = 620;
 
 /// Tamaño máximo con el que se carga la imagen del banner.
 const BANNER_IMAGE_MAX_WIDTH: i32 = 1920;
@@ -215,7 +217,9 @@ impl Banner {
         picture.set_hexpand(true);
         picture.set_vexpand(true);
         picture.set_can_shrink(true);
-        picture.set_content_fit(gtk4::ContentFit::Cover);
+        // `Contain` mantiene la imagen completa: la altura del banner se
+        // calcula a partir de su proporción y nunca se recorta.
+        picture.set_content_fit(gtk4::ContentFit::Contain);
         picture.set_alternative_text(Some("Banner del medio"));
         picture.set_visible(false);
 
@@ -233,7 +237,9 @@ impl Banner {
         overlay.set_hexpand(true);
         overlay.set_vexpand(false);
         overlay.set_valign(gtk4::Align::Start);
-        overlay.set_size_request(-1, BANNER_HEIGHT);
+        // Sin imagen se reserva una altura mínima; con imagen, la altura la
+        // marca la proporción del banner (`height-for-width` del Picture).
+        overlay.set_size_request(-1, BANNER_FALLBACK_HEIGHT);
         overlay.set_overflow(Overflow::Hidden);
         overlay.add_css_class("banner");
 
@@ -305,10 +311,15 @@ impl Banner {
                 let texture = gtk4::gdk::Texture::for_pixbuf(&pixbuf);
                 self.picture.set_paintable(Some(&texture));
                 self.picture.set_visible(true);
+                // La cabecera crece con la proporción de la imagen: se retira
+                // la altura de reserva y se recalcula el tamaño del overlay.
+                self.overlay.set_size_request(-1, -1);
                 // Forzar redibujado inmediato para que el nuevo banner se vea
                 // sin necesidad de reiniciar la aplicación.
+                self.picture.queue_resize();
                 self.picture.queue_draw();
                 self.drawing.queue_draw();
+                self.overlay.queue_resize();
                 self.overlay.queue_draw();
             }
             None => {
@@ -318,8 +329,10 @@ impl Banner {
                 // sustituto del otro.
                 self.picture.set_paintable(gtk4::gdk::Texture::NONE);
                 self.picture.set_visible(false);
+                self.overlay.set_size_request(-1, BANNER_FALLBACK_HEIGHT);
                 *self.palette.borrow_mut() = BannerPalette::default();
                 self.drawing.queue_draw();
+                self.overlay.queue_resize();
                 self.overlay.queue_draw();
             }
         }
