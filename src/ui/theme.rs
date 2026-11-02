@@ -139,9 +139,11 @@ pub fn install_theme_css() {
         css.push_str("overlay { background-color: transparent; }\n");
         css.push_str("stack { background-color: transparent; }\n");
 
-        /* Cabecera de detalles */
+        /* Cabecera de detalles.
+         * Sin padding: el banner es su único hijo y debe llenar toda la
+         * cabecera, incluido el fondo, para que no quede un marco alrededor. */
         css.push_str(&format!(
-            ".details-header {{ background-color: {}; border-radius: {}; padding: 24px; margin-bottom: 24px; }}\n",
+            ".details-header {{ background-color: {}; border-radius: {}; padding: 0; margin-bottom: 24px; }}\n",
             colors::SURFACE, radius::LARGE,
         ));
 

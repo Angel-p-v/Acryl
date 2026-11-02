@@ -177,7 +177,7 @@ pub fn install_poster_css() {
              .play-button:hover {{ background-color: {}; }}\n\
              .flat-button {{ background-color: transparent; border: none; color: {}; font-size: 0.9em; padding: 6px 12px; }}\n\
              .flat-button:hover {{ color: {}; background-color: {}; border-radius: {}; }}\n\
-             .details-header {{ background-color: {}; border-radius: {}; padding: 24px; margin-bottom: 24px; }}\n\
+             .details-header {{ background-color: {}; border-radius: {}; padding: 0; margin-bottom: 24px; }}\n\
              .synopsis-text {{ color: {}; line-height: 1.6; }}\n\
              .media-type {{ font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: {}; font-weight: 700; }}\n\
              .episode-grid {{ margin-top: 8px; }}\n\
