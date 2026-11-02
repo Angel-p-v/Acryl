@@ -679,10 +679,11 @@ async fn fetch_tvmaze_banner(show_id: u64, client: &TvmazeClient) -> Option<Stri
 /// Obtiene las imágenes disponibles para el selector desde todas las fuentes
 /// gratuitas y sin clave que correspondan al tipo de medio.
 ///
-/// TVmaze aporta póster y banner para series y películas; AniList, Kitsu y
-/// Jikan aportan imágenes de anime; iTunes aporta póster para películas y
-/// series. Las opciones se deduplican por URL normalizada para no saturar la
-/// vista con la misma imagen repetida.
+/// TVmaze aporta póster y banner para series y películas; AniList, Kitsu,
+/// Jikan y Shikimori aportan imágenes de anime; iTunes y Cinemeta aportan
+/// póster para películas y series, y Cinemeta además un banner. Las opciones
+/// se deduplican por URL normalizada para no saturar la vista con la misma
+/// imagen repetida.
 pub async fn fetch_available_images(
     media_type: &str,
     title: &str,
@@ -696,16 +697,23 @@ pub async fn fetch_available_images(
     }
 
     if media_type == "anime" {
-        let (anilist, kitsu, jikan) = tokio::join!(
+        let (anilist, kitsu, jikan, shikimori) = tokio::join!(
             fetch_anilist_images(title, client),
             fetch_kitsu_images(title, client),
             fetch_jikan_images(title, client),
+            fetch_shikimori_images(title, client),
         );
         options.extend(anilist);
         options.extend(kitsu);
         options.extend(jikan);
+        options.extend(shikimori);
     } else {
-        options.extend(fetch_itunes_images(media_type, title, client).await);
+        let (itunes, cinemeta) = tokio::join!(
+            fetch_itunes_images(media_type, title, client),
+            fetch_cinemeta_images(media_type, title, client),
+        );
+        options.extend(itunes);
+        options.extend(cinemeta);
     }
 
     dedupe_image_options(options)
@@ -973,6 +981,91 @@ fn parse_jikan_images(response: &Value) -> Vec<ImageOption> {
     options
 }
 
+/// Obtiene el póster de Shikimori (API pública de anime, sin clave).
+///
+/// La API devuelve rutas relativas, así que se convierten a absolutas antes de
+/// entregarlas al selector. Solo se usa la imagen original para no ofrecer la
+/// misma carátula en varias resoluciones.
+async fn fetch_shikimori_images(title: &str, client: &TvmazeClient) -> Vec<ImageOption> {
+    let url = format!(
+        "https://shikimori.one/api/animes?search={}&limit=5",
+        urlencoding::encode(title)
+    );
+
+    let response = match client
+        .client
+        .get(&url)
+        .timeout(Duration::from_secs(EXTRA_PROVIDER_TIMEOUT_SECS))
+        .send()
+        .await
+    {
+        Ok(response) => match response.error_for_status() {
+            Ok(response) => match response.json::<Value>().await {
+                Ok(value) => value,
+                Err(_) => return Vec::new(),
+            },
+            Err(_) => return Vec::new(),
+        },
+        Err(_) => return Vec::new(),
+    };
+
+    parse_shikimori_images(&response, title)
+}
+
+fn parse_shikimori_images(response: &Value, title: &str) -> Vec<ImageOption> {
+    let Some(items) = response.as_array() else {
+        return Vec::new();
+    };
+    let Some(first) = items.first() else {
+        return Vec::new();
+    };
+
+    let expected = normalize_title(title);
+    // Se prefiere una coincidencia exacta de título y, si no la hay, el primer
+    // resultado que contenga el título. En último caso se usa el más relevante
+    // según la API.
+    let exact = items.iter().find(|item| {
+        ["name", "russian"].into_iter().any(|key| {
+            item.get(key)
+                .and_then(Value::as_str)
+                .is_some_and(|name| normalize_title(name) == expected)
+        })
+    });
+    let anime = exact
+        .or_else(|| {
+            items.iter().find(|item| {
+                ["name", "russian"].into_iter().any(|key| {
+                    item.get(key)
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| titles_match(&expected, name))
+                })
+            })
+        })
+        .unwrap_or(first);
+
+    let Some(url) = anime
+        .get("image")
+        .and_then(|image| image.get("original"))
+        .and_then(Value::as_str)
+        .filter(|url| !url.is_empty())
+    else {
+        return Vec::new();
+    };
+
+    let url = if url.starts_with("http://") || url.starts_with("https://") {
+        url.to_string()
+    } else {
+        format!("https://shikimori.one/{}", url.trim_start_matches('/'))
+    };
+
+    vec![ImageOption {
+        image_type: "poster".to_string(),
+        provider: "Shikimori".to_string(),
+        resolution: "original".to_string(),
+        url,
+    }]
+}
+
 /// Obtiene pósteres de iTunes Search API (gratuita y sin clave) para películas
 /// y series. Solo se aceptan resultados cuyo título coincide con el del medio
 /// para no ofrecer imágenes de producciones distintas.
@@ -1057,6 +1150,107 @@ fn parse_itunes_images(response: &Value, title: &str) -> Vec<ImageOption> {
     }
 
     options
+}
+
+/// Obtiene el póster y el banner de Cinemeta (catálogo público de Stremio,
+/// sin clave) para películas y series.
+///
+/// Cinemeta sirve las imágenes desde el CDN de Metahub en varios tamaños; se
+/// solicita siempre la variante `large` y se descarta el resultado si el título
+/// no coincide, para no ofrecer carátulas de otra producción.
+async fn fetch_cinemeta_images(
+    media_type: &str,
+    title: &str,
+    client: &TvmazeClient,
+) -> Vec<ImageOption> {
+    let kind = if media_type == "movie" {
+        "movie"
+    } else {
+        "series"
+    };
+    let url = format!(
+        "https://v3-cinemeta.strem.io/catalog/{}/top/search={}.json",
+        kind,
+        urlencoding::encode(title)
+    );
+
+    let response = match client
+        .client
+        .get(&url)
+        .timeout(Duration::from_secs(EXTRA_PROVIDER_TIMEOUT_SECS))
+        .send()
+        .await
+    {
+        Ok(response) => match response.error_for_status() {
+            Ok(response) => match response.json::<Value>().await {
+                Ok(value) => value,
+                Err(_) => return Vec::new(),
+            },
+            Err(_) => return Vec::new(),
+        },
+        Err(_) => return Vec::new(),
+    };
+
+    parse_cinemeta_images(&response, title)
+}
+
+fn parse_cinemeta_images(response: &Value, title: &str) -> Vec<ImageOption> {
+    let expected = normalize_title(title);
+    let Some(metas) = response.get("metas").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+
+    // Coincidencia exacta primero: la búsqueda de Cinemeta puede devolver
+    // títulos que solo contienen el buscado (p. ej. «The Crack: Inception»
+    // antes que «Inception»).
+    let exact = metas.iter().find(|meta| {
+        meta.get("name")
+            .and_then(Value::as_str)
+            .is_some_and(|name| normalize_title(name) == expected)
+    });
+    let Some(meta) = exact.or_else(|| {
+        metas.iter().find(|meta| {
+            meta.get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| titles_match(&expected, name))
+        })
+    }) else {
+        return Vec::new();
+    };
+
+    let mut options = Vec::new();
+    if let Some(url) = meta
+        .get("poster")
+        .and_then(Value::as_str)
+        .filter(|url| !url.is_empty())
+    {
+        options.push(ImageOption {
+            image_type: "poster".to_string(),
+            provider: "Cinemeta".to_string(),
+            resolution: "original".to_string(),
+            url: upscale_metahub_image(url, "poster"),
+        });
+    }
+    if let Some(url) = meta
+        .get("background")
+        .and_then(Value::as_str)
+        .filter(|url| !url.is_empty())
+    {
+        options.push(ImageOption {
+            image_type: "banner".to_string(),
+            provider: "Cinemeta".to_string(),
+            resolution: "original".to_string(),
+            url: upscale_metahub_image(url, "background"),
+        });
+    }
+
+    options
+}
+
+/// Pide la variante `large` de una imagen de Metahub, el CDN de Cinemeta.
+fn upscale_metahub_image(url: &str, kind: &str) -> String {
+    url.replace(&format!("/{kind}/small/"), &format!("/{kind}/large/"))
+        .replace(&format!("/{kind}/medium/"), &format!("/{kind}/large/"))
 }
 
 fn normalize_title(title: &str) -> String {
@@ -1602,6 +1796,48 @@ mod tests {
     }
 
     #[test]
+    fn parse_shikimori_images_prefiere_coincidencia_exacta_y_absolutiza_la_url() {
+        let response = json!([
+            {
+                "name": "Road of Naruto",
+                "image": { "original": "/system/animes/original/53236.jpg" }
+            },
+            {
+                "name": "Naruto",
+                "image": { "original": "/system/animes/original/20.jpg?1711965679" }
+            }
+        ]);
+
+        let options = parse_shikimori_images(&response, "Naruto");
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].image_type, "poster");
+        assert_eq!(options[0].provider, "Shikimori");
+        assert_eq!(
+            options[0].url,
+            "https://shikimori.one/system/animes/original/20.jpg?1711965679"
+        );
+
+        // Sin coincidencia se usa el resultado más relevante.
+        let options = parse_shikimori_images(&response, "Desconocido");
+        assert_eq!(options.len(), 1);
+        assert!(options[0].url.ends_with("/original/53236.jpg"));
+
+        // Las URLs absolutas se conservan.
+        let absolute = json!([{
+            "name": "Naruto",
+            "image": { "original": "https://cdn.example/20.jpg" }
+        }]);
+        assert_eq!(
+            parse_shikimori_images(&absolute, "Naruto")[0].url,
+            "https://cdn.example/20.jpg"
+        );
+
+        assert!(parse_shikimori_images(&json!([]), "Naruto").is_empty());
+        assert!(parse_shikimori_images(&json!([{"name": "Naruto"}]), "Naruto").is_empty());
+        assert!(parse_shikimori_images(&json!({}), "Naruto").is_empty());
+    }
+
+    #[test]
     fn parse_itunes_images_filtra_por_titulo_y_mejora_la_resolucion() {
         let response = json!({
             "results": [
@@ -1627,6 +1863,59 @@ mod tests {
 
         assert!(parse_itunes_images(&response, "Inexistente").is_empty());
         assert!(parse_itunes_images(&json!({}), "Mi Pelicula").is_empty());
+    }
+
+    #[test]
+    fn parse_cinemeta_images_prefiere_exacto_y_pide_la_variante_grande() {
+        let response = json!({
+            "metas": [
+                {
+                    "name": "The Crack: Inception",
+                    "poster": "https://images.metahub.space/poster/small/tt6793710/img",
+                    "background": "https://images.metahub.space/background/medium/tt6793710/img"
+                },
+                {
+                    "name": "Inception",
+                    "poster": "https://images.metahub.space/poster/small/tt1375666/img",
+                    "background": "https://images.metahub.space/background/medium/tt1375666/img"
+                }
+            ]
+        });
+
+        let options = parse_cinemeta_images(&response, "Inception");
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].image_type, "poster");
+        assert_eq!(options[0].provider, "Cinemeta");
+        assert_eq!(
+            options[0].url,
+            "https://images.metahub.space/poster/large/tt1375666/img"
+        );
+        assert_eq!(options[1].image_type, "banner");
+        assert_eq!(
+            options[1].url,
+            "https://images.metahub.space/background/large/tt1375666/img"
+        );
+
+        assert!(parse_cinemeta_images(&response, "No existe").is_empty());
+        assert!(parse_cinemeta_images(&json!({}), "Inception").is_empty());
+    }
+
+    #[test]
+    fn upscale_metahub_image_cambia_solo_el_tamano_conocido() {
+        assert_eq!(
+            upscale_metahub_image(
+                "https://images.metahub.space/poster/medium/tt1/img",
+                "poster"
+            ),
+            "https://images.metahub.space/poster/large/tt1/img"
+        );
+        assert_eq!(
+            upscale_metahub_image(
+                "https://images.metahub.space/poster/thumb/tt1/img",
+                "poster"
+            ),
+            "https://images.metahub.space/poster/thumb/tt1/img"
+        );
     }
 
     #[test]
