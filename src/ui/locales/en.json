@@ -131,6 +131,7 @@
 
   "toast.indexing_completed": "Indexing completed",
   "toast.tracks_saved": "Tracks saved",
+  "toast.images_updated": "Poster/banner updated",
 
   "metadata.refresh.title": "Refresh all metadata?",
   "metadata.refresh.detail": "Will query TVmaze (and AniList for anime) and overwrite title, year, synopsis, poster and banner of all indexed media. This action cannot be undone.",
@@ -145,6 +146,7 @@
   "metadata.sync.banner_failed": " {} banners could not be downloaded; previous one kept.",
 
   "error.play_episode": "Could not play the episode",
+  "error.images_update": "The poster or banner could not be updated",
   "error.invalid_folder.title": "Invalid path",
   "error.invalid_folder.detail": "Select an existing and accessible folder.",
   "error.invalid_folder.status": "The indicated path is not a valid folder.",

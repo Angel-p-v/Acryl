@@ -14,36 +14,53 @@
 use crate::core::metadata::ImageOption;
 use crate::core::poster_service::{PosterService, cached_path};
 use crate::ui::poster::poster_picture;
-use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
+use gtk4::gdk_pixbuf::{InterpType, Pixbuf as GtkPixbuf};
 use gtk4::prelude::*;
 use gtk4::{Align, Box, Button, Dialog, FlowBox, Image, Label, Orientation, Window};
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::mpsc;
 
 /// Tamaño de las miniaturas en el selector.
 const THUMB_SIZE: i32 = 120;
 
+/// Cambio que el usuario quiere aplicar a una imagen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImageChoice {
+    /// Mantener la imagen actual sin cambios.
+    Keep,
+    /// Usar la imagen indicada.
+    Set(String),
+    /// Eliminar la imagen actual.
+    Remove,
+}
+
 /// Resultado de la selección del usuario.
 pub struct SelectorResult {
-    /// URL elegida para el póster, o `None` si se quiere eliminar el actual.
-    pub poster_path: Option<String>,
-    /// URL elegida para el banner, o `None` si se quiere eliminar el actual.
-    pub banner_path: Option<String>,
+    /// Cambio elegido para el póster.
+    pub poster: ImageChoice,
+    /// Cambio elegido para el banner.
+    pub banner: ImageChoice,
+}
+
+/// Entrada de una miniatura registrada para actualizarla cuando termine su
+/// descarga y para eliminar duplicados visuales.
+#[derive(Clone)]
+struct ThumbEntry {
+    button: Button,
+    flow: FlowBox,
+    provider: String,
+    seen_fingerprints: Rc<RefCell<HashSet<u64>>>,
 }
 
 /// Diálogo modal para elegir póster y banner.
 pub struct PosterSelector {
     dialog: Dialog,
-    /// Opción de póster actualmente seleccionada por el usuario.
-    selected_poster: Rc<RefCell<Option<ImageOption>>>,
-    /// Opción de banner actualmente seleccionada por el usuario.
-    selected_banner: Rc<RefCell<Option<ImageOption>>>,
-    /// Indica si el usuario eligió eliminar el póster (marca "Sin póster").
-    remove_poster: Rc<Cell<bool>>,
-    /// Indica si el usuario eligió eliminar el banner (marca "Sin banner").
-    remove_banner: Rc<Cell<bool>>,
+    /// Cambio elegido para el póster.
+    poster_choice: Rc<RefCell<ImageChoice>>,
+    /// Cambio elegido para el banner.
+    banner_choice: Rc<RefCell<ImageChoice>>,
 }
 
 impl PosterSelector {
@@ -56,14 +73,10 @@ impl PosterSelector {
     ///
     /// - `poster_options`: opciones de póster desde la API (puede estar vacío).
     /// - `banner_options`: opciones de banner desde la API (puede estar vacío).
-    /// - `current_poster`: URL del póster actualmente asignado (si existe).
-    /// - `current_banner`: URL del banner actualmente asignado (si existe).
     pub fn new(
         parent: &impl IsA<Window>,
         poster_options: &[ImageOption],
         banner_options: &[ImageOption],
-        current_poster: Option<&str>,
-        current_banner: Option<&str>,
     ) -> Self {
         let dialog = Dialog::new();
         dialog.set_title(Some("Elegir póster y banner"));
@@ -73,12 +86,12 @@ impl PosterSelector {
         dialog.set_default_size(720, 520);
         dialog.set_resizable(true);
 
-        let selected_poster = Rc::new(RefCell::new(None));
-        let selected_banner = Rc::new(RefCell::new(None));
-        let remove_poster = Rc::new(Cell::new(false));
-        let remove_banner = Rc::new(Cell::new(false));
-        let url_to_btn = Rc::new(RefCell::new(HashMap::new()));
-        let url_to_provider = Rc::new(RefCell::new(HashMap::new()));
+        let poster_choice = Rc::new(RefCell::new(ImageChoice::Keep));
+        let banner_choice = Rc::new(RefCell::new(ImageChoice::Keep));
+        let url_to_entries: Rc<RefCell<HashMap<String, Vec<ThumbEntry>>>> =
+            Rc::new(RefCell::new(HashMap::new()));
+        let poster_fingerprints: Rc<RefCell<HashSet<u64>>> = Rc::new(RefCell::new(HashSet::new()));
+        let banner_fingerprints: Rc<RefCell<HashSet<u64>>> = Rc::new(RefCell::new(HashSet::new()));
         let content = dialog.content_area();
         content.set_orientation(Orientation::Vertical);
         content.set_spacing(8);
@@ -95,49 +108,41 @@ impl PosterSelector {
         // Opción "Sin póster" (eliminar).
         let btn_remove_poster = thumbnail_button_remove("Sin póster");
         {
-            let selected = selected_poster.clone();
-            let remove = remove_poster.clone();
+            let choice = poster_choice.clone();
             btn_remove_poster.connect_clicked(move |_| {
-                *selected.borrow_mut() = None;
-                remove.set(true);
+                *choice.borrow_mut() = ImageChoice::Remove;
             });
         }
         poster_flow.append(&btn_remove_poster);
 
         // Opciones de póster desde la API.
         for opt in poster_options {
-            let btn = thumbnail_button_placeholder(opt);
-            // Registrar la URL para poder actualizar el botón después.
-            url_to_btn.borrow_mut().insert(opt.url.clone(), btn.clone());
-            url_to_provider
+            let pixbuf = load_thumbnail(&opt.url);
+            if let Some(fingerprint) = pixbuf.as_ref().and_then(image_fingerprint)
+                && is_duplicate_fingerprint(&mut poster_fingerprints.borrow_mut(), fingerprint)
+            {
+                continue;
+            }
+
+            let btn = thumbnail_button(opt, pixbuf.as_ref());
+            // Registrar la URL para poder actualizar el botón después y eliminar
+            // duplicados visuales que lleguen desde otra fuente.
+            url_to_entries
                 .borrow_mut()
-                .insert(opt.url.clone(), opt.provider.clone());
+                .entry(opt.url.clone())
+                .or_default()
+                .push(ThumbEntry {
+                    button: btn.clone(),
+                    flow: poster_flow.clone(),
+                    provider: opt.provider.clone(),
+                    seen_fingerprints: poster_fingerprints.clone(),
+                });
 
             {
                 let url = opt.url.clone();
-                let provider = opt.provider.clone();
-                let selected = selected_poster.clone();
-                let remove = remove_poster.clone();
+                let choice = poster_choice.clone();
                 btn.connect_clicked(move |_| {
-                    let provider = provider.clone();
-                    *selected.borrow_mut() = Some(ImageOption {
-                        image_type: "poster".to_string(),
-                        provider,
-                        resolution: "original".to_string(),
-                        url: url.clone(),
-                    });
-                    remove.set(false);
-                });
-            }
-            // Si coincide con el póster actual, marcar como seleccionado por defecto.
-            if let Some(cur) = current_poster
-                && cur == opt.url
-            {
-                *selected_poster.borrow_mut() = Some(ImageOption {
-                    image_type: "poster".to_string(),
-                    provider: opt.provider.clone(),
-                    resolution: "original".to_string(),
-                    url: opt.url.clone(),
+                    *choice.borrow_mut() = ImageChoice::Set(url.clone());
                 });
             }
             poster_flow.append(&btn);
@@ -153,47 +158,39 @@ impl PosterSelector {
         // Opción "Sin banner" (eliminar).
         let btn_remove_banner = thumbnail_button_remove("Sin banner");
         {
-            let selected = selected_banner.clone();
-            let remove = remove_banner.clone();
+            let choice = banner_choice.clone();
             btn_remove_banner.connect_clicked(move |_| {
-                *selected.borrow_mut() = None;
-                remove.set(true);
+                *choice.borrow_mut() = ImageChoice::Remove;
             });
         }
         banner_flow.append(&btn_remove_banner);
 
         // Opciones de banner desde la API.
         for opt in banner_options {
-            let btn = thumbnail_button_placeholder(opt);
-            url_to_btn.borrow_mut().insert(opt.url.clone(), btn.clone());
-            url_to_provider
+            let pixbuf = load_thumbnail(&opt.url);
+            if let Some(fingerprint) = pixbuf.as_ref().and_then(image_fingerprint)
+                && is_duplicate_fingerprint(&mut banner_fingerprints.borrow_mut(), fingerprint)
+            {
+                continue;
+            }
+
+            let btn = thumbnail_button(opt, pixbuf.as_ref());
+            url_to_entries
                 .borrow_mut()
-                .insert(opt.url.clone(), opt.provider.clone());
+                .entry(opt.url.clone())
+                .or_default()
+                .push(ThumbEntry {
+                    button: btn.clone(),
+                    flow: banner_flow.clone(),
+                    provider: opt.provider.clone(),
+                    seen_fingerprints: banner_fingerprints.clone(),
+                });
 
             {
                 let url = opt.url.clone();
-                let provider = opt.provider.clone();
-                let selected = selected_banner.clone();
-                let remove = remove_banner.clone();
+                let choice = banner_choice.clone();
                 btn.connect_clicked(move |_| {
-                    let provider = provider.clone();
-                    *selected.borrow_mut() = Some(ImageOption {
-                        image_type: "banner".to_string(),
-                        provider,
-                        resolution: "original".to_string(),
-                        url: url.clone(),
-                    });
-                    remove.set(false);
-                });
-            }
-            if let Some(cur) = current_banner
-                && cur == opt.url
-            {
-                *selected_banner.borrow_mut() = Some(ImageOption {
-                    image_type: "banner".to_string(),
-                    provider: opt.provider.clone(),
-                    resolution: "original".to_string(),
-                    url: opt.url.clone(),
+                    *choice.borrow_mut() = ImageChoice::Set(url.clone());
                 });
             }
             banner_flow.append(&btn);
@@ -206,13 +203,15 @@ impl PosterSelector {
         dialog.add_button("Aplicar", gtk4::ResponseType::Apply);
 
         // ---------- Descarga en segundo plano ----------
-        // Recopilar URLs que faltan en caché.
-        let missing_urls: Vec<String> = poster_options
+        // Recopilar URLs que faltan en caché (sin repetir la misma URL).
+        let mut missing_urls: Vec<String> = poster_options
             .iter()
             .chain(banner_options.iter())
             .filter(|o| cached_path(&o.url).is_none())
             .map(|o| o.url.clone())
             .collect();
+        missing_urls.sort_unstable();
+        missing_urls.dedup();
 
         if !missing_urls.is_empty() {
             let (tx, rx) = mpsc::channel::<String>();
@@ -231,13 +230,16 @@ impl PosterSelector {
             });
 
             // Revisar el canal desde el hilo principal para actualizar miniaturas.
-            let url_to_btn_for_idle = url_to_btn.clone();
-            let url_to_provider_for_idle = url_to_provider.clone();
+            let url_to_entries_for_idle = url_to_entries.clone();
             glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
                 match rx.try_recv() {
                     Ok(url) => {
-                        if let Some(btn) = url_to_btn_for_idle.borrow().get(&url)
-                            && let Some(cache_path) = cached_path(&url)
+                        let entries = url_to_entries_for_idle
+                            .borrow()
+                            .get(&url)
+                            .cloned()
+                            .unwrap_or_default();
+                        if let Some(cache_path) = cached_path(&url)
                             && let Ok(pixbuf) = GtkPixbuf::from_file_at_scale(
                                 &cache_path,
                                 THUMB_SIZE,
@@ -245,29 +247,20 @@ impl PosterSelector {
                                 true,
                             )
                         {
-                            // Reemplazar el contenido del botón con la imagen real.
-                            let box_ = Box::new(Orientation::Vertical, 4);
-                            box_.set_halign(Align::Center);
-                            box_.set_valign(Align::Center);
-
-                            let picture = poster_picture(&pixbuf, THUMB_SIZE, THUMB_SIZE);
-                            box_.append(&picture);
-
-                            let provider = url_to_provider_for_idle
-                                .borrow()
-                                .get(&url)
-                                .cloned()
-                                .unwrap_or_default();
-                            let lbl = Label::new(Some(&provider));
-                            lbl.set_halign(Align::Center);
-                            lbl.set_xalign(0.5);
-                            lbl.set_wrap(true);
-                            lbl.set_max_width_chars(10);
-                            lbl.add_css_class("thumbnail-label");
-                            box_.append(&lbl);
-
-                            btn.set_child(Some(&box_));
-                            btn.set_tooltip_text(Some(&url));
+                            let fingerprint = image_fingerprint(&pixbuf);
+                            for entry in entries {
+                                if let Some(fingerprint) = fingerprint
+                                    && is_duplicate_fingerprint(
+                                        &mut entry.seen_fingerprints.borrow_mut(),
+                                        fingerprint,
+                                    )
+                                {
+                                    // Misma imagen que otra opción ya visible.
+                                    entry.flow.remove(&entry.button);
+                                    continue;
+                                }
+                                set_thumbnail(&entry.button, &pixbuf, &entry.provider, &url);
+                            }
                         }
                         glib::ControlFlow::Continue
                     }
@@ -279,10 +272,8 @@ impl PosterSelector {
 
         Self {
             dialog,
-            selected_poster,
-            selected_banner,
-            remove_poster,
-            remove_banner,
+            poster_choice,
+            banner_choice,
         }
     }
 
@@ -293,37 +284,24 @@ impl PosterSelector {
         F: Fn(SelectorResult) + 'static,
     {
         let dialog = self.dialog;
-        let selected_poster = self.selected_poster;
-        let selected_banner = self.selected_banner;
-        let remove_poster = self.remove_poster;
-        let remove_banner = self.remove_banner;
+        let poster_choice = self.poster_choice;
+        let banner_choice = self.banner_choice;
 
         dialog.connect_response(move |dlg, response| {
-            match response {
-                gtk4::ResponseType::Apply => {
-                    let poster_path = if remove_poster.get() {
-                        None
-                    } else {
-                        selected_poster.borrow().as_ref().map(|opt| opt.url.clone())
-                    };
-                    let banner_path = if remove_banner.get() {
-                        None
-                    } else {
-                        selected_banner.borrow().as_ref().map(|opt| opt.url.clone())
-                    };
-                    callback(SelectorResult {
-                        poster_path,
-                        banner_path,
-                    });
-                }
+            let result = match response {
+                gtk4::ResponseType::Apply => SelectorResult {
+                    poster: poster_choice.borrow().clone(),
+                    banner: banner_choice.borrow().clone(),
+                },
                 _ => {
                     // Cancelar o cerrar: no hacer cambios.
-                    callback(SelectorResult {
-                        poster_path: None,
-                        banner_path: None,
-                    });
+                    SelectorResult {
+                        poster: ImageChoice::Keep,
+                        banner: ImageChoice::Keep,
+                    }
                 }
-            }
+            };
+            callback(result);
             dlg.close();
         });
 
@@ -362,11 +340,15 @@ fn thumbnail_flow() -> FlowBox {
     flow
 }
 
-/// Crea un botón con un marcador neutro para una opción de imagen.
-/// Crea un botón con la miniatura de una opción de imagen.
-/// Si la imagen ya está en caché, se muestra de inmediato; si no, se muestra
-/// un marcador neutro y se descarga en segundo plano.
-fn thumbnail_button_placeholder(opt: &ImageOption) -> Button {
+/// Carga la miniatura de una URL si ya está en caché.
+fn load_thumbnail(url: &str) -> Option<GtkPixbuf> {
+    let cache_path = cached_path(url)?;
+    GtkPixbuf::from_file_at_scale(&cache_path, THUMB_SIZE, THUMB_SIZE, true).ok()
+}
+
+/// Crea un botón con la miniatura de una opción de imagen. Si `pixbuf` es
+/// `None`, se muestra un marcador neutro hasta que termine la descarga.
+fn thumbnail_button(opt: &ImageOption, pixbuf: Option<&GtkPixbuf>) -> Button {
     let btn = Button::new();
     btn.set_hexpand(false);
     btn.set_vexpand(false);
@@ -378,17 +360,11 @@ fn thumbnail_button_placeholder(opt: &ImageOption) -> Button {
     box_.set_halign(Align::Center);
     box_.set_valign(Align::Center);
 
-    // Si la imagen ya está en caché, mostrarla de inmediato.
-    if let Some(cache_path) = cached_path(&opt.url) {
-        if let Ok(pixbuf) = GtkPixbuf::from_file_at_scale(&cache_path, THUMB_SIZE, THUMB_SIZE, true)
-        {
-            let picture = poster_picture(&pixbuf, THUMB_SIZE, THUMB_SIZE);
-            picture.set_hexpand(true);
-            picture.set_vexpand(true);
-            box_.append(&picture);
-        } else {
-            placeholder_thumbnail(&box_);
-        }
+    if let Some(pixbuf) = pixbuf {
+        let picture = poster_picture(pixbuf, THUMB_SIZE, THUMB_SIZE);
+        picture.set_hexpand(true);
+        picture.set_vexpand(true);
+        box_.append(&picture);
     } else {
         placeholder_thumbnail(&box_);
     }
@@ -403,6 +379,86 @@ fn thumbnail_button_placeholder(opt: &ImageOption) -> Button {
 
     btn.set_child(Some(&box_));
     btn
+}
+
+/// Sustituye el marcador neutro de un botón por la imagen descargada.
+fn set_thumbnail(btn: &Button, pixbuf: &GtkPixbuf, provider: &str, url: &str) {
+    let box_ = Box::new(Orientation::Vertical, 4);
+    box_.set_halign(Align::Center);
+    box_.set_valign(Align::Center);
+
+    let picture = poster_picture(pixbuf, THUMB_SIZE, THUMB_SIZE);
+    box_.append(&picture);
+
+    let lbl = Label::new(Some(provider));
+    lbl.set_halign(Align::Center);
+    lbl.set_xalign(0.5);
+    lbl.set_wrap(true);
+    lbl.set_max_width_chars(10);
+    lbl.add_css_class("thumbnail-label");
+    box_.append(&lbl);
+
+    btn.set_child(Some(&box_));
+    btn.set_tooltip_text(Some(url));
+}
+
+/// Calcula una huella visual (dHash de 64 bits) para detectar la misma imagen
+/// aunque provenga de proveedores distintos o con otra resolución.
+fn image_fingerprint(pixbuf: &GtkPixbuf) -> Option<u64> {
+    const HASH_COLUMNS: usize = 9;
+    const HASH_ROWS: usize = 8;
+
+    let scaled =
+        pixbuf.scale_simple(HASH_COLUMNS as i32, HASH_ROWS as i32, InterpType::Bilinear)?;
+    let bytes = scaled.read_pixel_bytes();
+    let data = bytes.as_ref();
+    let channels = scaled.n_channels() as usize;
+    let stride = scaled.rowstride() as usize;
+    if channels < 3 {
+        return None;
+    }
+
+    let mut luminance = [[0u32; HASH_COLUMNS]; HASH_ROWS];
+    for (y, row) in luminance.iter_mut().enumerate() {
+        for (x, value) in row.iter_mut().enumerate() {
+            let offset = y * stride + x * channels;
+            if offset + 2 >= data.len() {
+                return None;
+            }
+            let r = u32::from(data[offset]);
+            let g = u32::from(data[offset + 1]);
+            let b = u32::from(data[offset + 2]);
+            *value = (r * 299 + g * 587 + b * 114) / 1000;
+        }
+    }
+
+    let mut hash = 0u64;
+    let mut bit = 0;
+    for row in &luminance {
+        for x in 0..(HASH_COLUMNS - 1) {
+            if row[x] > row[x + 1] {
+                hash |= 1u64 << bit;
+            }
+            bit += 1;
+        }
+    }
+
+    Some(hash)
+}
+
+/// Indica si la huella se parece a otra ya vista (misma imagen con pequeñas
+/// diferencias de compresión o tamaño).
+fn is_duplicate_fingerprint(seen: &mut HashSet<u64>, fingerprint: u64) -> bool {
+    const MAX_DISTANCE: u32 = 3;
+
+    if seen
+        .iter()
+        .any(|existing| (existing ^ fingerprint).count_ones() <= MAX_DISTANCE)
+    {
+        return true;
+    }
+    seen.insert(fingerprint);
+    false
 }
 
 /// Crea un botón para la opción de eliminar (papelera).
@@ -444,4 +500,19 @@ fn placeholder_thumbnail(container: &Box) {
     rect.set_valign(Align::Center);
     rect.add_css_class("thumbnail-placeholder");
     container.append(&rect);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fingerprint_detecta_duplicados_cercanos() {
+        let mut seen = HashSet::new();
+
+        assert!(!is_duplicate_fingerprint(&mut seen, 0b1010));
+        assert!(is_duplicate_fingerprint(&mut seen, 0b1010));
+        assert!(is_duplicate_fingerprint(&mut seen, 0b1011));
+        assert!(!is_duplicate_fingerprint(&mut seen, u64::MAX));
+    }
 }

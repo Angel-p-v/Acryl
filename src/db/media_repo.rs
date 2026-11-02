@@ -611,22 +611,24 @@ impl<'a> MediaRepository<'a> {
         Ok(())
     }
 
-    /// Establece el póster y/o banner de un medio directamente.
-    ///
-    /// A diferencia de `update_metadata`, este método permite establecer
-    /// `poster_path` o `banner_path` a `None` para borrar la imagen actual.
-    /// Los campos que se pasan como `None` se dejan sin cambiar (COALESCE).
-    pub fn set_poster_banner(
-        &mut self,
-        media_id: i64,
-        poster_path: Option<&str>,
-        banner_path: Option<&str>,
-    ) -> RusqliteResult<()> {
+    /// Establece el póster de un medio. Pasar `None` elimina el póster actual
+    /// sin modificar el banner.
+    pub fn set_poster(&mut self, media_id: i64, poster_path: Option<&str>) -> RusqliteResult<()> {
         self.conn.execute(
-            "UPDATE media SET poster_path = ?1, banner_path = ?2,
-             updated_at = datetime('now')
-             WHERE id = ?3",
-            params![poster_path, banner_path, media_id],
+            "UPDATE media SET poster_path = ?1, updated_at = datetime('now')
+             WHERE id = ?2",
+            params![poster_path, media_id],
+        )?;
+        Ok(())
+    }
+
+    /// Establece el banner de un medio. Pasar `None` elimina el banner actual
+    /// sin modificar el póster.
+    pub fn set_banner(&mut self, media_id: i64, banner_path: Option<&str>) -> RusqliteResult<()> {
+        self.conn.execute(
+            "UPDATE media SET banner_path = ?1, updated_at = datetime('now')
+             WHERE id = ?2",
+            params![banner_path, media_id],
         )?;
         Ok(())
     }
@@ -1214,6 +1216,51 @@ mod tests {
         );
         assert_eq!(media.synopsis.as_deref(), Some("Sinopsis nueva"));
         assert!(media.metadata_fetched_at.is_some());
+    }
+
+    #[test]
+    fn set_poster_y_set_banner_no_modifican_el_otro_campo() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let media_id = setup_media_and_file(&mut conn);
+        let mut repo = MediaRepository::new(&mut conn);
+
+        repo.set_poster(media_id, Some("https://example.com/poster.jpg"))
+            .expect("guardar póster");
+        repo.set_banner(media_id, Some("https://example.com/banner.jpg"))
+            .expect("guardar banner");
+
+        let media = repo
+            .find_by_id(media_id)
+            .expect("buscar medio")
+            .expect("el medio existe");
+        assert_eq!(
+            media.poster_path.as_deref(),
+            Some("https://example.com/poster.jpg")
+        );
+        assert_eq!(
+            media.banner_path.as_deref(),
+            Some("https://example.com/banner.jpg")
+        );
+
+        repo.set_poster(media_id, None).expect("borrar póster");
+        let media = repo
+            .find_by_id(media_id)
+            .expect("buscar medio")
+            .expect("el medio existe");
+        assert!(media.poster_path.is_none());
+        assert_eq!(
+            media.banner_path.as_deref(),
+            Some("https://example.com/banner.jpg")
+        );
+
+        repo.set_banner(media_id, None).expect("borrar banner");
+        let media = repo
+            .find_by_id(media_id)
+            .expect("buscar medio")
+            .expect("el medio existe");
+        assert!(media.poster_path.is_none());
+        assert!(media.banner_path.is_none());
     }
 
     #[test]

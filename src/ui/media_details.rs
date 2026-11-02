@@ -47,8 +47,8 @@ struct SeasonOption {
 type PlayEpisodeCallback = Rc<dyn Fn(String)>;
 type SharedPlayEpisodeCallback = Rc<RefCell<Option<PlayEpisodeCallback>>>;
 
-/// Callback compartido para elegir póster y banner.
-type ChooseImagesCallback = Rc<dyn Fn(Option<String>, Option<String>)>;
+/// Callback compartido para abrir el selector de póster y banner.
+type ChooseImagesCallback = Rc<dyn Fn()>;
 
 /// Componente de vista de detalles.
 pub struct MediaDetails {
@@ -107,10 +107,12 @@ impl MediaDetails {
         details_header.append(banner.widget());
 
         let buttons_box = Box::new(Orientation::Horizontal, 10);
-        buttons_box.set_halign(gtk4::Align::Start);
+        buttons_box.set_halign(gtk4::Align::Fill);
         buttons_box.set_valign(gtk4::Align::Center);
+        buttons_box.set_hexpand(true);
         buttons_box.set_margin_top(14);
         buttons_box.set_margin_start(16);
+        buttons_box.set_margin_end(16);
         buttons_box.add_css_class("hero-actions");
 
         let back_button = Button::with_label(&t("back.previous"));
@@ -141,6 +143,7 @@ impl MediaDetails {
 
         let choose_images_button = Button::with_label(&t("button.choose_images"));
         choose_images_button.add_css_class("flat-button");
+        choose_images_button.set_valign(gtk4::Align::Center);
         choose_images_button.set_tooltip_text(Some(&t("tooltip.choose_images")));
         buttons_box.append(&choose_images_button);
 
@@ -495,12 +498,12 @@ impl MediaDetails {
 
     pub fn on_choose_images<F>(&mut self, f: F)
     where
-        F: Fn(Option<String>, Option<String>) + 'static,
+        F: Fn() + 'static,
     {
         let cb = Rc::new(f);
         let cb_clone = cb.clone();
         self.choose_images_button.connect_clicked(move |_| {
-            cb_clone(None, None);
+            cb_clone();
         });
         self.on_choose_images = Some(cb);
     }

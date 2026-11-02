@@ -141,8 +141,33 @@ impl PosterService {
 
         let bytes = response.bytes().await?;
 
+        // Escribir primero en un archivo temporal único y renombrarlo al final
+        // evita que otra lectura vea una imagen a medio escribir (el selector y
+        // la vista de detalles pueden pedir la misma URL en paralelo).
         let cache_path = poster_cache_path(poster_url);
-        fs::write(&cache_path, &*bytes)?;
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
+        let file_name = cache_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("poster");
+        let temp_path = cache_path.with_file_name(format!(
+            "{}.{}.{}.tmp",
+            file_name,
+            std::process::id(),
+            unique
+        ));
+
+        if let Err(error) = fs::write(&temp_path, &*bytes) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(error.into());
+        }
+        if let Err(error) = fs::rename(&temp_path, &cache_path) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(error.into());
+        }
 
         Ok(cache_path)
     }

@@ -281,6 +281,25 @@ impl MediaList {
         self.start_poster_downloads();
     }
 
+    /// Actualiza el póster de un medio ya cargado y fuerza el rebind de las
+    /// tarjetas visibles. Así el cambio se refleja sin recargar la galería ni
+    /// reiniciar la aplicación.
+    pub fn update_media_poster(&self, media_id: i64, poster_path: Option<&str>) {
+        {
+            let mut media = self.media.borrow_mut();
+            let Some(item) = media.iter_mut().find(|item| item.id == media_id) else {
+                return;
+            };
+            item.poster_path = poster_path.map(str::to_string);
+        }
+
+        let total = self.store.n_items();
+        if total > 0 {
+            self.store.items_changed(0, total, total);
+        }
+        self.start_poster_downloads();
+    }
+
     /// Añade medios al final de la galería sin reemplazar los existentes.
     /// Se usa para paginación con scroll infinito.
     pub fn append_media(&self, media: &[Media]) {
