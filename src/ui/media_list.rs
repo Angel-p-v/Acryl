@@ -21,12 +21,13 @@ use std::rc::Rc;
 use std::sync::mpsc;
 
 /// Tamaño del póster en la galería (relación 2:3).
-const CARD_POSTER_WIDTH: i32 = 200;
-const CARD_POSTER_HEIGHT: i32 = 300;
+/// Optimizado para pantallas de portátil y grandes.
+const CARD_POSTER_WIDTH: i32 = 220;
+const CARD_POSTER_HEIGHT: i32 = 330;
 
 /// Ancho y alto de la tarjeta completa (póster + padding + textos).
 const CARD_WIDTH: i32 = CARD_POSTER_WIDTH + 16;
-const CARD_HEIGHT: i32 = 404;
+const CARD_HEIGHT: i32 = 440;
 
 /// Límites de columnas por fila.
 const MIN_COLUMNS: u32 = 1;
