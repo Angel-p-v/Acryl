@@ -21,13 +21,13 @@ use std::rc::Rc;
 use std::sync::mpsc;
 
 /// Tamaño del póster en la galería (relación 2:3).
-/// Optimizado para pantallas de portátil y grandes.
-const CARD_POSTER_WIDTH: i32 = 220;
-const CARD_POSTER_HEIGHT: i32 = 330;
+/// Tamaño base optimizado para pantallas de portátil (1366px+).
+const CARD_POSTER_WIDTH: i32 = 160;
+const CARD_POSTER_HEIGHT: i32 = 240;
 
 /// Ancho y alto de la tarjeta completa (póster + padding + textos).
 const CARD_WIDTH: i32 = CARD_POSTER_WIDTH + 16;
-const CARD_HEIGHT: i32 = 440;
+const CARD_HEIGHT: i32 = 340;
 
 /// Límites de columnas por fila.
 const MIN_COLUMNS: u32 = 1;
@@ -177,6 +177,21 @@ impl MediaList {
             {
                 cb();
             }
+        });
+
+        // Recalcular columnas cuando cambia el ancho del contenedor (responsive en tiempo real).
+        // Se usa timeout_add_local porque connect_notify requiere Send+Sync y los widgets GTK
+        // no lo implementan. Se ejecuta cada 200 ms en el hilo principal.
+        let grid_for_timeout = grid_view.clone();
+        let scrolled_for_timeout = scrolled.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
+            let width = scrolled_for_timeout.width() as f64;
+            let card_total_width = CARD_WIDTH as f64 + 16.0 + 8.0;
+            let columns = (width / card_total_width).floor() as i32;
+            let columns = columns.clamp(MIN_COLUMNS as i32, MAX_COLUMNS as i32);
+            grid_for_timeout.set_min_columns(columns as u32);
+            grid_for_timeout.set_max_columns(columns as u32);
+            true.into()
         });
 
         let (download_tx, download_rx) = mpsc::channel();

@@ -26,9 +26,9 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// Tamaño de la portada de un episodio en la rejilla (relación 16:9).
-/// Optimizado para pantallas de portátil y grandes.
-const EPISODE_POSTER_WIDTH: i32 = 260;
-const EPISODE_POSTER_HEIGHT: i32 = 146;
+/// Optimizado para pantallas de portátil (1366px+).
+const EPISODE_POSTER_WIDTH: i32 = 200;
+const EPISODE_POSTER_HEIGHT: i32 = 112;
 
 /// Identifica la temporada seleccionada dentro de un medio.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
