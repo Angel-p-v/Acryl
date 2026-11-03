@@ -215,6 +215,74 @@ impl<'a> MediaRepository<'a> {
         }
     }
 
+    /// Obtiene la última posición de reproducción guardada para un archivo.
+    /// Devuelve la posición en segundos, o None si no hay registro previo.
+    pub fn get_playback_position(&mut self, file_path: &str) -> RusqliteResult<Option<f64>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT position FROM playback_history
+             WHERE file_path = ?1
+             ORDER BY played_at DESC
+             LIMIT 1",
+        )?;
+        let row = stmt.query_row(params![file_path], |row| row.get::<_, f64>(0));
+        match row {
+            Ok(pos) => Ok(Some(pos)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Obtiene el tipo de medio (series, anime, movie) por su ID.
+    pub fn get_media_type(&mut self, media_id: i64) -> RusqliteResult<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT r#type FROM media WHERE id = ?1")?;
+        let row = stmt.query_row(params![media_id], |row| row.get::<_, String>(0));
+        match row {
+            Ok(t) => Ok(Some(t)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Actualiza la posición y duración del último registro de reproducción
+    /// de un archivo. Se llama cuando el usuario termina o detiene la
+    /// reproducción para conservar el progreso.
+    pub fn update_playback_position(
+        &mut self,
+        media_id: i64,
+        file_path: &str,
+        position: f64,
+        duration: f64,
+    ) -> RusqliteResult<()> {
+        self.conn.execute(
+            "UPDATE playback_history
+             SET position = ?2, duration = ?3
+             WHERE file_path = ?1
+             AND id = (
+                 SELECT MAX(id) FROM playback_history WHERE file_path = ?1
+             )",
+            params![file_path, position, duration],
+        )?;
+        // Si no se actualizó ninguna fila (registro inexistente), insertar uno nuevo.
+        if self.conn.changes() == 0 {
+            self.conn.execute(
+                "INSERT INTO playback_history (media_id, file_path, position, duration)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![media_id, file_path, position, duration],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Marca un archivo como visto/no visto.
+    pub fn set_file_watched(&mut self, file_path: &str, watched: bool) -> RusqliteResult<usize> {
+        self.conn.execute(
+            "UPDATE media_files SET is_watched = ?2 WHERE file_path = ?1",
+            params![file_path, i64::from(watched)],
+        )
+    }
+
     /// Califica un medio (1-5 estrellas).
     pub fn set_rating(&mut self, media_id: i64, rating: i32) -> RusqliteResult<()> {
         self.conn.execute(

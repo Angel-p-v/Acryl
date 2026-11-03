@@ -1889,7 +1889,12 @@ impl MainWindow {
             media_id
         };
 
-        crate::core::player::play_external(&self.db_path, media_id, file_path)
+        match media_id {
+            Some(media_id) => {
+                crate::core::player::play_with_resume(&self.db_path, media_id, file_path)
+            }
+            None => crate::core::player::play_external(&self.db_path, None, file_path),
+        }
     }
 
     /// Sincroniza metadatos y pósters en segundo plano y refresca la UI al terminar.
