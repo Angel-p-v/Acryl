@@ -22,6 +22,8 @@ pub struct MediaFile {
     /// Momento en que se intentó obtener el thumbnail del episodio. Evita
     /// repetir peticiones cuando la fuente no ofrece imagen.
     pub episode_image_checked_at: Option<String>,
+    /// Indica si el episodio está marcado como visto por el usuario.
+    pub is_watched: bool,
 }
 
 impl MediaFile {
@@ -86,8 +88,8 @@ impl<'a> FileRepository<'a> {
         let tx = self.conn.transaction()?;
         for file in files {
             tx.execute(
-                "INSERT INTO media_files (media_id, season, episode, title, file_path, size_bytes, mtime_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "INSERT INTO media_files (media_id, season, episode, title, file_path, size_bytes, mtime_ms, is_watched)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)
                  ON CONFLICT(file_path) DO UPDATE SET
                    media_id = excluded.media_id,
                    season = excluded.season,
@@ -97,6 +99,7 @@ impl<'a> FileRepository<'a> {
                    size_bytes = excluded.size_bytes,
                    mtime_ms = excluded.mtime_ms,
                    indexed_at = datetime('now'),
+                   is_watched = media_files.is_watched,
                    episode_image_path = CASE
                      WHEN media_files.media_id = excluded.media_id
                       AND media_files.season IS excluded.season
@@ -130,7 +133,7 @@ impl<'a> FileRepository<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT id, media_id, season, episode, title, file_path, size_bytes, mtime_ms,
                     indexed_at, audio_stream_index, subtitle_stream_index, subtitles_disabled,
-                    streams_indexed_at, episode_image_path, episode_image_checked_at
+                    streams_indexed_at, episode_image_path, episode_image_checked_at, is_watched
              FROM media_files WHERE media_id = ?1 ORDER BY season, episode, file_path",
         )?;
         let rows: Vec<MediaFile> = stmt
@@ -222,7 +225,7 @@ impl<'a> FileRepository<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT id, media_id, season, episode, title, file_path, size_bytes, mtime_ms,
                     indexed_at, audio_stream_index, subtitle_stream_index, subtitles_disabled,
-                    streams_indexed_at, episode_image_path, episode_image_checked_at
+                    streams_indexed_at, episode_image_path, episode_image_checked_at, is_watched
              FROM media_files
              WHERE media_id = ?1 OR media_id IN (
                  SELECT id FROM media WHERE parent_id = ?1
@@ -260,6 +263,36 @@ impl<'a> FileRepository<'a> {
             params![file_path],
         )
     }
+
+    /// Marca un archivo individual como visto/no visto.
+    pub fn set_file_watched(&mut self, file_path: &str, watched: bool) -> RusqliteResult<usize> {
+        self.conn.execute(
+            "UPDATE media_files SET is_watched = ?2 WHERE file_path = ?1",
+            params![file_path, i64::from(watched)],
+        )
+    }
+
+    /// Marca todos los archivos de una temporada como vistos/no vistos.
+    ///
+    /// Para medios con temporadas hijas (`parent_id`), filtra por el `media_id`
+    /// de la temporada hija. Para medios raíz con archivos directos, filtra por
+    /// `media_id = root_media_id` y `season = season`.
+    pub fn set_season_watched(
+        &mut self,
+        root_media_id: i64,
+        season: i32,
+        watched: bool,
+    ) -> RusqliteResult<usize> {
+        self.conn.execute(
+            "UPDATE media_files
+             SET is_watched = ?3
+             WHERE (media_id = ?1 OR media_id IN (
+                 SELECT id FROM media WHERE parent_id = ?1
+             ))
+             AND season = ?2",
+            params![root_media_id, season, i64::from(watched)],
+        )
+    }
 }
 
 fn map_file_row(row: &rusqlite::Row<'_>) -> RusqliteResult<MediaFile> {
@@ -279,6 +312,7 @@ fn map_file_row(row: &rusqlite::Row<'_>) -> RusqliteResult<MediaFile> {
         streams_indexed_at: row.get(12)?,
         episode_image_path: row.get(13)?,
         episode_image_checked_at: row.get(14)?,
+        is_watched: row.get::<_, i64>(15)? != 0,
     })
 }
 
@@ -395,6 +429,7 @@ mod tests {
             streams_indexed_at: None,
             episode_image_path: None,
             episode_image_checked_at: None,
+            is_watched: false,
         };
         assert!(file.is_automatic_tracks());
 

@@ -1992,6 +1992,7 @@ mod tests {
             streams_indexed_at: None,
             episode_image_path: None,
             episode_image_checked_at: None,
+            is_watched: false,
         }
     }
 

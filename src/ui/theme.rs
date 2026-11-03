@@ -296,6 +296,35 @@ pub fn install_theme_css() {
             colors::ACCENT_HOVER,
         ));
 
+        /* Botón de marcar episodio como visto/no visto */
+        css.push_str(&format!(
+            ".episode-watched-btn {{ background-color: transparent; color: {}; border: 1px solid {}; border-radius: {}; font-weight: 600; min-width: 72px; min-height: 30px; }}\n",
+            colors::TEXT_SECONDARY, colors::BORDER, radius::SMALL,
+        ));
+        css.push_str(&format!(
+            ".episode-watched-btn:hover {{ color: {}; border-color: {}; }}\n",
+            colors::TEXT_PRIMARY, colors::BORDER_HOVER,
+        ));
+        css.push_str(&format!(
+            ".episode-watched-btn.watched {{ color: {}; border-color: {}; background-color: {}; }}\n",
+            colors::BTN_PRIMARY_TEXT, colors::ACCENT, colors::ACCENT,
+        ));
+
+        /* Tarjeta de episodio marcada como visto (opacidad reducida) */
+        css.push_str(".episode-card.episode-watched { opacity: 0.55; }\n");
+        css.push_str(".episode-card.episode-watched:hover { opacity: 0.75; }\n");
+
+        /* Estado visto/no visto en tarjeta de episodio */
+        css.push_str(".episode-status { font-size: 0.75em; font-weight: 600; margin-top: 4px; }\n");
+        css.push_str(&format!(
+            ".episode-status-watched {{ color: {}; }}\n",
+            colors::ACCENT,
+        ));
+        css.push_str(&format!(
+            ".episode-status-unwatched {{ color: {}; }}\n",
+            colors::TEXT_MUTED,
+        ));
+
         /* Tarjeta de episodio en rejilla */
         css.push_str(&format!(
             ".episode-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; transition: all {}; }}\n",
@@ -359,6 +388,7 @@ pub fn install_theme_css() {
 
         /* Dropdown de temporada */
         css.push_str(".season-dropdown { min-width: 180px; }\n");
+        css.push_str(".season-watched-dropdown { min-height: 30px; min-width: 150px; }\n");
 
         /* Esqueleto de carga (skeleton) */
         css.push_str(&format!(
