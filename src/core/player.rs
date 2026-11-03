@@ -4,6 +4,7 @@
 //! proceso externo mediante `std::process::Command`. El control (play, pausa,
 //! stop, seek, volumen) se envía a `mpv` a través de su socket IPC.
 
+use crate::config::DefaultTracks;
 use crate::db::file_repo::{FileRepository, TrackPreference, TrackSelection};
 use crate::db::{MediaRepository, close_db, open_db};
 use serde_json::Value;
@@ -49,6 +50,33 @@ pub enum PlayerWindowMode {
 pub struct ResolvedTracks {
     pub selection: TrackSelection,
     pub external_subtitles: Vec<String>,
+}
+
+/// Resultado de resolver las pistas para reproducir un archivo.
+///
+/// `used_defaults` indica si se aplicaron las pistas predeterminadas del
+/// usuario en vez de la preferencia guardada por archivo.
+/// `defaults_applicable` indica si las pistas predeterminadas se pudieron
+/// resolver contra los streams reales del video (false cuando el video no
+/// las tiene y se necesita un diálogo de fallback).
+#[derive(Debug, Clone)]
+pub struct TrackResolution {
+    pub tracks: ResolvedTracks,
+    pub used_defaults: bool,
+    pub defaults_applicable: bool,
+}
+
+/// Resultado de intentar iniciar una reproducción.
+///
+/// `NeedsDefaultTrackFallback` indica que las pistas predeterminadas no son
+/// aplicables a este video y la UI debe mostrar el diálogo de fallback
+/// antes de lanzar mpv.
+pub enum PlaybackStart {
+    Started(PlaybackSession),
+    NeedsDefaultTrackFallback {
+        file_path: String,
+        default_tracks: DefaultTracks,
+    },
 }
 
 /// Construye los argumentos de línea de comandos de mpv (puro, testeable).
@@ -244,11 +272,20 @@ pub fn launch_mpv_with_tracks(
 }
 
 /// Lee la preferencia guardada y la resuelve contra los streams actuales del
-/// archivo. Un fallo de la base de datos no impide la reproducción: se usa el
-/// comportamiento automático de mpv.
-fn saved_tracks(db_path: &str, file_path: &str) -> ResolvedTracks {
+/// archivo, aplicando primero las pistas predeterminadas del usuario si hay
+/// alguna configurada. Un fallo de la base de datos no impide la
+/// reproducción: se usa el comportamiento automático de mpv.
+fn saved_tracks(
+    db_path: &str,
+    file_path: &str,
+    default_tracks: Option<&DefaultTracks>,
+) -> TrackResolution {
     let Ok(mut conn) = open_db(db_path) else {
-        return ResolvedTracks::default();
+        return TrackResolution {
+            tracks: ResolvedTracks::default(),
+            used_defaults: false,
+            defaults_applicable: true,
+        };
     };
     let preference = FileRepository::new(&mut conn)
         .track_preference(file_path)
@@ -276,7 +313,73 @@ fn saved_tracks(db_path: &str, file_path: &str) -> ResolvedTracks {
         }
     }
 
-    resolve_track_preference(&preference, &streams)
+    // Las pistas predeterminadas del usuario tienen prioridad sobre la
+    // preferencia guardada por archivo. Si están configuradas, se intentan
+    // resolver primero.
+    if let Some(defaults) = default_tracks {
+        let audio_key = defaults.audio.as_deref();
+        let subtitle_key = defaults.subtitle.as_deref();
+
+        let audio_streams: Vec<_> = streams
+            .iter()
+            .filter(|stream| stream.stream_type == "audio")
+            .collect();
+        let subtitle_streams: Vec<_> = streams
+            .iter()
+            .filter(|stream| stream.stream_type == "subtitle")
+            .collect();
+
+        let resolved_audio = audio_key.and_then(|key| {
+            audio_streams
+                .iter()
+                .find(|stream| stream.track_key() == key)
+                .map(|stream| stream.stream_index)
+        });
+        let resolved_subtitle = subtitle_key.and_then(|key| {
+            subtitle_streams
+                .iter()
+                .find(|stream| stream.track_key() == key)
+                .map(|stream| stream.stream_index)
+        });
+
+        // Si se configuraron predeterminadas pero alguna no existe en el
+        // video, no son aplicables y se necesita un diálogo de fallback.
+        let defaults_applicable = matches!(
+            (audio_key, subtitle_key, resolved_audio, resolved_subtitle),
+            (Some(_), Some(_), Some(_), Some(_))
+                | (Some(_), None, Some(_), _)
+                | (None, Some(_), _, Some(_))
+        );
+
+        let selection = TrackSelection {
+            audio_stream_index: resolved_audio,
+            subtitle_stream_index: resolved_subtitle,
+            subtitles_disabled: resolved_subtitle.is_none() && subtitle_key.is_some(),
+        };
+
+        let mut external_subtitles: Vec<String> = subtitle_streams
+            .iter()
+            .filter_map(|stream| stream.external_path.clone())
+            .collect();
+        external_subtitles.sort();
+        external_subtitles.dedup();
+
+        return TrackResolution {
+            tracks: ResolvedTracks {
+                selection,
+                external_subtitles,
+            },
+            used_defaults: true,
+            defaults_applicable,
+        };
+    }
+
+    let resolved = resolve_track_preference(&preference, &streams);
+    TrackResolution {
+        tracks: resolved,
+        used_defaults: false,
+        defaults_applicable: true,
+    }
 }
 
 /// Resuelve una preferencia guardada contra los streams actuales.
@@ -372,22 +475,42 @@ pub fn play_external(
     db_path: &str,
     media_id: Option<i64>,
     file_path: &str,
-) -> Result<PlaybackSession, Box<dyn std::error::Error>> {
-    play_external_with_mode(db_path, media_id, file_path, PlayerWindowMode::Fullscreen)
+) -> Result<PlaybackStart, Box<dyn std::error::Error>> {
+    play_external_with_mode(
+        db_path,
+        media_id,
+        file_path,
+        PlayerWindowMode::Fullscreen,
+        None,
+    )
 }
 
 /// Variante de `play_external` que respeta el estado de ventana de Acryl.
+///
+/// `default_tracks` son las pistas predeterminadas del usuario. Tienen
+/// prioridad sobre cualquier preferencia guardada por archivo. Si no son
+/// aplicables a este video, devuelve `PlaybackStart::NeedsDefaultTrackFallback`.
 pub fn play_external_with_mode(
     db_path: &str,
     media_id: Option<i64>,
     file_path: &str,
     window_mode: PlayerWindowMode,
-) -> Result<PlaybackSession, Box<dyn std::error::Error>> {
+    default_tracks: Option<&DefaultTracks>,
+) -> Result<PlaybackStart, Box<dyn std::error::Error>> {
     validate_media_path(file_path)?;
-    let tracks = saved_tracks(db_path, file_path);
+    let resolution = saved_tracks(db_path, file_path, default_tracks);
+
+    // Si se usaron predeterminadas pero no son aplicables, pedir fallback a la UI.
+    if resolution.used_defaults && !resolution.defaults_applicable {
+        return Ok(PlaybackStart::NeedsDefaultTrackFallback {
+            file_path: file_path.to_string(),
+            default_tracks: default_tracks.cloned().unwrap_or_default(),
+        });
+    }
+
     let mut child = spawn_mpv(&build_mpv_launch_args_for_playback(
         file_path,
-        &tracks,
+        &resolution.tracks,
         window_mode,
     ))?;
 
@@ -403,9 +526,9 @@ pub fn play_external_with_mode(
         eprintln!("No se pudo registrar la reproducción: {}", error);
     }
 
-    Ok(PlaybackSession {
+    Ok(PlaybackStart::Started(PlaybackSession {
         finished: finished_receiver,
-    })
+    }))
 }
 
 /// Lanza mpv con soporte de reanudación desde una posición guardada y
@@ -425,18 +548,29 @@ pub fn play_with_resume(
     db_path: &str,
     media_id: i64,
     file_path: &str,
-) -> Result<PlaybackSession, Box<dyn std::error::Error>> {
-    play_with_resume_with_mode(db_path, media_id, file_path, PlayerWindowMode::Fullscreen)
+) -> Result<PlaybackStart, Box<dyn std::error::Error>> {
+    play_with_resume_with_mode(
+        db_path,
+        media_id,
+        file_path,
+        PlayerWindowMode::Fullscreen,
+        None,
+    )
 }
 
 /// Variante de `play_with_resume` que usa el modo de ventana solicitado por
 /// la UI (normal, maximizada o pantalla completa real).
+///
+/// `default_tracks` son las pistas predeterminadas del usuario. Tienen
+/// prioridad sobre cualquier preferencia guardada por archivo. Si no son
+/// aplicables a este video, devuelve `PlaybackStart::NeedsDefaultTrackFallback`.
 pub fn play_with_resume_with_mode(
     db_path: &str,
     media_id: i64,
     file_path: &str,
     window_mode: PlayerWindowMode,
-) -> Result<PlaybackSession, Box<dyn std::error::Error>> {
+    default_tracks: Option<&DefaultTracks>,
+) -> Result<PlaybackStart, Box<dyn std::error::Error>> {
     validate_media_path(file_path)?;
 
     // 1. Consultar tipo de medio y última posición guardada (rápido, en hilo principal).
@@ -449,8 +583,16 @@ pub fn play_with_resume_with_mode(
         (t, pos)
     };
 
-    // 2. Preferencia de pistas guardada, resuelta contra los streams actuales.
-    let tracks = saved_tracks(db_path, file_path);
+    // 2. Preferencia de pistas (predeterminadas o por archivo) resuelta contra los streams actuales.
+    let resolution = saved_tracks(db_path, file_path, default_tracks);
+
+    // Si se usaron predeterminadas pero no son aplicables, pedir fallback a la UI.
+    if resolution.used_defaults && !resolution.defaults_applicable {
+        return Ok(PlaybackStart::NeedsDefaultTrackFallback {
+            file_path: file_path.to_string(),
+            default_tracks: default_tracks.cloned().unwrap_or_default(),
+        });
+    }
 
     // 3. Crear socket IPC único para mpv.
     let socket_path = format!(
@@ -461,7 +603,8 @@ pub fn play_with_resume_with_mode(
     // 4. Construir argumentos de mpv con IPC, start-position, pistas y modo
     //    de ventana. `--start` reanuda sin dejar que mpv reabra la ventana
     //    con un tamaño distinto al solicitado.
-    let mut args = build_mpv_args_for_playback(file_path, &socket_path, &tracks, window_mode);
+    let mut args =
+        build_mpv_args_for_playback(file_path, &socket_path, &resolution.tracks, window_mode);
     // Insertar `--start` antes de la ruta del archivo.
     let insert_at = args.len().saturating_sub(1);
     args.insert(insert_at, format!("--start={}", start_position));
@@ -595,9 +738,9 @@ pub fn play_with_resume_with_mode(
         let _ = finished_sender.send(());
     });
 
-    Ok(PlaybackSession {
+    Ok(PlaybackStart::Started(PlaybackSession {
         finished: finished_receiver,
-    })
+    }))
 }
 
 /// Ejecuta un comando JSON contra el socket IPC de mpv y devuelve la primera
@@ -1262,6 +1405,261 @@ mod tests {
         assert_eq!(
             resolved.external_subtitles,
             vec!["/tmp/video.es.srt".to_string()]
+        );
+    }
+
+    #[test]
+    fn pistas_predeterminadas_se_aplican_cuando_existen_en_el_video() {
+        use crate::config::DefaultTracks;
+        use crate::db::file_repo::{
+            FileRepository, MediaFileInput,
+        };
+        use crate::db::media_repo::{MediaInput, MediaRepository};
+        use rusqlite::params;
+        use tempfile::TempDir;
+
+        let video_path = "/tmp/video_test_defaults.mkv";
+        let temp_dir = TempDir::new().expect("crear dir temporal");
+        let db_path = temp_dir.path().join("test.db");
+        let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+        let media_id = {
+            let mut repo = MediaRepository::new(&mut conn);
+            repo.upsert(&MediaInput {
+                r#type: "series".to_string(),
+                title: "Test".to_string(),
+                sort_title: "test".to_string(),
+                year: None,
+                folder_path: "/tmp".to_string(),
+                parent_id: None,
+            })
+            .expect("upsert")
+            .id
+        };
+
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            repo.upsert_many(&[MediaFileInput {
+                media_id,
+                season: Some(1),
+                episode: Some(1),
+                title: Some("E01".to_string()),
+                file_path: video_path.to_string(),
+                size_bytes: None,
+                mtime_ms: None,
+            }])
+            .expect("insertar media_file");
+        }
+
+        // Streams: audio japonés (idx 0), subtítulo español Spanish[ESP] (idx 6)
+        let streams_data = [
+            ("audio", 0, "jpn", "Japanese", "aac"),
+            ("subtitle", 6, "spa", "Spanish[ESP]", "ass"),
+        ];
+        for (stype, idx, lang, title, codec) in streams_data {
+            conn.execute(
+                "INSERT INTO media_streams
+                 (media_id, file_path, stream_type, stream_index, language, codec, title, external_path)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![media_id, video_path, stype, idx, lang, codec, title, Option::<String>::None],
+            )
+            .expect("insertar stream");
+        }
+
+        let defaults = DefaultTracks {
+            audio: Some("embedded:audio:jpn:aac:japanese".to_string()),
+            subtitle: Some("embedded:subtitle:spa:ass:spanish[esp]".to_string()),
+        };
+
+        let resolution = saved_tracks(db_path.to_str().unwrap(), video_path, Some(&defaults));
+        assert!(resolution.used_defaults, "debe usar predeterminadas");
+        assert!(
+            resolution.defaults_applicable,
+            "las predeterminadas deben ser aplicables"
+        );
+        assert_eq!(
+            resolution.tracks.selection.audio_stream_index,
+            Some(0),
+            "audio resuelto debe ser el japonés"
+        );
+        assert_eq!(
+            resolution.tracks.selection.subtitle_stream_index,
+            Some(6),
+            "subtítulo resuelto debe ser el español"
+        );
+        assert!(!resolution.tracks.selection.subtitles_disabled);
+    }
+
+    #[test]
+    fn pistas_predeterminadas_no_aplicables_desencadenan_fallback() {
+        use crate::config::DefaultTracks;
+        use crate::db::file_repo::{FileRepository, MediaFileInput};
+        use crate::db::media_repo::{MediaInput, MediaRepository};
+        use rusqlite::params;
+        use tempfile::TempDir;
+
+        let video_path = "/tmp/video_test_no_defaults.mkv";
+        let temp_dir = TempDir::new().expect("crear dir temporal");
+        let db_path = temp_dir.path().join("test.db");
+        let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+        let media_id = {
+            let mut repo = MediaRepository::new(&mut conn);
+            repo.upsert(&MediaInput {
+                r#type: "series".to_string(),
+                title: "Test".to_string(),
+                sort_title: "test".to_string(),
+                year: None,
+                folder_path: "/tmp".to_string(),
+                parent_id: None,
+            })
+            .expect("upsert")
+            .id
+        };
+
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            repo.upsert_many(&[MediaFileInput {
+                media_id,
+                season: Some(1),
+                episode: Some(1),
+                title: Some("E01".to_string()),
+                file_path: video_path.to_string(),
+                size_bytes: None,
+                mtime_ms: None,
+            }])
+            .expect("insertar media_file");
+        }
+
+        // Solo hay subtítulo en inglés, no en español
+        conn.execute(
+            "INSERT INTO media_streams
+             (media_id, file_path, stream_type, stream_index, language, codec, title, external_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                media_id,
+                video_path,
+                "subtitle",
+                0i32,
+                "eng",
+                "ass",
+                "English",
+                Option::<String>::None
+            ],
+        )
+        .expect("insertar stream");
+
+        let defaults = DefaultTracks {
+            audio: None,
+            subtitle: Some("embedded:subtitle:spa:ass:spanish[esp]".to_string()),
+        };
+
+        let resolution = saved_tracks(db_path.to_str().unwrap(), video_path, Some(&defaults));
+        assert!(
+            resolution.used_defaults,
+            "debe intentar usar predeterminadas"
+        );
+        assert!(
+            !resolution.defaults_applicable,
+            "las predeterminadas no deben ser aplicables"
+        );
+        assert_eq!(
+            resolution.tracks.selection.subtitle_stream_index, None,
+            "no hay subtítulo español disponible"
+        );
+        assert!(
+            resolution.tracks.selection.subtitles_disabled,
+            "los subtítulos deben desactivarse"
+        );
+    }
+
+    #[test]
+    fn sin_predeterminadas_usa_preferencia_por_archivo() {
+        use crate::db::file_repo::{FileRepository, MediaFileInput};
+        use crate::db::media_repo::{MediaInput, MediaRepository};
+        use rusqlite::params;
+        use tempfile::TempDir;
+
+        let video_path = "/tmp/video_test_no_defaults_config.mkv";
+        let temp_dir = TempDir::new().expect("crear dir temporal");
+        let db_path = temp_dir.path().join("test.db");
+        let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+        let media_id = {
+            let mut repo = MediaRepository::new(&mut conn);
+            repo.upsert(&MediaInput {
+                r#type: "series".to_string(),
+                title: "Test".to_string(),
+                sort_title: "test".to_string(),
+                year: None,
+                folder_path: "/tmp".to_string(),
+                parent_id: None,
+            })
+            .expect("upsert")
+            .id
+        };
+
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            repo.upsert_many(&[MediaFileInput {
+                media_id,
+                season: Some(1),
+                episode: Some(1),
+                title: Some("E01".to_string()),
+                file_path: video_path.to_string(),
+                size_bytes: None,
+                mtime_ms: None,
+            }])
+            .expect("insertar media_file");
+        }
+
+        // Guardar preferencia por archivo: subtítulo índice 0
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            repo.set_track_preference(
+                video_path,
+                &TrackPreference {
+                    selection: TrackSelection {
+                        audio_stream_index: None,
+                        subtitle_stream_index: Some(0),
+                        subtitles_disabled: false,
+                    },
+                    audio_track_key: None,
+                    subtitle_track_key: Some("embedded:subtitle:eng:ass:english".to_string()),
+                    subtitle_external_path: None,
+                },
+            )
+            .expect("guardar preferencia");
+        }
+
+        conn.execute(
+            "INSERT INTO media_streams
+             (media_id, file_path, stream_type, stream_index, language, codec, title, external_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                media_id,
+                video_path,
+                "subtitle",
+                0i32,
+                "eng",
+                "ass",
+                "English",
+                Option::<String>::None
+            ],
+        )
+        .expect("insertar stream");
+
+        // Sin predeterminadas configuradas (None)
+        let resolution = saved_tracks(db_path.to_str().unwrap(), video_path, None);
+        assert!(!resolution.used_defaults, "no debe usar predeterminadas");
+        assert!(
+            resolution.defaults_applicable,
+            "debe ser aplicable (no hay predeterminadas que validar)"
+        );
+        assert_eq!(
+            resolution.tracks.selection.subtitle_stream_index,
+            Some(0),
+            "debe usar la preferencia guardada por archivo"
         );
     }
 }
