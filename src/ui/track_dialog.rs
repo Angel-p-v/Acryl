@@ -458,15 +458,15 @@ fn audio_position(
     preference: &TrackPreference,
     default_tracks: Option<&DefaultTracks>,
 ) -> u32 {
+    // Si el usuario eligió "Usar predeterminadas de Ajustes", devolver directamente
+    // la posición 1 (el desplegable tiene: 0=Automático, 1=Predeterminadas, 2+=pistas).
+    if preference.audio_track_key.as_deref() == Some("default:audio")
+        && default_tracks.map(|d| d.audio.is_some()).unwrap_or(false)
+    {
+        return 1;
+    }
+
     let position = match preference.audio_track_key.as_deref() {
-        Some("default:audio") => {
-            // El usuario eligió "Usar predeterminadas de Ajustes".
-            if default_tracks.map(|d| d.audio.is_some()).unwrap_or(false) {
-                Some(1) // posición 1 = "Usar predeterminadas de Ajustes"
-            } else {
-                None
-            }
-        }
         Some(key) => streams.iter().position(|stream| stream.track_key() == key),
         None => preference.selection.audio_stream_index.and_then(|index| {
             streams
@@ -474,7 +474,7 @@ fn audio_position(
                 .position(|stream| stream.stream_index == index)
         }),
     };
-    // Desplazamiento: 0=Automático, 1=Predeterminadas, 2+=pistas del vec
+    // 0 = Automático, 2+ = pistas del vec (índice del stream + 2)
     position.map(|position| position as u32 + 2).unwrap_or(0)
 }
 
@@ -487,18 +487,17 @@ fn subtitle_position(
     if preference.selection.subtitles_disabled {
         return 1;
     }
+    // Si el usuario eligió "Usar predeterminadas de Ajustes", devolver directamente
+    // la posición 2 (el desplegable tiene: 0=Automático, 1=Ninguno, 2=Predeterminadas, 3+=pistas).
+    if preference.subtitle_track_key.as_deref() == Some("default:subtitle")
+        && default_tracks
+            .map(|d| d.subtitle.is_some())
+            .unwrap_or(false)
+    {
+        return 2;
+    }
+
     let position = match preference.subtitle_track_key.as_deref() {
-        Some("default:subtitle") => {
-            // El usuario eligió "Usar predeterminadas de Ajustes".
-            if default_tracks
-                .map(|d| d.subtitle.is_some())
-                .unwrap_or(false)
-            {
-                Some(2) // posición 2 = "Usar predeterminadas de Ajustes"
-            } else {
-                None
-            }
-        }
         Some(key) => streams.iter().position(|stream| stream.track_key() == key),
         None => preference
             .selection
@@ -509,7 +508,7 @@ fn subtitle_position(
                     .position(|stream| stream.stream_index == index)
             }),
     };
-    // Desplazamiento: 0=Automático, 1=Ninguno, 2=Predeterminadas, 3+=pistas del vec
+    // 0 = Automático, 1 = Ninguno, 3+ = pistas del vec (índice del stream + 3)
     position.map(|position| position as u32 + 3).unwrap_or(0)
 }
 
