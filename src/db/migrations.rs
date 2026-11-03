@@ -220,6 +220,56 @@ const MEDIA_FILE_WATCHED_SQL: &str = r#"
 ALTER TABLE media_files ADD COLUMN is_watched INTEGER NOT NULL DEFAULT 0 CHECK (is_watched IN (0, 1));
 "#;
 
+/// Identidad estable de las pistas elegidas por archivo.
+///
+/// `audio_stream_index` y `subtitle_stream_index` identifican la pista dentro
+/// del archivo, pero un índice de mpv/ffprobe no es una identidad duradera.
+/// Estas claves describen la pista (idioma, título, códec o ruta externa) para
+/// poder volver a encontrarla si cambia el orden de los streams. Se guardan
+/// junto al índice para conservar compatibilidad con bases de datos antiguas.
+const MEDIA_FILE_TRACK_IDENTITY_SQL: &str = r#"
+ALTER TABLE media_files ADD COLUMN audio_track_key TEXT;
+ALTER TABLE media_files ADD COLUMN subtitle_track_key TEXT;
+ALTER TABLE media_files ADD COLUMN subtitle_external_path TEXT;
+"#;
+
+/// Ruta de un subtítulo externo asociado a un archivo de vídeo.
+///
+/// Los subtítulos sidecar (`.srt`, `.ass`, `.vtt`, ...) no aparecen en
+/// `ffprobe` cuando se analiza solo el vídeo. Se indexan como streams
+/// adicionales y necesitan conservar su ruta para que mpv los cargue con
+/// `--sub-file`.
+const MEDIA_STREAM_EXTERNAL_PATH_SQL: &str = r#"
+ALTER TABLE media_streams ADD COLUMN external_path TEXT;
+"#;
+
+/// Historial de reproducción con una única entrada activa por archivo.
+///
+/// `completed_at = NULL` significa que la reproducción sigue pendiente. El
+/// índice único parcial garantiza en SQLite que dos guardados concurrentes no
+/// puedan crear dos entradas activas del mismo archivo. Las filas duplicadas
+/// antiguas no se eliminan: se archivan marcándolas como completadas, de modo
+/// que se conserva el historial y solo la más reciente queda activa.
+const PLAYBACK_HISTORY_ACTIVE_ENTRY_SQL: &str = r#"
+ALTER TABLE playback_history ADD COLUMN completed_at TEXT;
+
+UPDATE playback_history
+SET completed_at = played_at
+WHERE file_path IS NOT NULL
+  AND id NOT IN (
+      SELECT MAX(id) FROM playback_history
+      WHERE file_path IS NOT NULL
+      GROUP BY file_path
+  );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_playback_history_active_file
+  ON playback_history(file_path)
+  WHERE completed_at IS NULL AND file_path IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_playback_history_file
+  ON playback_history(file_path, completed_at);
+"#;
+
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -280,5 +330,20 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 12,
         name: "media-file-watched",
         sql: MEDIA_FILE_WATCHED_SQL,
+    },
+    Migration {
+        version: 13,
+        name: "media-file-track-identity",
+        sql: MEDIA_FILE_TRACK_IDENTITY_SQL,
+    },
+    Migration {
+        version: 14,
+        name: "media-stream-external-path",
+        sql: MEDIA_STREAM_EXTERNAL_PATH_SQL,
+    },
+    Migration {
+        version: 15,
+        name: "playback-history-active-entry",
+        sql: PLAYBACK_HISTORY_ACTIVE_ENTRY_SQL,
     },
 ];

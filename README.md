@@ -43,7 +43,7 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 | 🔍 **Búsqueda rápida** | Busca por título con filtrado por tipo y paginación |
 | 🏷️ **Categorías** | Filtra la biblioteca por géneros/etiquetas obtenidos de los metadatos (TVmaze) |
 | 🖼️ **Pósteres, banners y metadatos** | Descarga pósteres, sinopsis y puntuación (vote_average) desde TVmaze; el selector combina TVmaze, AniList, Kitsu, Jikan, Shikimori, iTunes y Cinemeta (todos gratuitos y sin clave) y elimina imágenes repetidas. Imágenes individuales por episodio. |
-| ▶️ **Reproducción con mpv** | Abre el episodio seleccionado en `mpv` en pantalla completa (ventana independiente) |
+| ▶️ **Reproducción con mpv** | Abre el episodio seleccionado en `mpv` en una ventana independiente y respeta el estado de Acryl: normal, maximizado o pantalla completa |
 | ⚙️ **Configuración YAML** | Ajustes persistentes en archivo YAML (idioma, ruta de base de datos, reproductor predeterminado) |
 | 🌐 **Idiomas** | Interfaz disponible en español e inglés |
 | 📦 **Instalación** | Clona el repositorio y ejecuta `./scripts/install.sh` |
@@ -230,7 +230,7 @@ Una vez iniciada la aplicación:
 3. **Ver detalles**: Haz clic en cualquier medio para ver su banner, sinopsis, año y archivos indexados.
 4. **Volver atrás**: En la vista de detalles, el botón «← Volver» regresa a la serie desde una temporada o episodio, y a la lista principal desde una serie, película o anime.
 5. **Filtrar por categorías**: Desde la barra superior, pulsa «Categorías» para ver los géneros disponibles y filtrar la biblioteca. Usa «Ver todo» para quitar el filtro.
-6. **Reproducir**: Pulsa "▶ Reproducir" en la vista de detalles o en un episodio concreto; el archivo se abrirá en `mpv` en pantalla completa.
+6. **Reproducir**: Pulsa "▶ Reproducir" en la vista de detalles o en un episodio concreto; el archivo se abrirá en `mpv` con el mismo estado de ventana que Acryl (normal, maximizado o pantalla completa).
 7. **Puntuación de metadatos**: En la vista de detalles se muestra la puntuación obtenida de TVmaze (vote_average, 0-10) cuando está disponible.
 8. **Actualizar metadatos**: En Ajustes, pulsa "Actualizar todos los metadatos" para volver a consultar TVmaze y sobrescribir título, año, sinopsis, puntuación, póster y banner de todos los medios indexados. La operación se ejecuta en segundo plano y pide confirmación.
 9. **Cambiar idioma**: Usa el selector de idioma en Ajustes; el cambio se aplica al instante sin necesidad de reiniciar la aplicación.
@@ -240,6 +240,23 @@ Una vez iniciada la aplicación:
    a escanear las rutas configuradas. Al eliminar una carpeta se pide confirmación y
    solo se borran sus entradas de la biblioteca: **los archivos de vídeo del disco no
    se tocan**.
+
+### Pistas de audio y subtítulos
+
+El selector de pistas permite elegir la pista de audio, una pista de subtítulos
+concreta o desactivarlos. La preferencia se guarda por archivo, no por serie:
+cada episodio conserva su propia elección y nunca reutiliza la pista de otro
+episodio por coincidir su número.
+
+- Se admiten subtítulos embebidos en el contenedor y archivos externos junto al
+  vídeo (`.srt`, `.ass`, `.ssa`, `.vtt`, `.sub`, `.idx`, `.sup`, `.ttml`,
+  `.dfxp`), incluidos nombres con idioma o variantes como
+  `Pelicula.es.srt` o `Pelicula.forced.ass`.
+- Las pistas se identifican por sus metadatos o por la ruta absoluta del
+  subtítulo externo, no solo por su índice. Si una pista guardada deja de
+  existir, Acryl no selecciona otra pista parecida por error.
+- El historial de reproducción mantiene una sola entrada pendiente por archivo:
+  al reanudar se actualizan la posición y la fecha, sin crear duplicados.
 
 ### Estructura de carpetas e indexado
 

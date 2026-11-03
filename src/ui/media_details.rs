@@ -61,7 +61,10 @@ type ToggleFileWatchedCallback = Rc<dyn Fn(String, bool)>;
 type SharedToggleFileWatchedCallback = Rc<RefCell<Option<ToggleFileWatchedCallback>>>;
 
 /// Callback para marcar una temporada completa como vista/no vista.
-type ToggleSeasonWatchedCallback = Rc<dyn Fn(i32, bool)>;
+///
+/// Recibe la selección completa para distinguir una temporada hija (carpeta)
+/// de un número de temporada de los archivos del medio raíz.
+type ToggleSeasonWatchedCallback = Rc<dyn Fn(SeasonSelection, bool)>;
 type SharedToggleSeasonWatchedCallback = Rc<RefCell<Option<ToggleSeasonWatchedCallback>>>;
 
 /// Componente de vista de detalles.
@@ -224,16 +227,11 @@ impl MediaDetails {
 
                 *selected_season.borrow_mut() = Some(selection);
                 let db_path = db_path.borrow().clone();
-                let season_for_button = match selection {
-                    SeasonSelection::Number(n) => Some(n),
-                    SeasonSelection::Child(_) => None,
-                };
                 render_selection(
                     &db_path,
                     &content_container,
                     root_media_id.get(),
                     selection,
-                    season_for_button,
                     &translations,
                     &on_play_episode,
                     &on_toggle_file_watched,
@@ -448,16 +446,11 @@ impl MediaDetails {
         let selection = options[index].key;
         self.selected_season.replace(Some(selection));
         let db_path = self.db_path.borrow().clone();
-        let season_for_button = match selection {
-            SeasonSelection::Number(n) => Some(n),
-            SeasonSelection::Child(_) => None,
-        };
         render_selection(
             &db_path,
             &self.content_container,
             self.media_id,
             selection,
-            season_for_button,
             &self.translations,
             &self.on_play_episode,
             &self.on_toggle_file_watched,
@@ -563,9 +556,9 @@ impl MediaDetails {
 
     pub fn on_toggle_season_watched<F>(&mut self, f: F)
     where
-        F: Fn(i32, bool) + 'static,
+        F: Fn(SeasonSelection, bool) + 'static,
     {
-        let cb: Rc<dyn Fn(i32, bool)> = Rc::new(f);
+        let cb: Rc<dyn Fn(SeasonSelection, bool)> = Rc::new(f);
         *self.on_toggle_season_watched.borrow_mut() = Some(cb);
     }
 
@@ -596,7 +589,6 @@ fn render_selection(
     container: &Box,
     root_media_id: i64,
     selection: SeasonSelection,
-    season: Option<i32>,
     translations: &TranslationsRef,
     on_play_episode: &SharedPlayEpisodeCallback,
     on_toggle_file_watched: &SharedToggleFileWatchedCallback,
@@ -656,7 +648,7 @@ fn render_selection(
         container,
         title.as_deref(),
         &files,
-        season,
+        Some(selection),
         translations,
         on_play_episode,
         on_toggle_file_watched,
@@ -669,7 +661,7 @@ fn render_files(
     container: &Box,
     title: Option<&str>,
     files: &[MediaFile],
-    season: Option<i32>,
+    season_target: Option<SeasonSelection>,
     translations: &TranslationsRef,
     on_play_episode: &SharedPlayEpisodeCallback,
     on_toggle_file_watched: &SharedToggleFileWatchedCallback,
@@ -696,10 +688,10 @@ fn render_files(
         spacer.set_hexpand(true);
         season_header.append(&spacer);
 
-        // Desplegable para marcar toda la temporada como vista/no vista, solo
-        // cuando se conoce el número de temporada (temporadas por número,
-        // no temporadas hijas).
-        if let Some(season_number) = season {
+        // Desplegable para marcar toda la temporada como vista/no vista.
+        // Funciona tanto para temporadas por número como para carpetas de
+        // temporada hijas; la selección identifica el objetivo exacto.
+        if let Some(target) = season_target {
             let all_watched = files.iter().all(|f| f.is_watched);
             let default_index = if all_watched { 1 } else { 0 };
             let model = gtk4::StringList::new(&[
@@ -720,7 +712,7 @@ fn render_files(
                 season_dropdown.connect_selected_notify(move |dd| {
                     let index = dd.selected() as usize;
                     // Índice 0 = marcar como vista, 1 = marcar como no vista.
-                    callback(season_number, index == 0);
+                    callback(target, index == 0);
                 });
             }
             season_header.append(&season_dropdown);

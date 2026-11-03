@@ -22,6 +22,11 @@ use std::process::Command;
 /// Extensiones de vídeo que se indexan.
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mkv", "avi", "webm", "mov", "flv", "wmv"];
 
+/// Extensiones de subtítulos externos (sidecar) que mpv puede cargar.
+const SUBTITLE_EXTENSIONS: &[&str] = &[
+    "srt", "ass", "ssa", "vtt", "sub", "idx", "sup", "ttml", "dfxp",
+];
+
 /// Profundidad máxima al recorrer carpetas contenedoras. Evita recorrer
 /// árboles sin fin o enlazados y cubre `raíz/categoría/título/temporada`.
 const MAX_SCAN_DEPTH: usize = 4;
@@ -1508,6 +1513,7 @@ pub fn extract_media_streams(
                     language,
                     codec,
                     title,
+                    external_path: None,
                 });
                 audio_index += 1;
             }
@@ -1519,6 +1525,7 @@ pub fn extract_media_streams(
                     language,
                     codec,
                     title,
+                    external_path: None,
                 });
                 subtitle_index += 1;
             }
@@ -1529,6 +1536,146 @@ pub fn extract_media_streams(
     Ok(result)
 }
 
+/// Descubre subtítulos externos (sidecar) junto al archivo de vídeo.
+///
+/// Se consideran sidecars los archivos con extensión de subtítulo cuyo nombre
+/// coincide con el del vídeo (`Pelicula.srt`) o lo extiende con sufijos
+/// habituales (`Pelicula.es.srt`, `Pelicula.forced.ass`). La ruta absoluta es
+/// la identidad de la pista: no depende del orden ni del número de pista.
+///
+/// `start_index` es el primer índice libre entre los subtítulos embebidos;
+/// el resultado mantiene el orden determinista de las rutas para que `--sid`
+/// se pueda calcular de forma estable.
+pub fn discover_external_subtitles(file_path: &str, start_index: i32) -> Vec<NewMediaStream> {
+    let video_path = Path::new(file_path);
+    let Some(parent) = video_path.parent() else {
+        return Vec::new();
+    };
+    let Some(video_stem) = video_path.file_stem().and_then(|stem| stem.to_str()) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return Vec::new();
+    };
+
+    let mut candidates: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_type().ok().map(|kind| (entry.path(), kind)))
+        .filter(|(_, kind)| kind.is_file())
+        .map(|(path, _)| path)
+        .filter(|path| is_external_subtitle_for(path, video_stem))
+        .map(|path| std::fs::canonicalize(&path).unwrap_or(path))
+        .collect();
+    candidates.sort();
+    candidates.dedup();
+
+    candidates
+        .into_iter()
+        .enumerate()
+        .map(|(position, path)| {
+            let suffix = subtitle_suffix(&path, video_stem);
+            NewMediaStream {
+                file_path: file_path.to_string(),
+                stream_type: "subtitle".to_string(),
+                stream_index: start_index + position as i32,
+                language: subtitle_language_from_suffix(&suffix),
+                codec: path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .map(|extension| extension.to_ascii_lowercase()),
+                title: (!suffix.is_empty()).then_some(suffix),
+                external_path: path.to_str().map(|path| path.to_string()),
+            }
+        })
+        .collect()
+}
+
+/// Extrae las pistas embebidas con `ffprobe` y añade los subtítulos externos
+/// que acompañan al archivo. Es la variante que se guarda en la biblioteca.
+pub fn extract_media_streams_with_external(
+    file_path: &str,
+) -> Result<Vec<NewMediaStream>, Box<dyn std::error::Error>> {
+    let mut streams = extract_media_streams(file_path)?;
+    let subtitle_count = streams
+        .iter()
+        .filter(|stream| stream.stream_type == "subtitle")
+        .count() as i32;
+    streams.extend(discover_external_subtitles(file_path, subtitle_count));
+    Ok(streams)
+}
+
+fn is_external_subtitle_for(path: &Path, video_stem: &str) -> bool {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase());
+    if !extension
+        .as_deref()
+        .is_some_and(|extension| SUBTITLE_EXTENSIONS.contains(&extension))
+    {
+        return false;
+    }
+    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        return false;
+    };
+    stem == video_stem || stem.starts_with(&format!("{}.", video_stem))
+}
+
+/// Sufijo que diferencia un sidecar del vídeo (`Pelicula.es.srt` → `es`).
+fn subtitle_suffix(path: &Path, video_stem: &str) -> String {
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default();
+    stem.strip_prefix(video_stem)
+        .unwrap_or(stem)
+        .trim_matches(|character: char| {
+            character == '.' || character == '_' || character == '-' || character.is_whitespace()
+        })
+        .to_string()
+}
+
+fn subtitle_language_from_suffix(suffix: &str) -> Option<String> {
+    suffix
+        .split(|character: char| {
+            character == '.' || character == '_' || character == '-' || character.is_whitespace()
+        })
+        .find(|token| is_known_subtitle_language(token))
+        .map(|token| token.to_ascii_lowercase())
+}
+
+fn is_known_subtitle_language(token: &str) -> bool {
+    matches!(
+        token.to_ascii_lowercase().as_str(),
+        "es" | "spa"
+            | "en"
+            | "eng"
+            | "ja"
+            | "jpn"
+            | "fr"
+            | "fra"
+            | "fre"
+            | "de"
+            | "deu"
+            | "ger"
+            | "it"
+            | "ita"
+            | "pt"
+            | "por"
+            | "ru"
+            | "rus"
+            | "zh"
+            | "zho"
+            | "chi"
+            | "ko"
+            | "kor"
+            | "ar"
+            | "ara"
+            | "hi"
+            | "hin"
+    )
+}
+
 /// Extrae y guarda los streams de audio/subtítulo de un archivo en la base de datos.
 /// Es idempotente: reemplaza los streams previos de ese archivo.
 pub fn index_media_streams_for_file(
@@ -1536,7 +1683,7 @@ pub fn index_media_streams_for_file(
     media_id: i64,
     file_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let streams = extract_media_streams(file_path)?;
+    let streams = extract_media_streams_with_external(file_path)?;
 
     let mut conn = open_db(db_path)?;
     let mut media_repo = MediaRepository::new(&mut conn);
@@ -1646,7 +1793,7 @@ fn index_streams_with_connection(
         )
     })?;
 
-    let streams = extract_media_streams(file_path)?;
+    let streams = extract_media_streams_with_external(file_path)?;
     {
         let mut repo = MediaRepository::new(conn);
         repo.replace_streams_for_file(media_id, file_path, &streams)?;
@@ -2299,6 +2446,86 @@ mod tests {
             streams.iter().any(|s| s.stream_type == "audio"),
             "debería guardar al menos una pista de audio"
         );
+    }
+
+    #[test]
+    fn descubre_subtitulos_sidecar_del_mismo_video_y_les_asigna_indice() {
+        let dir = TempDir::new().expect("crear directorio temporal");
+        let video = dir.path().join("Pelicula.mkv");
+        std::fs::write(&video, b"video").expect("crear video");
+        std::fs::write(dir.path().join("Pelicula.srt"), b"1").expect("sidecar simple");
+        std::fs::write(dir.path().join("Pelicula.es.forced.srt"), b"1")
+            .expect("sidecar con idioma");
+        std::fs::write(dir.path().join("Pelicula.en.ass"), b"1").expect("sidecar ass");
+        std::fs::write(dir.path().join("Otra.srt"), b"1").expect("sidecar ajeno");
+
+        let subtitles = discover_external_subtitles(video.to_str().unwrap(), 1);
+
+        assert_eq!(subtitles.len(), 3);
+        assert_eq!(subtitles[0].stream_index, 1);
+        assert_eq!(subtitles[1].stream_index, 2);
+        assert_eq!(subtitles[2].stream_index, 3);
+        assert_eq!(subtitles[0].language.as_deref(), Some("en"));
+        assert_eq!(subtitles[1].language.as_deref(), Some("es"));
+        assert_eq!(subtitles[0].title.as_deref(), Some("en"));
+        assert_eq!(subtitles[1].title.as_deref(), Some("es.forced"));
+        assert!(subtitles.iter().all(|subtitle| {
+            subtitle
+                .external_path
+                .as_deref()
+                .is_some_and(|path| path.starts_with('/'))
+        }));
+        assert_eq!(subtitles[2].codec.as_deref(), Some("srt"));
+    }
+
+    #[test]
+    fn index_media_streams_for_file_incluye_subtitulos_externos() {
+        if !disponible("ffmpeg") || !disponible("ffprobe") {
+            eprintln!("test salteado: se requiere ffmpeg y ffprobe");
+            return;
+        }
+
+        let (db_path, _db_dir) = temp_db();
+        let media_dir = TempDir::new().expect("crear directorio temporal");
+        let video = generar_video_prueba(media_dir.path());
+        let video_str = video.to_str().unwrap().to_string();
+        let sidecar = media_dir.path().join("prueba.es.srt");
+        std::fs::write(&sidecar, "1\n00:00:00,000 --> 00:00:01,000\nHola\n")
+            .expect("escribir subtítulo externo");
+
+        {
+            let conn = open_db(&db_path).expect("abrir BD");
+            conn.execute(
+                "INSERT INTO media (type, title, sort_title, folder_path)
+                 VALUES ('movie', 'Pelicula', 'pelicula', ?1)",
+                rusqlite::params![media_dir.path().to_str().unwrap()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO media_files (media_id, file_path) VALUES (1, ?1)",
+                rusqlite::params![&video_str],
+            )
+            .unwrap();
+        }
+
+        index_media_streams_for_file(&db_path, 1, &video_str).expect("indexar streams");
+
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let streams = {
+            let mut repo = MediaRepository::new(&mut conn);
+            repo.list_streams_by_file(&video_str).expect("listar")
+        };
+        let external: Vec<_> = streams
+            .iter()
+            .filter(|stream| stream.external_path.is_some())
+            .collect();
+        assert_eq!(external.len(), 1);
+        assert_eq!(
+            external[0].external_path.as_deref(),
+            sidecar.to_str(),
+            "la ruta absoluta del sidecar debe persistirse"
+        );
+        assert_eq!(external[0].language.as_deref(), Some("es"));
     }
 
     #[test]

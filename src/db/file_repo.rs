@@ -60,6 +60,23 @@ impl TrackSelection {
     }
 }
 
+/// Preferencia de pistas con identidad estable además del índice.
+///
+/// El índice solo se usa como respaldo cuando la clave no puede resolverse
+/// contra los streams actuales del archivo. Así, dos episodios distintos nunca
+/// comparten una pista por coincidir su número, y un archivo cuyas pistas
+/// cambiaron de orden no reutiliza la pista equivocada.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TrackPreference {
+    pub selection: TrackSelection,
+    /// Clave de la pista de audio elegida (`embedded:...`).
+    pub audio_track_key: Option<String>,
+    /// Clave de la pista de subtítulos elegida (`embedded:...` o `external:...`).
+    pub subtitle_track_key: Option<String>,
+    /// Ruta absoluta del subtítulo externo elegido, si lo hay.
+    pub subtitle_external_path: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct MediaFileInput {
     pub media_id: i64,
@@ -155,43 +172,78 @@ impl<'a> FileRepository<'a> {
         }
     }
 
-    /// Devuelve la preferencia de pistas de un archivo. Si el archivo no
-    /// existe en la biblioteca, devuelve la selección automática.
-    pub fn track_selection(&mut self, file_path: &str) -> RusqliteResult<TrackSelection> {
+    /// Devuelve la preferencia completa de pistas de un archivo, incluyendo
+    /// las claves estables usadas para resolver las pistas al reproducir.
+    /// Si el archivo no existe en la biblioteca, devuelve la selección
+    /// automática.
+    pub fn track_preference(&mut self, file_path: &str) -> RusqliteResult<TrackPreference> {
         let mut stmt = self.conn.prepare(
-            "SELECT audio_stream_index, subtitle_stream_index, subtitles_disabled
+            "SELECT audio_stream_index, subtitle_stream_index, subtitles_disabled,
+                    audio_track_key, subtitle_track_key, subtitle_external_path
              FROM media_files WHERE file_path = ?1 LIMIT 1",
         )?;
         let row = stmt.query_row(params![file_path], |row| {
-            Ok(TrackSelection {
-                audio_stream_index: row.get(0)?,
-                subtitle_stream_index: row.get(1)?,
-                subtitles_disabled: row.get::<_, i64>(2)? != 0,
+            Ok(TrackPreference {
+                selection: TrackSelection {
+                    audio_stream_index: row.get(0)?,
+                    subtitle_stream_index: row.get(1)?,
+                    subtitles_disabled: row.get::<_, i64>(2)? != 0,
+                },
+                audio_track_key: row.get(3)?,
+                subtitle_track_key: row.get(4)?,
+                subtitle_external_path: row.get(5)?,
             })
         });
         match row {
-            Ok(selection) => Ok(selection),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(TrackSelection::default()),
+            Ok(preference) => Ok(preference),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(TrackPreference::default()),
             Err(error) => Err(error),
         }
     }
 
-    /// Guarda la preferencia de pistas de un archivo.
+    /// Devuelve la preferencia de pistas de un archivo. Si el archivo no
+    /// existe en la biblioteca, devuelve la selección automática.
+    pub fn track_selection(&mut self, file_path: &str) -> RusqliteResult<TrackSelection> {
+        Ok(self.track_preference(file_path)?.selection)
+    }
+
+    /// Guarda la preferencia completa de pistas de un archivo.
+    pub fn set_track_preference(
+        &mut self,
+        file_path: &str,
+        preference: &TrackPreference,
+    ) -> RusqliteResult<usize> {
+        self.conn.execute(
+            "UPDATE media_files
+             SET audio_stream_index = ?2, subtitle_stream_index = ?3, subtitles_disabled = ?4,
+                 audio_track_key = ?5, subtitle_track_key = ?6, subtitle_external_path = ?7
+             WHERE file_path = ?1",
+            params![
+                file_path,
+                preference.selection.audio_stream_index,
+                preference.selection.subtitle_stream_index,
+                i64::from(preference.selection.subtitles_disabled),
+                preference.audio_track_key,
+                preference.subtitle_track_key,
+                preference.subtitle_external_path,
+            ],
+        )
+    }
+
+    /// Guarda la preferencia de pistas de un archivo sin claves de identidad.
+    /// Se conserva para llamadas internas y tests; la UI usa
+    /// `set_track_preference` para guardar también la identidad de la pista.
     pub fn set_track_selection(
         &mut self,
         file_path: &str,
         selection: TrackSelection,
     ) -> RusqliteResult<usize> {
-        self.conn.execute(
-            "UPDATE media_files
-             SET audio_stream_index = ?2, subtitle_stream_index = ?3, subtitles_disabled = ?4
-             WHERE file_path = ?1",
-            params![
-                file_path,
-                selection.audio_stream_index,
-                selection.subtitle_stream_index,
-                i64::from(selection.subtitles_disabled),
-            ],
+        self.set_track_preference(
+            file_path,
+            &TrackPreference {
+                selection,
+                ..Default::default()
+            },
         )
     }
 
@@ -293,6 +345,24 @@ impl<'a> FileRepository<'a> {
             params![root_media_id, season, i64::from(watched)],
         )
     }
+
+    /// Marca todos los archivos de una temporada hija (carpeta de temporada)
+    /// como vistos/no vistos.
+    ///
+    /// A diferencia de `set_season_watched`, no filtra por número de temporada:
+    /// la propia carpeta identifica sus episodios. Así funciona también cuando
+    /// los nombres de archivo no incluyen `SxxExx` o la carpeta no expone un
+    /// número de temporada reconocible.
+    pub fn set_season_media_watched(
+        &mut self,
+        season_media_id: i64,
+        watched: bool,
+    ) -> RusqliteResult<usize> {
+        self.conn.execute(
+            "UPDATE media_files SET is_watched = ?2 WHERE media_id = ?1",
+            params![season_media_id, i64::from(watched)],
+        )
+    }
 }
 
 fn map_file_row(row: &rusqlite::Row<'_>) -> RusqliteResult<MediaFile> {
@@ -384,6 +454,38 @@ mod tests {
             .track_selection("/tmp/pelicula/video.mkv")
             .expect("leer selección");
         assert_eq!(stored, selection);
+    }
+
+    #[test]
+    fn set_track_preference_persiste_claves_y_ruta_externa() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        insert_media_and_file(&mut conn);
+
+        let preference = TrackPreference {
+            selection: TrackSelection {
+                audio_stream_index: Some(1),
+                subtitle_stream_index: Some(2),
+                subtitles_disabled: false,
+            },
+            audio_track_key: Some("embedded:audio:eng:opus:English".to_string()),
+            subtitle_track_key: Some("external:/tmp/pelicula/video.es.srt".to_string()),
+            subtitle_external_path: Some("/tmp/pelicula/video.es.srt".to_string()),
+        };
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            assert_eq!(
+                repo.set_track_preference("/tmp/pelicula/video.mkv", &preference)
+                    .expect("guardar preferencia"),
+                1
+            );
+        }
+
+        let mut repo = FileRepository::new(&mut conn);
+        let stored = repo
+            .track_preference("/tmp/pelicula/video.mkv")
+            .expect("leer preferencia");
+        assert_eq!(stored, preference);
     }
 
     #[test]
@@ -563,6 +665,74 @@ mod tests {
             vec!["/tmp/serie/s01e01.mkv", "/tmp/serie/t1/s01e02.mkv"],
             "incluye la temporada hija y excluye otros shows"
         );
+    }
+
+    #[test]
+    fn marcar_temporada_hija_solo_afecta_a_sus_propios_archivos() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path)
+             VALUES ('series', 'Serie', 'serie', '/tmp/serie')",
+            [],
+        )
+        .expect("insertar serie");
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path, parent_id)
+             VALUES ('series', 'Serie T1', 'serie t1', '/tmp/serie/t1', 1)",
+            [],
+        )
+        .expect("insertar temporada hija");
+
+        let mut repo = FileRepository::new(&mut conn);
+        repo.upsert_many(&[
+            file(1, 1, 1, "/tmp/serie/s01e01.mkv"),
+            file(2, 1, 1, "/tmp/serie/t1/s01e01.mkv"),
+            file(2, 1, 2, "/tmp/serie/t1/s01e02.mkv"),
+        ])
+        .expect("insertar archivos");
+
+        assert_eq!(
+            repo.set_season_media_watched(2, true)
+                .expect("marcar temporada hija"),
+            2
+        );
+        let watched: Vec<(String, bool)> = {
+            let mut stmt = repo
+                .conn
+                .prepare("SELECT file_path, is_watched FROM media_files ORDER BY file_path")
+                .expect("preparar consulta");
+            stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0))
+            })
+            .expect("leer archivos")
+            .map(Result::unwrap)
+            .collect()
+        };
+        assert_eq!(
+            watched,
+            vec![
+                ("/tmp/serie/s01e01.mkv".to_string(), false),
+                ("/tmp/serie/t1/s01e01.mkv".to_string(), true),
+                ("/tmp/serie/t1/s01e02.mkv".to_string(), true),
+            ],
+            "la temporada raíz no se modifica"
+        );
+
+        assert_eq!(
+            repo.set_season_media_watched(2, false)
+                .expect("desmarcar temporada hija"),
+            2
+        );
+        let remaining: i64 = repo
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM media_files WHERE is_watched = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("contar vistos");
+        assert_eq!(remaining, 0);
     }
 
     #[test]
