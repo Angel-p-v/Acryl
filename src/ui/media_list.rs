@@ -56,6 +56,7 @@ pub struct MediaList {
     selection: SingleSelection,
     on_media_select: SharedSelectCallback,
     scrolled: ScrolledWindow,
+    grid_view: GridView,
 }
 
 impl MediaList {
@@ -190,7 +191,20 @@ impl MediaList {
             selection,
             on_media_select: on_select_ref,
             scrolled: scrolled.clone(),
+            grid_view,
         }
+    }
+
+    /// Recalcula el número de columnas del `GridView` según el ancho actual del
+    /// contenedor. Se puede llamar cuando la ventana cambia de tamaño para
+    /// adaptar la rejilla a pantallas pequeñas o grandes.
+    pub fn update_columns(&self) {
+        let width = self.scrolled.width() as f64;
+        let card_total_width = CARD_WIDTH as f64 + 16.0 + 8.0;
+        let columns = (width / card_total_width).floor() as i32;
+        let columns = columns.clamp(MIN_COLUMNS as i32, MAX_COLUMNS as i32);
+        self.grid_view.set_min_columns(columns as u32);
+        self.grid_view.set_max_columns(columns as u32);
     }
 
     /// Registra un callback que se invoca cuando una descarga de póster termina
@@ -415,7 +429,11 @@ fn build_card_widget() -> Box {
     card.add_css_class("media-card");
     card.set_halign(gtk4::Align::Start);
     card.set_valign(gtk4::Align::Start);
-    card.set_size_request(CARD_WIDTH, CARD_HEIGHT);
+    // Ancho fijo eliminado: las tarjetas se adaptan al ancho disponible del
+    // contenedor (responsive). Se usa hexpand para que ocupen el espacio
+    // asignado por GtkGridView.
+    card.set_hexpand(true);
+    card.set_size_request(-1, CARD_HEIGHT);
     // Pequeña separación respecto al borde superior de la galería.
     card.set_margin_top(8);
     // Pequeña separación respecto a los bordes izquierdo y derecho de la galería.
