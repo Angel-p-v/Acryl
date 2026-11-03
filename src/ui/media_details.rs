@@ -52,8 +52,16 @@ type SharedPlayEpisodeCallback = Rc<RefCell<Option<PlayEpisodeCallback>>>;
 type EditTracksCallback = Rc<dyn Fn(String)>;
 type SharedEditTracksCallback = Rc<RefCell<Option<EditTracksCallback>>>;
 
-/// Callback compartido para abrir el selector de póster y banner.
+/// Callback para abrir el selector de póster y banner.
 type ChooseImagesCallback = Rc<dyn Fn()>;
+
+/// Callback para marcar un archivo individual como visto/no visto.
+type ToggleFileWatchedCallback = Rc<dyn Fn(String, bool)>;
+type SharedToggleFileWatchedCallback = Rc<RefCell<Option<ToggleFileWatchedCallback>>>;
+
+/// Callback para marcar una temporada completa como vista/no vista.
+type ToggleSeasonWatchedCallback = Rc<dyn Fn(i32, bool)>;
+type SharedToggleSeasonWatchedCallback = Rc<RefCell<Option<ToggleSeasonWatchedCallback>>>;
 
 /// Componente de vista de detalles.
 pub struct MediaDetails {
@@ -82,6 +90,8 @@ pub struct MediaDetails {
     on_back: Option<Rc<dyn Fn()>>,
     on_play_episode: SharedPlayEpisodeCallback,
     on_edit_tracks: SharedEditTracksCallback,
+    on_toggle_file_watched: SharedToggleFileWatchedCallback,
+    on_toggle_season_watched: SharedToggleSeasonWatchedCallback,
     on_choose_images: Option<ChooseImagesCallback>,
     translations: TranslationsRef,
 }
@@ -180,6 +190,9 @@ impl MediaDetails {
         let suppress_season_change = Rc::new(Cell::new(false));
         let on_play_episode: SharedPlayEpisodeCallback = Rc::new(RefCell::new(None));
         let on_edit_tracks: SharedEditTracksCallback = Rc::new(RefCell::new(None));
+        let on_toggle_file_watched: SharedToggleFileWatchedCallback = Rc::new(RefCell::new(None));
+        let on_toggle_season_watched: SharedToggleSeasonWatchedCallback =
+            Rc::new(RefCell::new(None));
         let db_path = Rc::new(RefCell::new(db_path.to_string()));
         let root_media_id = Rc::new(Cell::new(media_id));
 
@@ -195,6 +208,8 @@ impl MediaDetails {
             let content_container = content_container.clone();
             let translations = translations.clone();
             let on_play_episode = on_play_episode.clone();
+            let on_toggle_file_watched = on_toggle_file_watched.clone();
+            let on_toggle_season_watched = on_toggle_season_watched.clone();
 
             season_dropdown.connect_selected_notify(move |dropdown| {
                 if suppress.get() {
@@ -208,13 +223,23 @@ impl MediaDetails {
 
                 *selected_season.borrow_mut() = Some(selection);
                 let db_path = db_path.borrow().clone();
+                let season_for_button = match selection {
+                    SeasonSelection::Number(n) => Some(n),
+                    SeasonSelection::Child(_) => None,
+                };
+                let callbacks = RenderCallbacks {
+                    on_play_episode: &on_play_episode,
+                    on_toggle_file_watched: &on_toggle_file_watched,
+                    on_toggle_season_watched: &on_toggle_season_watched,
+                };
                 render_selection(
                     &db_path,
                     &content_container,
                     root_media_id.get(),
                     selection,
+                    season_for_button,
                     &translations,
-                    &on_play_episode,
+                    callbacks,
                 );
             });
         }
@@ -243,6 +268,8 @@ impl MediaDetails {
             on_back: None,
             on_play_episode,
             on_edit_tracks,
+            on_toggle_file_watched,
+            on_toggle_season_watched,
             on_choose_images: None,
             translations,
         }
@@ -387,12 +414,18 @@ impl MediaDetails {
                 };
                 append_message(&self.content_container, &text);
             } else {
+                let callbacks = RenderCallbacks {
+                    on_play_episode: &self.on_play_episode,
+                    on_toggle_file_watched: &self.on_toggle_file_watched,
+                    on_toggle_season_watched: &self.on_toggle_season_watched,
+                };
                 render_files(
                     &self.content_container,
                     None,
                     &direct_files,
+                    None,
                     &self.translations,
-                    &self.on_play_episode,
+                    callbacks,
                 );
             }
             return;
@@ -420,13 +453,23 @@ impl MediaDetails {
         let selection = options[index].key;
         self.selected_season.replace(Some(selection));
         let db_path = self.db_path.borrow().clone();
+        let season_for_button = match selection {
+            SeasonSelection::Number(n) => Some(n),
+            SeasonSelection::Child(_) => None,
+        };
+        let callbacks = RenderCallbacks {
+            on_play_episode: &self.on_play_episode,
+            on_toggle_file_watched: &self.on_toggle_file_watched,
+            on_toggle_season_watched: &self.on_toggle_season_watched,
+        };
         render_selection(
             &db_path,
             &self.content_container,
             self.media_id,
             selection,
+            season_for_button,
             &self.translations,
-            &self.on_play_episode,
+            callbacks,
         );
     }
 
@@ -518,6 +561,22 @@ impl MediaDetails {
         *self.on_edit_tracks.borrow_mut() = Some(cb);
     }
 
+    pub fn on_toggle_file_watched<F>(&mut self, f: F)
+    where
+        F: Fn(String, bool) + 'static,
+    {
+        let cb: Rc<dyn Fn(String, bool)> = Rc::new(f);
+        *self.on_toggle_file_watched.borrow_mut() = Some(cb);
+    }
+
+    pub fn on_toggle_season_watched<F>(&mut self, f: F)
+    where
+        F: Fn(i32, bool) + 'static,
+    {
+        let cb: Rc<dyn Fn(i32, bool)> = Rc::new(f);
+        *self.on_toggle_season_watched.borrow_mut() = Some(cb);
+    }
+
     pub fn on_choose_images<F>(&mut self, f: F)
     where
         F: Fn() + 'static,
@@ -537,6 +596,13 @@ impl MediaDetails {
     }
 }
 
+/// Conjunto de callbacks compartidos para renderizar tarjetas de episodio.
+struct RenderCallbacks<'a> {
+    on_play_episode: &'a SharedPlayEpisodeCallback,
+    on_toggle_file_watched: &'a SharedToggleFileWatchedCallback,
+    on_toggle_season_watched: &'a SharedToggleSeasonWatchedCallback,
+}
+
 /// Representa un archivo de episodio en la rejilla. Mantiene el texto y el
 /// número coherentes con la temporada seleccionada.
 fn render_selection(
@@ -544,8 +610,9 @@ fn render_selection(
     container: &Box,
     root_media_id: i64,
     selection: SeasonSelection,
+    season: Option<i32>,
     translations: &TranslationsRef,
-    on_play_episode: &SharedPlayEpisodeCallback,
+    callbacks: RenderCallbacks,
 ) {
     let (title, files) = match selection {
         SeasonSelection::Child(season_id) => {
@@ -601,8 +668,9 @@ fn render_selection(
         container,
         title.as_deref(),
         &files,
+        season,
         translations,
-        on_play_episode,
+        callbacks,
     );
 }
 
@@ -610,21 +678,49 @@ fn render_files(
     container: &Box,
     title: Option<&str>,
     files: &[MediaFile],
+    season: Option<i32>,
     translations: &TranslationsRef,
-    on_play_episode: &SharedPlayEpisodeCallback,
+    callbacks: RenderCallbacks,
 ) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
 
     if let Some(title) = title.filter(|title| !title.is_empty()) {
+        let season_header = Box::new(Orientation::Horizontal, 6);
+        season_header.set_halign(gtk4::Align::Start);
+        season_header.set_hexpand(true);
+
         let season_title = Label::new(Some(title));
-        season_title.set_halign(gtk4::Align::Start);
-        season_title.set_hexpand(true);
         season_title.set_xalign(0.0);
-        season_title.set_margin_top(24);
         season_title.add_css_class("season-grid-title");
-        container.append(&season_title);
+        season_header.append(&season_title);
+
+        // Botón para marcar toda la temporada como vista/no vista, solo
+        // cuando se conoce el número de temporada (temporadas por número,
+        // no temporadas hijas).
+        if let Some(season_number) = season {
+            let season_btn_label = if files.iter().any(|f| f.is_watched) {
+                translations.borrow().t("button.mark_season_unwatched")
+            } else {
+                translations.borrow().t("button.mark_season_watched")
+            };
+            let season_btn = Button::with_label(&season_btn_label);
+            season_btn.add_css_class("season-watched-btn");
+            if files.iter().all(|f| f.is_watched) {
+                season_btn.add_css_class("watched");
+            }
+            let cb = callbacks.on_toggle_season_watched.borrow().clone();
+            if let Some(callback) = cb {
+                let all_watched = files.iter().all(|f| f.is_watched);
+                season_btn.connect_clicked(move |_| {
+                    callback(season_number, !all_watched);
+                });
+            }
+            season_header.append(&season_btn);
+        }
+
+        container.append(&season_header);
     }
 
     if files.is_empty() {
@@ -637,7 +733,7 @@ fn render_files(
 
     let mut cards = Vec::with_capacity(files.len());
     for file in files {
-        cards.push(build_episode_card(file, translations, on_play_episode));
+        cards.push(build_episode_card(file, translations, &callbacks));
     }
     container.append(&episode_grid(cards));
 }
@@ -661,13 +757,16 @@ fn season_numbers(files: &[MediaFile]) -> Vec<i32> {
 fn build_episode_card(
     file: &MediaFile,
     translations: &TranslationsRef,
-    on_play_episode: &SharedPlayEpisodeCallback,
+    callbacks: &RenderCallbacks,
 ) -> Box {
     let t = |key: &str| translations.borrow().t(key);
     let (_episode_label, episode_number) = episode_texts(file, translations);
 
     let card = Box::new(Orientation::Vertical, 6);
     card.add_css_class("episode-card");
+    if file.is_watched {
+        card.add_css_class("episode-watched");
+    }
     card.set_hexpand(false);
     card.set_vexpand(false);
     card.set_halign(gtk4::Align::Start);
@@ -743,10 +842,40 @@ fn build_episode_card(
         title_text
     )));
     let file_path_for_play = file.file_path.clone();
-    if let Some(callback) = on_play_episode.borrow().clone() {
+    if let Some(callback) = callbacks.on_play_episode.borrow().clone() {
         play_btn.connect_clicked(move |_| callback(file_path_for_play.clone()));
     }
     actions.append(&play_btn);
+
+    // Botón para marcar este episodio individual como visto/no visto.
+    let watched_btn_label = if file.is_watched {
+        t("button.mark_unwatched")
+    } else {
+        t("button.mark_watched")
+    };
+    let watched_btn = Button::with_label(&watched_btn_label);
+    watched_btn.add_css_class("episode-watched-btn");
+    if file.is_watched {
+        watched_btn.add_css_class("watched");
+    }
+    watched_btn.set_halign(gtk4::Align::Center);
+    watched_btn.set_tooltip_text(Some(&format!(
+        "{} {}",
+        if file.is_watched {
+            t("tooltip.mark_unwatched")
+        } else {
+            t("tooltip.mark_watched")
+        },
+        title_text
+    )));
+    let file_path_for_watched = file.file_path.clone();
+    let is_watched = file.is_watched;
+    if let Some(callback) = callbacks.on_toggle_file_watched.borrow().clone() {
+        watched_btn.connect_clicked(move |_| {
+            callback(file_path_for_watched.clone(), !is_watched);
+        });
+    }
+    actions.append(&watched_btn);
 
     card.append(&actions);
 
@@ -827,6 +956,7 @@ mod tests {
             streams_indexed_at: None,
             episode_image_path: None,
             episode_image_checked_at: None,
+            is_watched: false,
         }
     }
 
