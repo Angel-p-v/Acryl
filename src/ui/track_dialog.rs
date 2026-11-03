@@ -6,13 +6,13 @@
 //! Si el archivo aún no tiene pistas analizadas, se ejecuta `ffprobe` en
 //! segundo plano para no bloquear la interfaz.
 
-use crate::core::library::ensure_media_streams;
+use crate::core::library::{discover_external_subtitles, ensure_media_streams};
 use crate::db::media_repo::MediaStream;
-use crate::db::{FileRepository, TrackSelection, close_db, open_db};
+use crate::db::{FileRepository, TrackPreference, TrackSelection, close_db, open_db};
 use crate::ui::i18n::TranslationsRef;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, DropDown, Label, Orientation, Window};
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::Duration;
@@ -117,12 +117,11 @@ pub fn show_track_dialog(
     // y el guardado.
     let audio_streams: Rc<RefCell<Vec<MediaStream>>> = Rc::new(RefCell::new(Vec::new()));
     let subtitle_streams: Rc<RefCell<Vec<MediaStream>>> = Rc::new(RefCell::new(Vec::new()));
-    let selection = Rc::new(Cell::new(load_selection(db_path, file_path)));
+    let preference = Rc::new(RefCell::new(load_preference(db_path, file_path)));
 
     // Carga rápida desde la base de datos: si ya hay pistas analizadas, la
     // ventana aparece completa al instante.
-    let (stored_audio, stored_subtitle) = load_streams(db_path, file_path);
-    let has_stored_streams = !stored_audio.is_empty() || !stored_subtitle.is_empty();
+    let (stored_audio, stored_subtitle, has_stored_streams) = load_streams(db_path, file_path);
     *audio_streams.borrow_mut() = stored_audio;
     *subtitle_streams.borrow_mut() = stored_subtitle;
     refresh_dropdowns(
@@ -130,7 +129,7 @@ pub fn show_track_dialog(
         &subtitle_dropdown,
         &audio_streams.borrow(),
         &subtitle_streams.borrow(),
-        selection.get(),
+        &preference.borrow(),
         &translations,
     );
 
@@ -147,7 +146,7 @@ pub fn show_track_dialog(
             subtitle_dropdown.clone(),
             audio_streams.clone(),
             subtitle_streams.clone(),
-            selection.clone(),
+            preference.clone(),
             translations.clone(),
         );
     }
@@ -167,14 +166,14 @@ pub fn show_track_dialog(
     let file_path_for_save = file_path.to_string();
     let translations_for_save = translations.clone();
     save_button.connect_clicked(move |_| {
-        let selection = current_selection(
+        let preference = current_preference(
             &audio_for_save,
             &subtitle_for_save,
             &audio_streams_for_save.borrow(),
             &subtitle_streams_for_save.borrow(),
         );
 
-        match save_selection(&db_path_for_save, &file_path_for_save, selection) {
+        match save_preference(&db_path_for_save, &file_path_for_save, &preference) {
             Ok(true) => {
                 on_saved();
                 window_for_save.close();
@@ -204,7 +203,7 @@ pub fn show_track_dialog(
     let subtitle_dropdown_red = subtitle_dropdown.clone();
     let audio_streams_red = audio_streams.clone();
     let subtitle_streams_red = subtitle_streams.clone();
-    let selection_red = selection.clone();
+    let preference_red = preference.clone();
     let translations_red = translations.clone();
     redetect_for_click.connect_clicked(move |_| {
         status_red.set_label(&translations_red.borrow().t("status.detecting"));
@@ -218,7 +217,7 @@ pub fn show_track_dialog(
             subtitle_dropdown_red.clone(),
             audio_streams_red.clone(),
             subtitle_streams_red.clone(),
-            selection_red.clone(),
+            preference_red.clone(),
             translations_red.clone(),
         );
     });
@@ -227,15 +226,36 @@ pub fn show_track_dialog(
 }
 
 /// Carga las pistas guardadas, separadas por tipo.
-fn load_streams(db_path: &str, file_path: &str) -> (Vec<MediaStream>, Vec<MediaStream>) {
+///
+/// El tercer valor indica si la base de datos ya tenía pistas analizadas; si
+/// no, la ventana lanzará `ffprobe` en segundo plano aunque haya sidecars.
+fn load_streams(db_path: &str, file_path: &str) -> (Vec<MediaStream>, Vec<MediaStream>, bool) {
     let Ok(mut conn) = open_db(db_path) else {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), false);
     };
-    let streams = {
+    let mut streams = {
         let mut repo = crate::db::MediaRepository::new(&mut conn);
         repo.list_streams_by_file(file_path).unwrap_or_default()
     };
     close_db(conn);
+    let has_stored_streams = !streams.is_empty();
+
+    // Los sidecars pueden no estar en una BD indexada antes de que existiera
+    // su soporte. Se muestran igualmente para poder elegirlos y guardarlos.
+    let next_index = streams
+        .iter()
+        .filter(|stream| stream.stream_type == "subtitle")
+        .map(|stream| stream.stream_index + 1)
+        .max()
+        .unwrap_or(0);
+    for subtitle in discover_external_subtitles(file_path, next_index) {
+        if !streams
+            .iter()
+            .any(|stream| stream.external_path == subtitle.external_path)
+        {
+            streams.push(subtitle.into_media_stream());
+        }
+    }
 
     let mut audio = Vec::new();
     let mut subtitle = Vec::new();
@@ -246,33 +266,34 @@ fn load_streams(db_path: &str, file_path: &str) -> (Vec<MediaStream>, Vec<MediaS
             _ => {}
         }
     }
-    (audio, subtitle)
+    (audio, subtitle, has_stored_streams)
 }
 
 /// Carga la preferencia guardada; si falla, usa la selección automática.
-fn load_selection(db_path: &str, file_path: &str) -> TrackSelection {
+fn load_preference(db_path: &str, file_path: &str) -> TrackPreference {
     let Ok(mut conn) = open_db(db_path) else {
-        return TrackSelection::default();
+        return TrackPreference::default();
     };
-    let selection = {
+    let preference = {
         let mut repo = FileRepository::new(&mut conn);
-        repo.track_selection(file_path).unwrap_or_default()
+        repo.track_preference(file_path).unwrap_or_default()
     };
     close_db(conn);
-    selection
+    preference
 }
 
-/// Guarda la preferencia. Devuelve `Ok(false)` si el archivo no existe en la
-/// biblioteca, para poder avisar al usuario sin tratarlo como error interno.
-fn save_selection(
+/// Guarda la preferencia, incluidas las claves estables de cada pista.
+/// Devuelve `Ok(false)` si el archivo no existe en la biblioteca, para poder
+/// avisar al usuario sin tratarlo como error interno.
+fn save_preference(
     db_path: &str,
     file_path: &str,
-    selection: TrackSelection,
+    preference: &TrackPreference,
 ) -> Result<bool, std::boxed::Box<dyn std::error::Error>> {
     let mut conn = open_db(db_path)?;
     let updated = {
         let mut repo = FileRepository::new(&mut conn);
-        repo.set_track_selection(file_path, selection)?
+        repo.set_track_preference(file_path, preference)?
     };
     close_db(conn);
     Ok(updated > 0)
@@ -291,7 +312,7 @@ fn detect_streams_in_background(
     subtitle_dropdown: DropDown,
     audio_streams: Rc<RefCell<Vec<MediaStream>>>,
     subtitle_streams: Rc<RefCell<Vec<MediaStream>>>,
-    selection: Rc<Cell<TrackSelection>>,
+    preference: Rc<RefCell<TrackPreference>>,
     translations: TranslationsRef,
 ) {
     let (sender, receiver) = mpsc::channel();
@@ -320,7 +341,7 @@ fn detect_streams_in_background(
                     &subtitle_dropdown,
                     &audio_streams.borrow(),
                     &subtitle_streams.borrow(),
-                    selection.get(),
+                    &preference.borrow(),
                     &translations,
                 );
 
@@ -357,7 +378,7 @@ fn refresh_dropdowns(
     subtitle_dropdown: &DropDown,
     audio_streams: &[MediaStream],
     subtitle_streams: &[MediaStream],
-    selection: TrackSelection,
+    preference: &TrackPreference,
     translations: &TranslationsRef,
 ) {
     let auto_label = translations.borrow().t("track.auto");
@@ -372,7 +393,7 @@ fn refresh_dropdowns(
     let audio_model =
         gtk4::StringList::new(&audio_options.iter().map(String::as_str).collect::<Vec<_>>());
     audio_dropdown.set_model(Some(&audio_model));
-    audio_dropdown.set_selected(audio_position(audio_streams, selection.audio_stream_index));
+    audio_dropdown.set_selected(audio_position(audio_streams, preference));
 
     let mut subtitle_options = vec![auto_label, none_label];
     subtitle_options.extend(
@@ -387,69 +408,74 @@ fn refresh_dropdowns(
             .collect::<Vec<_>>(),
     );
     subtitle_dropdown.set_model(Some(&subtitle_model));
-    subtitle_dropdown.set_selected(subtitle_position(subtitle_streams, selection));
+    subtitle_dropdown.set_selected(subtitle_position(subtitle_streams, preference));
 }
 
 /// Posición de la pista de audio en el desplegable (0 = automático).
-fn audio_position(streams: &[MediaStream], selected: Option<i32>) -> u32 {
-    selected
-        .and_then(|index| {
+///
+/// La clave estable tiene prioridad. El índice guardado solo se usa como
+/// respaldo para bases de datos antiguas que no tienen clave.
+fn audio_position(streams: &[MediaStream], preference: &TrackPreference) -> u32 {
+    let position = match preference.audio_track_key.as_deref() {
+        Some(key) => streams.iter().position(|stream| stream.track_key() == key),
+        None => preference.selection.audio_stream_index.and_then(|index| {
             streams
                 .iter()
                 .position(|stream| stream.stream_index == index)
-        })
-        .map(|position| position as u32 + 1)
-        .unwrap_or(0)
+        }),
+    };
+    position.map(|position| position as u32 + 1).unwrap_or(0)
 }
 
 /// Posición de la pista de subtítulos (0 = automático, 1 = ninguno).
-fn subtitle_position(streams: &[MediaStream], selection: TrackSelection) -> u32 {
-    if selection.subtitles_disabled {
+fn subtitle_position(streams: &[MediaStream], preference: &TrackPreference) -> u32 {
+    if preference.selection.subtitles_disabled {
         return 1;
     }
-    selection
-        .subtitle_stream_index
-        .and_then(|index| {
-            streams
-                .iter()
-                .position(|stream| stream.stream_index == index)
-        })
-        .map(|position| position as u32 + 2)
-        .unwrap_or(0)
+    let position = match preference.subtitle_track_key.as_deref() {
+        Some(key) => streams.iter().position(|stream| stream.track_key() == key),
+        None => preference
+            .selection
+            .subtitle_stream_index
+            .and_then(|index| {
+                streams
+                    .iter()
+                    .position(|stream| stream.stream_index == index)
+            }),
+    };
+    position.map(|position| position as u32 + 2).unwrap_or(0)
 }
 
-/// Traduce la posición de los desplegables a índices relativos al tipo.
-fn current_selection(
+/// Traduce la posición de los desplegables a una preferencia con identidad
+/// estable. Guardar las claves permite recuperar la misma pista aunque cambie
+/// el orden de los streams o se trate de un subtítulo externo.
+fn current_preference(
     audio_dropdown: &DropDown,
     subtitle_dropdown: &DropDown,
     audio_streams: &[MediaStream],
     subtitle_streams: &[MediaStream],
-) -> TrackSelection {
+) -> TrackPreference {
     let audio_position = audio_dropdown.selected() as usize;
-    let audio_stream_index = if audio_position == 0 {
-        None
-    } else {
-        audio_streams
-            .get(audio_position - 1)
-            .map(|stream| stream.stream_index)
-    };
+    let audio_stream = audio_position
+        .checked_sub(1)
+        .and_then(|position| audio_streams.get(position));
 
     let subtitle_position = subtitle_dropdown.selected() as usize;
-    let (subtitle_stream_index, subtitles_disabled) = match subtitle_position {
+    let (subtitle_stream, subtitles_disabled) = match subtitle_position {
         0 => (None, false),
         1 => (None, true),
-        position => (
-            subtitle_streams
-                .get(position - 2)
-                .map(|stream| stream.stream_index),
-            false,
-        ),
+        position => (subtitle_streams.get(position.saturating_sub(2)), false),
     };
 
-    TrackSelection {
-        audio_stream_index,
-        subtitle_stream_index,
-        subtitles_disabled,
+    TrackPreference {
+        selection: TrackSelection {
+            audio_stream_index: audio_stream.map(|stream| stream.stream_index),
+            subtitle_stream_index: subtitle_stream.map(|stream| stream.stream_index),
+            subtitles_disabled,
+        },
+        audio_track_key: audio_stream.map(MediaStream::track_key),
+        subtitle_track_key: subtitle_stream.map(MediaStream::track_key),
+        subtitle_external_path: subtitle_stream.and_then(|stream| stream.external_path.clone()),
     }
 }
 
@@ -504,43 +530,65 @@ mod tests {
             language: Some(language.to_string()),
             codec: Some("aac".to_string()),
             title: None,
+            external_path: None,
+        }
+    }
+
+    fn preference(index: Option<i32>) -> TrackPreference {
+        TrackPreference {
+            selection: TrackSelection {
+                audio_stream_index: index,
+                ..Default::default()
+            },
+            ..Default::default()
         }
     }
 
     #[test]
     fn posicion_de_audio_traduce_indice_relativo_a_desplegable() {
         let audio = vec![stream("audio", 0, "spa"), stream("audio", 1, "eng")];
-        assert_eq!(audio_position(&audio, None), 0);
-        assert_eq!(audio_position(&audio, Some(0)), 1);
-        assert_eq!(audio_position(&audio, Some(1)), 2);
-        assert_eq!(audio_position(&audio, Some(9)), 0);
+        assert_eq!(audio_position(&audio, &TrackPreference::default()), 0);
+        assert_eq!(audio_position(&audio, &preference(Some(0))), 1);
+        assert_eq!(audio_position(&audio, &preference(Some(1))), 2);
+        assert_eq!(audio_position(&audio, &preference(Some(9))), 0);
+    }
+
+    #[test]
+    fn posicion_de_audio_prioriza_la_clave_estable() {
+        let audio = vec![stream("audio", 0, "spa"), stream("audio", 1, "eng")];
+        let mut saved = preference(Some(0));
+        saved.audio_track_key = Some(audio[1].track_key());
+
+        assert_eq!(audio_position(&audio, &saved), 2);
     }
 
     #[test]
     fn posicion_de_subtitulos_distingue_automatico_y_ninguno() {
         let subtitles = vec![stream("subtitle", 0, "spa"), stream("subtitle", 1, "eng")];
-        assert_eq!(subtitle_position(&subtitles, TrackSelection::default()), 0);
         assert_eq!(
-            subtitle_position(
-                &subtitles,
-                TrackSelection {
-                    subtitle_stream_index: None,
-                    subtitles_disabled: true,
-                    ..Default::default()
-                }
-            ),
-            1
+            subtitle_position(&subtitles, &TrackPreference::default()),
+            0
         );
-        assert_eq!(
-            subtitle_position(
-                &subtitles,
-                TrackSelection {
-                    subtitle_stream_index: Some(1),
-                    ..Default::default()
-                }
-            ),
-            3
-        );
+        let mut disabled = TrackPreference::default();
+        disabled.selection.subtitles_disabled = true;
+        assert_eq!(subtitle_position(&subtitles, &disabled), 1);
+
+        let mut saved = TrackPreference::default();
+        saved.selection.subtitle_stream_index = Some(1);
+        assert_eq!(subtitle_position(&subtitles, &saved), 3);
+    }
+
+    #[test]
+    fn posicion_de_subtitulos_encuentra_sidecar_por_clave() {
+        let mut external = stream("subtitle", 2, "spa");
+        external.external_path = Some("/tmp/video.es.srt".to_string());
+        let subtitles = vec![stream("subtitle", 0, "spa"), external.clone()];
+        let saved = TrackPreference {
+            subtitle_track_key: Some(external.track_key()),
+            ..Default::default()
+        };
+
+        assert_eq!(subtitle_position(&subtitles, &saved), 3);
     }
 
     #[test]

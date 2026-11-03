@@ -1171,7 +1171,7 @@ impl MainWindow {
         this.borrow_mut()
             .media_details
             .borrow_mut()
-            .on_toggle_season_watched(move |season, watched| {
+            .on_toggle_season_watched(move |selection, watched| {
                 let this = this_clone.clone();
                 let w = this.borrow();
                 let db_path = w.db_path.clone();
@@ -1184,18 +1184,26 @@ impl MainWindow {
                         return;
                     }
                 };
-                let mut repo = FileRepository::new(&mut conn);
-                if let Err(e) = repo.set_season_watched(media_id, season, watched) {
+                let result = {
+                    let mut repo = FileRepository::new(&mut conn);
+                    match selection {
+                        // Una carpeta de temporada identifica sus propios
+                        // episodios; no se filtra por número de temporada.
+                        SeasonSelection::Child(season_id) => {
+                            repo.set_season_media_watched(season_id, watched)
+                        }
+                        SeasonSelection::Number(season) => {
+                            repo.set_season_watched(media_id, season, watched)
+                        }
+                    }
+                };
+                if let Err(e) = result {
                     eprintln!("Error marcando temporada como vista: {}", e);
                 }
                 close_db(conn);
-                // Recargar la vista para reflejar el cambio de estado.
-                let w2 = this.borrow();
-                let media_id2 = w2.media_details.borrow().media_id();
-                let season2 = w2.media_details.borrow().season_selection();
-                drop(w2);
-                let w3 = this.borrow();
-                w3.show_details(media_id2, season2);
+                // Recargar la vista conservando exactamente la temporada
+                // seleccionada, incluida una carpeta hija.
+                this.borrow().show_details(media_id, Some(selection));
             });
 
         // Completar metadatos y pósters que falten sin bloquear la UI.
@@ -1889,12 +1897,37 @@ impl MainWindow {
             media_id
         };
 
-        match media_id {
-            Some(media_id) => {
-                crate::core::player::play_with_resume(&self.db_path, media_id, file_path)
+        // El modo de mpv se deriva del estado real de Acryl: una ventana
+        // maximizada no es pantalla completa. Forzar --fullscreen en ese caso
+        // hacía que Hyprland reubicara y encogiera la ventana de Acryl.
+        let window_mode = player_window_mode(&self.window);
+        let session = match media_id {
+            Some(media_id) => crate::core::player::play_with_resume_with_mode(
+                &self.db_path,
+                media_id,
+                file_path,
+                window_mode,
+            ),
+            None => crate::core::player::play_external_with_mode(
+                &self.db_path,
+                None,
+                file_path,
+                window_mode,
+            ),
+        }?;
+
+        // Al cerrar mpv se reafirma el estado original para deshacer cualquier
+        // reubicación que el compositor haya aplicado mientras estaba abierto.
+        let window = self.window.clone();
+        glib::timeout_add_local(Duration::from_millis(250), move || {
+            if !session.finished() {
+                return glib::ControlFlow::Continue;
             }
-            None => crate::core::player::play_external(&self.db_path, None, file_path),
-        }
+            restore_window_mode(&window, window_mode);
+            glib::ControlFlow::Break
+        });
+
+        Ok(())
     }
 
     /// Sincroniza metadatos y pósters en segundo plano y refresca la UI al terminar.
@@ -2088,6 +2121,50 @@ impl MainWindow {
 
     pub fn widget(&self) -> &AdwApplicationWindow {
         &self.window
+    }
+}
+
+/// Traduce el estado real de la ventana de Acryl al modo que debe usar mpv.
+///
+/// Pantalla completa y maximizado son estados distintos: solo el primero debe
+/// abrir mpv en pantalla completa. Una ventana normal no añade ninguna opción
+/// para respetar el tamaño configurado por el usuario en mpv.
+fn player_window_mode(window: &AdwApplicationWindow) -> crate::core::player::PlayerWindowMode {
+    use crate::core::player::PlayerWindowMode;
+    if window.is_fullscreen() {
+        PlayerWindowMode::Fullscreen
+    } else if window.is_maximized() {
+        PlayerWindowMode::Maximized
+    } else {
+        PlayerWindowMode::Normal
+    }
+}
+
+/// Reafirma el estado de ventana previo a la reproducción.
+fn restore_window_mode(window: &AdwApplicationWindow, mode: crate::core::player::PlayerWindowMode) {
+    use crate::core::player::PlayerWindowMode;
+    match mode {
+        PlayerWindowMode::Fullscreen => {
+            if !window.is_fullscreen() {
+                window.fullscreen();
+            }
+        }
+        PlayerWindowMode::Maximized => {
+            if window.is_fullscreen() {
+                window.unfullscreen();
+            }
+            if !window.is_maximized() {
+                window.maximize();
+            }
+        }
+        PlayerWindowMode::Normal => {
+            if window.is_fullscreen() {
+                window.unfullscreen();
+            }
+            if window.is_maximized() {
+                window.unmaximize();
+            }
+        }
     }
 }
 
