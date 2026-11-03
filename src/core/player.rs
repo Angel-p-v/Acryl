@@ -191,7 +191,7 @@ pub fn play_with_resume(
     let mut args = vec![
         "--force-window=immediate".to_string(),
         format!("--input-ipc-server={}", socket_path),
-        format!("--start-position={}", start_position),
+        format!("--start={}", start_position),
         "--fullscreen".to_string(),
     ];
     append_track_args(&mut args, selection);
@@ -227,10 +227,22 @@ pub fn play_with_resume(
         let mut last_position = start_position;
         let mut last_duration = 0.0;
 
+        // Darle tiempo a mpv para crear el socket IPC antes del primer intento.
+        std::thread::sleep(Duration::from_millis(300));
+
         // Polling de posición y duración cada segundo hasta que mpv cierre el socket.
+        // Reintenta la conexión varias veces al inicio (race condition con la
+        // creación del socket) y deja de intentar cuando mpv ya no responde.
+        let mut connect_failures = 0usize;
         loop {
+            // Si mpv ya terminó, salir del bucle.
+            if child.try_wait().is_ok_and(|s| s.is_some()) {
+                break;
+            }
+
             match UnixStream::connect(&socket_owned) {
                 Ok(mut stream) => {
+                    connect_failures = 0;
                     let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
                     let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
 
@@ -247,12 +259,20 @@ pub fn play_with_resume(
                     }
                     drop(stream);
                 }
-                Err(_) => break, // Socket cerrado: mpv terminó.
+                Err(_) => {
+                    connect_failures += 1;
+                    // Si fallamos muchas veces seguidas y mpv sigue vivo,
+                    // el socket puede no haberse creado aún; reintentar.
+                    if connect_failures > 5 {
+                        break;
+                    }
+                }
             }
 
             // Leer duration (nueva conexión para evitar bloqueos).
             match UnixStream::connect(&socket_owned) {
                 Ok(mut stream) => {
+                    connect_failures = 0;
                     let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
                     let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
                     let msg = r#"{"command":["get_property","duration"]}"#;
@@ -267,7 +287,12 @@ pub fn play_with_resume(
                     }
                     drop(stream);
                 }
-                Err(_) => break,
+                Err(_) => {
+                    connect_failures += 1;
+                    if connect_failures > 5 {
+                        break;
+                    }
+                }
             }
 
             std::thread::sleep(Duration::from_secs(1));
@@ -293,9 +318,9 @@ pub fn play_with_resume(
         let threshold: f64 = if is_movie { 600.0 } else { 300.0 }; // 10 min / 5 min
         if last_duration > 0.0 {
             let remaining = last_duration - last_position;
-            if let Ok(mut conn) = open_db(&db_path_owned)
-                && remaining > 0.0
+            if remaining > 0.0
                 && remaining < threshold
+                && let Ok(mut conn) = open_db(&db_path_owned)
             {
                 let mut repo = MediaRepository::new(&mut conn);
                 let _ = repo.set_file_watched(&file_path_owned, true);
