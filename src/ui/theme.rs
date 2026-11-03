@@ -429,40 +429,11 @@ pub fn install_theme_css() {
             colors::TEXT_PRIMARY,
         ));
 
-        /* ===== RESPONSIVE: Media Queries ===== */
-        /* Nota: GTK4 CSS no soporta max-width/width/height ni margin-start/margin-end.
-         * Se usan solo propiedades válidas: min-width, min-height, margin-left/right.
-         * Los tamaños exactos de póster se controlan desde Rust con set_size_request. */
-
-        /* Mobile: hasta 599px - tarjetas más estrechas, márgenes reducidos */
-        css.push_str("@media (max-width: 599px) {\n");
-        css.push_str("  .media-card { min-width: 140px; }\n");
-        css.push_str("  .episode-card { min-width: 160px; }\n");
-        css.push_str("  .hero-actions { margin-top: 10px; margin-left: 12px; margin-right: 12px; }\n");
-        css.push_str("  .hero-action-btn { min-height: 36px; padding: 0 12px; font-size: 0.9em; }\n");
-        css.push_str("  .banner-title { font-size: 1.8em; }\n");
-        css.push_str("  .banner-subtitle { font-size: 0.95em; }\n");
-        css.push_str("  .synopsis-text { margin-left: 12px; margin-right: 12px; }\n");
-        css.push_str("  .season-dropdown { min-width: 140px; margin-left: 12px; }\n");
-        css.push_str("  .season-watched-dropdown { min-width: 130px; }\n");
-        css.push_str("  .details-header { margin-bottom: 6px; }\n");
-        css.push_str("  .vote-average { margin-left: 12px; }\n");
-        css.push_str("}\n");
-
-        /* Tablet: 600px - 1023px - márgenes medios */
-        css.push_str("@media (min-width: 600px) and (max-width: 1023px) {\n");
-        css.push_str("  .media-card { min-width: 160px; }\n");
-        css.push_str("  .episode-card { min-width: 180px; }\n");
-        css.push_str("  .hero-actions { margin-left: 16px; margin-right: 16px; }\n");
-        css.push_str("  .banner-title { font-size: 2.2em; }\n");
-        css.push_str("  .synopsis-text { margin-left: 16px; margin-right: 16px; }\n");
-        css.push_str("}\n");
-
-        /* Desktop: 1024px+ - layout completo */
-        css.push_str("@media (min-width: 1024px) {\n");
-        css.push_str("  .media-card { min-width: 180px; }\n");
-        css.push_str("  .episode-card { min-width: 200px; }\n");
-        css.push_str("}\n");
+        /* Nota: GTK4 CSS no soporta @media queries de ancho de forma fiable.
+         * El responsive se gestiona desde Rust en media_list.rs (update_columns)
+         * calculando columnas dinámicamente según el ancho del contenedor.
+         * Los tamaños base de las tarjetas están optimizados para pantallas
+         * de portátil (1366px+) y grandes (1920px+). */
 
         provider.load_from_data(&css);
 
