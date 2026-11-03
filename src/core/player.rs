@@ -272,8 +272,8 @@ pub fn launch_mpv_with_tracks(
 }
 
 /// Lee la preferencia guardada y la resuelve contra los streams actuales del
-/// archivo, aplicando primero las pistas predeterminadas del usuario si hay
-/// alguna configurada. Un fallo de la base de datos no impide la
+/// archivo. La preferencia por-archivo tiene prioridad sobre las pistas
+/// predeterminadas del usuario. Un fallo de la base de datos no impide la
 /// reproducción: se usa el comportamiento automático de mpv.
 fn saved_tracks(
     db_path: &str,
@@ -313,9 +313,25 @@ fn saved_tracks(
         }
     }
 
-    // Las pistas predeterminadas del usuario tienen prioridad sobre la
-    // preferencia guardada por archivo. Si están configuradas, se intentan
-    // resolver primero.
+    // La preferencia guardada por archivo tiene prioridad sobre las pistas
+    // predeterminadas. Si el usuario configuró pistas para este archivo
+    // concreto, se usan esas y se ignoran las predeterminadas.
+    let has_file_preference = preference.audio_track_key.is_some()
+        || preference.subtitle_track_key.is_some()
+        || preference.selection.subtitle_stream_index.is_some()
+        || preference.selection.audio_stream_index.is_some()
+        || preference.selection.subtitles_disabled;
+
+    if has_file_preference {
+        let resolved = resolve_track_preference(&preference, &streams);
+        return TrackResolution {
+            tracks: resolved,
+            used_defaults: false,
+            defaults_applicable: true,
+        };
+    }
+
+    // Solo si no hay preferencia por archivo, se intentan las predeterminadas.
     if let Some(defaults) = default_tracks {
         let audio_key = defaults.audio.as_deref();
         let subtitle_key = defaults.subtitle.as_deref();

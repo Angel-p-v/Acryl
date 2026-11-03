@@ -597,7 +597,8 @@ impl SettingsView {
         default_tracks_section.append(&default_audio_title);
 
         let default_audio_dropdown = DropDown::from_strings(&["Ninguno"]);
-        default_audio_dropdown.set_hexpand(true);
+        default_audio_dropdown.set_hexpand(false);
+        default_audio_dropdown.set_width_request(320);
         default_tracks_section.append(&default_audio_dropdown);
 
         // Subtítulos predeterminados.
@@ -606,7 +607,8 @@ impl SettingsView {
         default_tracks_section.append(&default_subtitle_title);
 
         let default_subtitle_dropdown = DropDown::from_strings(&["Ninguno"]);
-        default_subtitle_dropdown.set_hexpand(true);
+        default_subtitle_dropdown.set_hexpand(false);
+        default_subtitle_dropdown.set_width_request(320);
         default_tracks_section.append(&default_subtitle_dropdown);
 
         content.append(&default_tracks_section);
