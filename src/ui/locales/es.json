@@ -124,6 +124,7 @@
   "track.subtitles": "Subtítulos",
   "track.auto": "Automático (predeterminado)",
   "track.none": "Ninguno (desactivados)",
+  "track.use_defaults": "Usar predeterminadas de Ajustes",
 
   "stream.track_word": "Pista",
   "stream.label_format": "Pista {} · {} · {}",

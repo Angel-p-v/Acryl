@@ -124,6 +124,7 @@
   "track.subtitles": "Subtitles",
   "track.auto": "Automatic (default)",
   "track.none": "None (disabled)",
+  "track.use_defaults": "Use Settings defaults",
 
   "stream.track_word": "Track",
   "stream.label_format": "Track {} · {} · {}",

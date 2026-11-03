@@ -326,6 +326,17 @@ fn saved_tracks(
 
     // --- Resolución de audio: preferencia por-archivo > predeterminada > auto ---
     let resolved_audio = preference.audio_track_key.as_deref().and_then(|key| {
+        // Clave especial: usar predeterminada de audio de Ajustes.
+        if key == "default:audio" {
+            return default_tracks
+                .and_then(|d| d.audio.as_deref())
+                .and_then(|default_key| {
+                    audio_streams
+                        .iter()
+                        .find(|stream| stream.track_key() == default_key)
+                        .map(|stream| stream.stream_index)
+                });
+        }
         audio_streams
             .iter()
             .find(|stream| stream.track_key() == key)
@@ -345,6 +356,17 @@ fn saved_tracks(
 
     // --- Resolución de subtítulos: preferencia por-archivo > predeterminada > auto ---
     let resolved_subtitle = preference.subtitle_track_key.as_deref().and_then(|key| {
+        // Clave especial: usar predeterminada de subtítulos de Ajustes.
+        if key == "default:subtitle" {
+            return default_tracks
+                .and_then(|d| d.subtitle.as_deref())
+                .and_then(|default_key| {
+                    subtitle_streams
+                        .iter()
+                        .find(|stream| stream.track_key() == default_key)
+                        .map(|stream| stream.stream_index)
+                });
+        }
         subtitle_streams
             .iter()
             .find(|stream| stream.track_key() == key)
