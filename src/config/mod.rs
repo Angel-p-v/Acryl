@@ -24,6 +24,21 @@ pub fn default_data_dir() -> PathBuf {
     PathBuf::from("acryl-data")
 }
 
+/// Preferencias predeterminadas de pistas para reproducir cualquier medio.
+///
+/// Se aplican cuando el archivo no tiene una preferencia propia guardada y
+/// tienen prioridad sobre cualquier preferencia por-archivo.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DefaultTracks {
+    /// Clave estable de la pista de audio predeterminada (ej. `embedded:audio:jpn:aac:japanese`).
+    #[serde(default)]
+    pub audio: Option<String>,
+    /// Clave estable de la pista de subtítulos predeterminada
+    /// (ej. `embedded:subtitle:spa:ass:spanish[esp]` o `external:/ruta/archivo.srt`).
+    #[serde(default)]
+    pub subtitle: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub db_path: String,
@@ -32,6 +47,8 @@ pub struct AppConfig {
     pub language: String,
     pub auto_sync_metadata: bool,
     pub default_player: String,
+    #[serde(default)]
+    pub default_tracks: DefaultTracks,
 }
 
 impl Default for AppConfig {
@@ -45,6 +62,7 @@ impl Default for AppConfig {
             language: "es".to_string(),
             auto_sync_metadata: false,
             default_player: "mpv".to_string(),
+            default_tracks: DefaultTracks::default(),
         }
     }
 }

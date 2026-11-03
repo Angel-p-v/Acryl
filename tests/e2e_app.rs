@@ -13,7 +13,7 @@
 //! (X11/Wayland). Se omiten automáticamente si no hay display disponible.
 //! En CI se ejecutan con `xvfb-run`.
 
-use acryl::config::{AppConfig, Config};
+use acryl::config::{AppConfig, Config, DefaultTracks};
 use acryl::db::connection::open_db;
 use acryl::db::media_repo::{ListMediaOptions, MediaInput, MediaRepository};
 use acryl::ui::main_window::MainWindow;
@@ -73,6 +73,7 @@ fn temp_config() -> (Config, TempDir, TempDir) {
         language: "es".to_string(),
         auto_sync_metadata: false,
         default_player: "mpv".to_string(),
+        default_tracks: DefaultTracks::default(),
     };
 
     let config = Config {

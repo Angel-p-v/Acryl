@@ -1901,30 +1901,132 @@ impl MainWindow {
         // maximizada no es pantalla completa. Forzar --fullscreen en ese caso
         // hacía que Hyprland reubicara y encogiera la ventana de Acryl.
         let window_mode = player_window_mode(&self.window);
-        let session = match media_id {
+
+        // Las pistas predeterminadas del usuario tienen prioridad sobre
+        // cualquier preferencia guardada por archivo.
+        let default_tracks = {
+            let config = self.config.borrow();
+            config.default_tracks.clone()
+        };
+
+        let playback_start = match media_id {
             Some(media_id) => crate::core::player::play_with_resume_with_mode(
                 &self.db_path,
                 media_id,
                 file_path,
                 window_mode,
-            ),
+                Some(&default_tracks),
+            )?,
             None => crate::core::player::play_external_with_mode(
                 &self.db_path,
                 None,
                 file_path,
                 window_mode,
-            ),
-        }?;
+                Some(&default_tracks),
+            )?,
+        };
 
-        // Al cerrar mpv se reafirma el estado original para deshacer cualquier
-        // reubicación que el compositor haya aplicado mientras estaba abierto.
-        let window = self.window.clone();
-        glib::timeout_add_local(Duration::from_millis(250), move || {
-            if !session.finished() {
-                return glib::ControlFlow::Continue;
+        match playback_start {
+            crate::core::player::PlaybackStart::Started(session) => {
+                // Al cerrar mpv se reafirma el estado original para deshacer
+                // cualquier reubicación que el compositor haya aplicado mientras
+                // estaba abierto.
+                let window = self.window.clone();
+                glib::timeout_add_local(Duration::from_millis(250), move || {
+                    if !session.finished() {
+                        return glib::ControlFlow::Continue;
+                    }
+                    restore_window_mode(&window, window_mode);
+                    glib::ControlFlow::Break
+                });
+                Ok(())
             }
-            restore_window_mode(&window, window_mode);
-            glib::ControlFlow::Break
+            crate::core::player::PlaybackStart::NeedsDefaultTrackFallback {
+                file_path: fallback_path,
+                default_tracks: fallback_defaults,
+            } => self.show_default_track_fallback_dialog(fallback_path, fallback_defaults),
+        }
+    }
+
+    /// Muestra el diálogo de fallback cuando las pistas predeterminadas del
+    /// usuario no son aplicables al video que se va a reproducir.
+    fn show_default_track_fallback_dialog(
+        &self,
+        file_path: String,
+        default_tracks: crate::config::DefaultTracks,
+    ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
+        let audio_label = default_tracks
+            .audio
+            .as_deref()
+            .map(|key| format!("Audio: {key}"))
+            .unwrap_or_else(|| "Audio: (ninguno)".to_string());
+        let subtitle_label = default_tracks
+            .subtitle
+            .as_deref()
+            .map(|key| format!("Subtítulos: {key}"))
+            .unwrap_or_else(|| "Subtítulos: (ninguno)".to_string());
+
+        let message = format!(
+            "Este video no tiene las pistas predeterminadas configuradas:\n<b>{}</b>\n<b>{}</b>\n\n¿Qué desea hacer?",
+            audio_label, subtitle_label
+        );
+
+        let dialog = gtk4::AlertDialog::builder()
+            .modal(true)
+            .message(&message)
+            .detail("¿Qué desea hacer?")
+            .buttons(["Continuar con las más cercanas", "Elegir otras pistas"])
+            .default_button(0)
+            .build();
+
+        let window = self.window.clone();
+        let window_for_dialog = window.clone();
+        let db_path = self.db_path.clone();
+        let translations = self.translations.clone();
+        let file_path_for_choose = file_path.clone();
+
+        let media_id_for_continue = {
+            let mut conn = open_db(&self.db_path).ok();
+            let mut repo = conn.as_mut().map(MediaRepository::new);
+            repo.as_mut()
+                .and_then(|r| r.find_media_id_by_file(&file_path).ok())
+                .flatten()
+        };
+
+        dialog.choose(Some(&window), None::<&gio::Cancellable>, move |response| {
+            match response {
+                Ok(0) => {
+                    // Continuar con las más cercanas: reproducir sin
+                    // aplicar predeterminadas (usar por-archivo o automático).
+                    let _ = match media_id_for_continue {
+                        Some(media_id) => crate::core::player::play_with_resume_with_mode(
+                            &db_path,
+                            media_id,
+                            &file_path,
+                            player_window_mode(&window_for_dialog),
+                            None,
+                        ),
+                        None => crate::core::player::play_external_with_mode(
+                            &db_path,
+                            None,
+                            &file_path,
+                            player_window_mode(&window_for_dialog),
+                            None,
+                        ),
+                    };
+                }
+                Ok(1) => {
+                    // Elegir otras pistas: abrir el diálogo de pistas.
+                    crate::ui::track_dialog::show_track_dialog(
+                        &window_for_dialog,
+                        &db_path,
+                        &file_path_for_choose,
+                        translations.clone(),
+                        Rc::new(move || {}),
+                    );
+                }
+                _ => {}
+            }
         });
 
         Ok(())
