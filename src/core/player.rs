@@ -4,13 +4,14 @@
 //! proceso externo mediante `std::process::Command`. El control (play, pausa,
 //! stop, seek, volumen) se envía a `mpv` a través de su socket IPC.
 
-use crate::db::file_repo::{FileRepository, TrackSelection};
+use crate::db::file_repo::{FileRepository, TrackPreference, TrackSelection};
 use crate::db::{MediaRepository, close_db, open_db};
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
 /// Identificador incremental para que dos reproductores (o dos tests en
@@ -26,6 +27,30 @@ const MPV_COMMAND: &str = "mpv";
 /// Tiempo máximo de espera (ms) para que mpv cree su socket IPC.
 const MPV_SOCKET_TIMEOUT_MS: u64 = 5000;
 
+/// Modo de ventana que debe usar mpv al abrirse.
+///
+/// Se deriva del estado real de la ventana de Acryl para no forzar pantalla
+/// completa cuando el usuario solo tenía la ventana maximizada. Confundir
+/// ambos estados hacía que Hyprland reubicara Acryl al cerrar mpv.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlayerWindowMode {
+    #[default]
+    Normal,
+    Maximized,
+    Fullscreen,
+}
+
+/// Pistas resueltas para un archivo concreto.
+///
+/// `external_subtitles` contiene las rutas de los sidecars en el mismo orden
+/// que sus índices de subtítulo. Se pasan a mpv con `--sub-file` para que la
+/// pista externa elegida tenga un `--sid` determinista.
+#[derive(Debug, Clone, Default)]
+pub struct ResolvedTracks {
+    pub selection: TrackSelection,
+    pub external_subtitles: Vec<String>,
+}
+
 /// Construye los argumentos de línea de comandos de mpv (puro, testeable).
 pub fn build_mpv_args(file_path: &str, socket_path: &str) -> Vec<String> {
     build_mpv_args_with_tracks(file_path, socket_path, TrackSelection::default())
@@ -39,13 +64,32 @@ pub fn build_mpv_args_with_tracks(
     socket_path: &str,
     selection: TrackSelection,
 ) -> Vec<String> {
+    build_mpv_args_for_playback(
+        file_path,
+        socket_path,
+        &ResolvedTracks {
+            selection,
+            external_subtitles: Vec::new(),
+        },
+        PlayerWindowMode::Fullscreen,
+    )
+}
+
+/// Construye los argumentos de mpv con IPC para un modo de ventana y pistas
+/// resueltas concretas.
+pub fn build_mpv_args_for_playback(
+    file_path: &str,
+    socket_path: &str,
+    tracks: &ResolvedTracks,
+    window_mode: PlayerWindowMode,
+) -> Vec<String> {
     let mut args = vec![
         "--force-window=immediate".to_string(),
         format!("--input-ipc-server={}", socket_path),
         "--idle=yes".to_string(),
-        "--fullscreen".to_string(),
     ];
-    append_track_args(&mut args, selection);
+    append_window_args(&mut args, window_mode);
+    append_track_args(&mut args, tracks);
     args.push(file_path.to_string());
     args
 }
@@ -62,20 +106,50 @@ pub fn build_mpv_launch_args_with_tracks(
     file_path: &str,
     selection: TrackSelection,
 ) -> Vec<String> {
-    let mut args = vec![
-        "--force-window=immediate".to_string(),
-        "--fullscreen".to_string(),
-    ];
-    append_track_args(&mut args, selection);
+    build_mpv_launch_args_for_playback(
+        file_path,
+        &ResolvedTracks {
+            selection,
+            external_subtitles: Vec::new(),
+        },
+        PlayerWindowMode::Fullscreen,
+    )
+}
+
+/// Construye los argumentos del reproductor independiente para un modo de
+/// ventana y pistas resueltas concretas.
+pub fn build_mpv_launch_args_for_playback(
+    file_path: &str,
+    tracks: &ResolvedTracks,
+    window_mode: PlayerWindowMode,
+) -> Vec<String> {
+    let mut args = vec!["--force-window=immediate".to_string()];
+    append_window_args(&mut args, window_mode);
+    append_track_args(&mut args, tracks);
     args.push("--".to_string());
     args.push(file_path.to_string());
     args
 }
 
+/// Añade solo la opción de ventana solicitada. `normal` no añade nada para
+/// respetar el tamaño que mpv tenga configurado por el usuario.
+fn append_window_args(args: &mut Vec<String>, window_mode: PlayerWindowMode) {
+    match window_mode {
+        PlayerWindowMode::Normal => {}
+        PlayerWindowMode::Maximized => args.push("--window-maximized=yes".to_string()),
+        PlayerWindowMode::Fullscreen => args.push("--fullscreen".to_string()),
+    }
+}
+
 /// Añade `--aid` y `--sid` según la selección. `subtitles_disabled` tiene
 /// prioridad sobre una pista concreta para que «Ninguno» siempre desactive
 /// los subtítulos.
-fn append_track_args(args: &mut Vec<String>, selection: TrackSelection) {
+///
+/// Cuando hay subtítulos externos se desactiva la autocarga de mpv y se pasan
+/// todos los sidecars en orden. Así el `--sid` elegido apunta siempre a la
+/// pista correcta, sin depender de cómo ordene mpv los archivos descubiertos.
+fn append_track_args(args: &mut Vec<String>, tracks: &ResolvedTracks) {
+    let selection = tracks.selection;
     if let Some(audio_index) = selection.audio_stream_index {
         args.push(format!("--aid={}", audio_index + 1));
     }
@@ -85,6 +159,67 @@ fn append_track_args(args: &mut Vec<String>, selection: TrackSelection) {
     } else if let Some(subtitle_index) = selection.subtitle_stream_index {
         args.push(format!("--sid={}", subtitle_index + 1));
     }
+
+    let has_selected_subtitle = !selection.subtitles_disabled
+        && (selection.subtitle_stream_index.is_some() || !tracks.external_subtitles.is_empty());
+    if has_selected_subtitle && !tracks.external_subtitles.is_empty() {
+        args.push("--sub-auto=no".to_string());
+        for path in &tracks.external_subtitles {
+            args.push(format!("--sub-file={}", path));
+        }
+    }
+}
+
+/// Señal de finalización de una reproducción lanzada como proceso externo.
+///
+/// La UI la usa para restaurar el estado de su ventana cuando mpv termina,
+/// sin bloquear el hilo de GTK ni hacer polling del proceso.
+pub struct PlaybackSession {
+    finished: Receiver<()>,
+}
+
+impl PlaybackSession {
+    /// Indica si mpv ya terminó. Pensado para consultarse desde un timeout de
+    /// GLib; devuelve `true` también si el hilo terminó sin enviar la señal.
+    pub fn finished(&self) -> bool {
+        match self.finished.try_recv() {
+            Ok(()) | Err(mpsc::TryRecvError::Disconnected) => true,
+            Err(mpsc::TryRecvError::Empty) => false,
+        }
+    }
+}
+
+/// Valida la ruta y lanza el proceso mpv sin esperar a que termine.
+fn spawn_mpv(args: &[String]) -> Result<Child, Box<dyn std::error::Error>> {
+    Command::new(MPV_COMMAND)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .stdin(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("no se pudo lanzar '{}': {}", MPV_COMMAND, e).into())
+}
+
+fn validate_media_path(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let is_url = file_path.starts_with("http://") || file_path.starts_with("https://");
+    if !is_url && file_path != "-" && !std::path::Path::new(file_path).exists() {
+        return Err(format!("archivo no encontrado: {}", file_path).into());
+    }
+    Ok(())
+}
+
+/// Indica si una reproducción terminada debe marcarse como completada.
+///
+/// Se conserva el umbral existente (5 minutos para episodios, 10 para
+/// películas), pero también se completa cuando la posición alcanza o supera la
+/// duración: antes esos casos dejaban una entrada activa al final del vídeo y
+/// la siguiente reproducción empezaba en el último segundo.
+fn should_complete_playback(media_type: &str, position: f64, duration: f64) -> bool {
+    if duration <= 0.0 {
+        return false;
+    }
+    let threshold = if media_type == "movie" { 600.0 } else { 300.0 };
+    duration - position < threshold
 }
 
 /// Lanza mpv en su propia ventana para reproducir un archivo.
@@ -100,38 +235,136 @@ pub fn launch_mpv_with_tracks(
     file_path: &str,
     selection: TrackSelection,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let is_url = file_path.starts_with("http://") || file_path.starts_with("https://");
-    if !is_url && file_path != "-" && !std::path::Path::new(file_path).exists() {
-        return Err(format!("archivo no encontrado: {}", file_path).into());
-    }
-
-    let mut child = Command::new(MPV_COMMAND)
-        .args(build_mpv_launch_args_with_tracks(file_path, selection))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .stdin(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("no se pudo lanzar '{}': {}", MPV_COMMAND, e))?;
-
+    validate_media_path(file_path)?;
+    let mut child = spawn_mpv(&build_mpv_launch_args_with_tracks(file_path, selection))?;
     std::thread::spawn(move || {
         let _ = child.wait();
     });
-
     Ok(())
 }
 
-/// Lee la preferencia de pistas guardada para un archivo. Un fallo de la base
-/// de datos no debe impedir la reproducción: en ese caso se usa el
+/// Lee la preferencia guardada y la resuelve contra los streams actuales del
+/// archivo. Un fallo de la base de datos no impide la reproducción: se usa el
 /// comportamiento automático de mpv.
-fn saved_track_selection(db_path: &str, file_path: &str) -> TrackSelection {
+fn saved_tracks(db_path: &str, file_path: &str) -> ResolvedTracks {
     let Ok(mut conn) = open_db(db_path) else {
-        return TrackSelection::default();
+        return ResolvedTracks::default();
     };
-    let selection = FileRepository::new(&mut conn)
-        .track_selection(file_path)
+    let preference = FileRepository::new(&mut conn)
+        .track_preference(file_path)
+        .unwrap_or_default();
+    let mut streams = MediaRepository::new(&mut conn)
+        .list_streams_by_file(file_path)
         .unwrap_or_default();
     close_db(conn);
-    selection
+
+    // Una base de datos indexada antes de soportar sidecars puede no tenerlos
+    // en `media_streams`. Se descubren al reproducir para no perder la pista
+    // externa guardada ni obligar a reindexar toda la biblioteca.
+    let next_index = streams
+        .iter()
+        .filter(|stream| stream.stream_type == "subtitle")
+        .map(|stream| stream.stream_index + 1)
+        .max()
+        .unwrap_or(0);
+    for subtitle in crate::core::library::discover_external_subtitles(file_path, next_index) {
+        if !streams
+            .iter()
+            .any(|stream| stream.external_path == subtitle.external_path)
+        {
+            streams.push(subtitle.into_media_stream());
+        }
+    }
+
+    resolve_track_preference(&preference, &streams)
+}
+
+/// Resuelve una preferencia guardada contra los streams actuales.
+///
+/// La clave estable manda sobre el índice. Si la pista ya no existe, no se
+/// reutiliza otra pista parecida: se desactivan los subtítulos. El índice solo
+/// actúa como respaldo para bases de datos antiguas sin clave.
+pub fn resolve_track_preference(
+    preference: &TrackPreference,
+    streams: &[crate::db::media_repo::MediaStream],
+) -> ResolvedTracks {
+    let audio_streams: Vec<_> = streams
+        .iter()
+        .filter(|stream| stream.stream_type == "audio")
+        .collect();
+    let subtitle_streams: Vec<_> = streams
+        .iter()
+        .filter(|stream| stream.stream_type == "subtitle")
+        .collect();
+
+    let audio_stream_index = match preference.audio_track_key.as_deref() {
+        Some(key) => audio_streams
+            .iter()
+            .find(|stream| stream.track_key() == key)
+            .map(|stream| stream.stream_index),
+        None => preference.selection.audio_stream_index.filter(|index| {
+            audio_streams
+                .iter()
+                .any(|stream| stream.stream_index == *index)
+        }),
+    };
+
+    let mut external_subtitles: Vec<String> = subtitle_streams
+        .iter()
+        .filter_map(|stream| stream.external_path.clone())
+        .collect();
+    external_subtitles.sort();
+    external_subtitles.dedup();
+
+    if preference.selection.subtitles_disabled {
+        return ResolvedTracks {
+            selection: TrackSelection {
+                audio_stream_index,
+                subtitle_stream_index: None,
+                subtitles_disabled: true,
+            },
+            external_subtitles,
+        };
+    }
+
+    let resolved_subtitle: Option<(Option<i32>, Option<String>)> =
+        match preference.subtitle_track_key.as_deref() {
+            Some(key) => subtitle_streams
+                .iter()
+                .find(|stream| stream.track_key() == key)
+                .map(|stream| (Some(stream.stream_index), stream.external_path.clone())),
+            None => preference
+                .selection
+                .subtitle_stream_index
+                .filter(|index| {
+                    subtitle_streams
+                        .iter()
+                        .any(|stream| stream.stream_index == *index)
+                })
+                .map(|index| (Some(index), None)),
+        };
+
+    // Si había una preferencia de subtítulos pero la pista ya no existe, se
+    // desactivan para no mostrar accidentalmente otra pista del mismo archivo.
+    let subtitle_was_requested = preference.subtitle_track_key.is_some()
+        || preference.selection.subtitle_stream_index.is_some();
+    let (subtitle_stream_index, selected_external) = resolved_subtitle.unwrap_or((None, None));
+
+    if let Some(path) = selected_external
+        && !external_subtitles.iter().any(|known| known == &path)
+    {
+        external_subtitles.push(path);
+        external_subtitles.sort();
+    }
+
+    ResolvedTracks {
+        selection: TrackSelection {
+            audio_stream_index,
+            subtitle_stream_index,
+            subtitles_disabled: subtitle_was_requested && subtitle_stream_index.is_none(),
+        },
+        external_subtitles,
+    }
 }
 
 /// Lanza mpv y registra la reproducción en el historial si se conoce el medio.
@@ -139,9 +372,30 @@ pub fn play_external(
     db_path: &str,
     media_id: Option<i64>,
     file_path: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let selection = saved_track_selection(db_path, file_path);
-    launch_mpv_with_tracks(file_path, selection)?;
+) -> Result<PlaybackSession, Box<dyn std::error::Error>> {
+    play_external_with_mode(db_path, media_id, file_path, PlayerWindowMode::Fullscreen)
+}
+
+/// Variante de `play_external` que respeta el estado de ventana de Acryl.
+pub fn play_external_with_mode(
+    db_path: &str,
+    media_id: Option<i64>,
+    file_path: &str,
+    window_mode: PlayerWindowMode,
+) -> Result<PlaybackSession, Box<dyn std::error::Error>> {
+    validate_media_path(file_path)?;
+    let tracks = saved_tracks(db_path, file_path);
+    let mut child = spawn_mpv(&build_mpv_launch_args_for_playback(
+        file_path,
+        &tracks,
+        window_mode,
+    ))?;
+
+    let (finished_sender, finished_receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = child.wait();
+        let _ = finished_sender.send(());
+    });
 
     if let Some(media_id) = media_id
         && let Err(error) = PlayerService::open(db_path, media_id, file_path)
@@ -149,7 +403,9 @@ pub fn play_external(
         eprintln!("No se pudo registrar la reproducción: {}", error);
     }
 
-    Ok(())
+    Ok(PlaybackSession {
+        finished: finished_receiver,
+    })
 }
 
 /// Lanza mpv con soporte de reanudación desde una posición guardada y
@@ -157,9 +413,11 @@ pub fn play_external(
 /// pocos minutos (5 min para episodios, 10 min para películas).
 ///
 /// - Lee la última posición guardada en `playback_history` y la pasa a
-///   mpv con `--start-position` para reanudar donde se quedó.
+///   mpv con `--start` para reanudar donde se quedó.
 ///   Hace polling de la posición cada segundo vía socket IPC para conocer
 ///   el progreso real.
+/// - Respeta el modo de ventana solicitado (`normal`, `maximizado` o
+///   `pantalla completa`) en lugar de forzar siempre `--fullscreen`.
 ///   Cuando mpv termina, si faltan menos de 5 min (episodio/anime) o
 ///   10 min (película) para terminar, marca `is_watched = true` en
 ///   `media_files`.
@@ -167,7 +425,20 @@ pub fn play_with_resume(
     db_path: &str,
     media_id: i64,
     file_path: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<PlaybackSession, Box<dyn std::error::Error>> {
+    play_with_resume_with_mode(db_path, media_id, file_path, PlayerWindowMode::Fullscreen)
+}
+
+/// Variante de `play_with_resume` que usa el modo de ventana solicitado por
+/// la UI (normal, maximizada o pantalla completa real).
+pub fn play_with_resume_with_mode(
+    db_path: &str,
+    media_id: i64,
+    file_path: &str,
+    window_mode: PlayerWindowMode,
+) -> Result<PlaybackSession, Box<dyn std::error::Error>> {
+    validate_media_path(file_path)?;
+
     // 1. Consultar tipo de medio y última posición guardada (rápido, en hilo principal).
     let (media_type, start_position) = {
         let mut conn = open_db(db_path)?;
@@ -178,8 +449,8 @@ pub fn play_with_resume(
         (t, pos)
     };
 
-    // 2. Selección de pistas guardada.
-    let selection = saved_track_selection(db_path, file_path);
+    // 2. Preferencia de pistas guardada, resuelta contra los streams actuales.
+    let tracks = saved_tracks(db_path, file_path);
 
     // 3. Crear socket IPC único para mpv.
     let socket_path = format!(
@@ -187,26 +458,19 @@ pub fn play_with_resume(
         NEXT_SOCKET_ID.fetch_add(1, Ordering::Relaxed)
     );
 
-    // 4. Construir argumentos de mpv con IPC, start-position y pistas.
-    let mut args = vec![
-        "--force-window=immediate".to_string(),
-        format!("--input-ipc-server={}", socket_path),
-        format!("--start={}", start_position),
-        "--fullscreen".to_string(),
-    ];
-    append_track_args(&mut args, selection);
-    args.push(file_path.to_string());
+    // 4. Construir argumentos de mpv con IPC, start-position, pistas y modo
+    //    de ventana. `--start` reanuda sin dejar que mpv reabra la ventana
+    //    con un tamaño distinto al solicitado.
+    let mut args = build_mpv_args_for_playback(file_path, &socket_path, &tracks, window_mode);
+    // Insertar `--start` antes de la ruta del archivo.
+    let insert_at = args.len().saturating_sub(1);
+    args.insert(insert_at, format!("--start={}", start_position));
 
     // 5. Lanzar mpv.
-    let mut child = Command::new(MPV_COMMAND)
-        .args(&args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .stdin(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("no se pudo lanzar '{}': {}", MPV_COMMAND, e))?;
+    let mut child = spawn_mpv(&args)?;
 
-    // 6. Registrar inicio de reproducción en historial.
+    // 6. Registrar inicio de reproducción en historial. El repositorio hace
+    //    UPSERT de la entrada activa para no duplicar reproducciones pendientes.
     {
         let mut conn = open_db(db_path)?;
         let mut repo = MediaRepository::new(&mut conn);
@@ -222,6 +486,7 @@ pub fn play_with_resume(
     let file_path_owned = file_path.to_string();
     let media_type_owned = media_type;
     let socket_owned = socket_path.clone();
+    let (finished_sender, finished_receiver) = mpsc::channel();
 
     std::thread::spawn(move || {
         let mut last_position = start_position;
@@ -313,26 +578,26 @@ pub fn play_with_resume(
             close_db(conn);
         }
 
-        // Marcar como visto si faltan menos del umbral.
-        let is_movie = media_type_owned == "movie";
-        let threshold: f64 = if is_movie { 600.0 } else { 300.0 }; // 10 min / 5 min
-        if last_duration > 0.0 {
-            let remaining = last_duration - last_position;
-            if remaining > 0.0
-                && remaining < threshold
-                && let Ok(mut conn) = open_db(&db_path_owned)
-            {
-                let mut repo = MediaRepository::new(&mut conn);
-                let _ = repo.set_file_watched(&file_path_owned, true);
-                close_db(conn);
-            }
+        // Marcar como visto si faltan menos del umbral o si el vídeo terminó.
+        if should_complete_playback(&media_type_owned, last_position, last_duration)
+            && let Ok(mut conn) = open_db(&db_path_owned)
+        {
+            let mut repo = MediaRepository::new(&mut conn);
+            let _ = repo.set_file_watched(&file_path_owned, true);
+            let _ = repo.complete_playback(media_id, &file_path_owned);
+            close_db(conn);
         }
 
         // Limpiar socket IPC.
         let _ = std::fs::remove_file(&socket_owned);
+
+        // Avisar a la UI de que puede restaurar el estado de su ventana.
+        let _ = finished_sender.send(());
     });
 
-    Ok(())
+    Ok(PlaybackSession {
+        finished: finished_receiver,
+    })
 }
 
 /// Ejecuta un comando JSON contra el socket IPC de mpv y devuelve la primera
@@ -830,5 +1095,173 @@ mod tests {
         assert!(resultado.is_err());
         assert!(!player.is_playing());
         assert!(player.current_path().is_none());
+    }
+
+    fn stream(
+        stream_type: &str,
+        index: i32,
+        language: &str,
+        title: Option<&str>,
+        external_path: Option<&str>,
+    ) -> crate::db::media_repo::MediaStream {
+        crate::db::media_repo::MediaStream {
+            id: 0,
+            media_id: 1,
+            file_path: "/tmp/video.mkv".to_string(),
+            stream_type: stream_type.to_string(),
+            stream_index: index,
+            language: Some(language.to_string()),
+            codec: Some("aac".to_string()),
+            title: title.map(str::to_string),
+            external_path: external_path.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn completa_la_reproduccion_al_llegar_al_final() {
+        assert!(should_complete_playback("series", 299.0, 300.0));
+        assert!(should_complete_playback("series", 300.0, 300.0));
+        assert!(should_complete_playback("series", 301.0, 300.0));
+        assert!(!should_complete_playback("series", 0.0, 300.0));
+        assert!(!should_complete_playback("series", 100.0, 1000.0));
+        assert!(!should_complete_playback("series", 0.0, 0.0));
+    }
+
+    #[test]
+    fn las_peliculas_usan_un_umbral_mayor() {
+        assert!(!should_complete_playback("movie", 0.0, 600.0));
+        assert!(should_complete_playback("movie", 0.0, 599.0));
+    }
+
+    #[test]
+    fn modo_de_ventana_no_fuerza_pantalla_completa_en_ventana_normal() {
+        let args = build_mpv_args_for_playback(
+            "/ruta/video.mkv",
+            "/tmp/acryl.sock",
+            &ResolvedTracks::default(),
+            PlayerWindowMode::Normal,
+        );
+        assert!(!args.iter().any(|arg| arg == "--fullscreen"));
+        assert!(!args.iter().any(|arg| arg.starts_with("--window-maximized")));
+    }
+
+    #[test]
+    fn modo_de_ventana_distingue_maximizado_de_pantalla_completa() {
+        let maximized = build_mpv_launch_args_for_playback(
+            "/ruta/video.mkv",
+            &ResolvedTracks::default(),
+            PlayerWindowMode::Maximized,
+        );
+        assert!(maximized.contains(&"--window-maximized=yes".to_string()));
+        assert!(!maximized.contains(&"--fullscreen".to_string()));
+
+        let fullscreen = build_mpv_launch_args_for_playback(
+            "/ruta/video.mkv",
+            &ResolvedTracks::default(),
+            PlayerWindowMode::Fullscreen,
+        );
+        assert!(fullscreen.contains(&"--fullscreen".to_string()));
+        assert!(
+            !fullscreen
+                .iter()
+                .any(|arg| arg.starts_with("--window-maximized"))
+        );
+    }
+
+    #[test]
+    fn subtitulos_externos_se_pasan_con_sub_file_y_sid_determinista() {
+        let tracks = ResolvedTracks {
+            selection: TrackSelection {
+                audio_stream_index: None,
+                subtitle_stream_index: Some(2),
+                subtitles_disabled: false,
+            },
+            external_subtitles: vec![
+                "/tmp/video.es.srt".to_string(),
+                "/tmp/video.en.srt".to_string(),
+            ],
+        };
+        let args =
+            build_mpv_launch_args_for_playback("/tmp/video.mkv", &tracks, PlayerWindowMode::Normal);
+        assert!(args.contains(&"--sub-auto=no".to_string()));
+        let sub_files: Vec<String> = args
+            .iter()
+            .filter(|arg| arg.starts_with("--sub-file="))
+            .cloned()
+            .collect();
+        assert_eq!(
+            sub_files,
+            vec![
+                "--sub-file=/tmp/video.es.srt".to_string(),
+                "--sub-file=/tmp/video.en.srt".to_string(),
+            ]
+        );
+        assert!(args.contains(&"--sid=3".to_string()));
+    }
+
+    #[test]
+    fn preferencia_por_clave_ignora_un_indice_que_apunta_a_otra_pista() {
+        let streams = vec![
+            stream("audio", 0, "spa", None, None),
+            stream("audio", 1, "eng", None, None),
+            stream("subtitle", 0, "spa", None, None),
+            stream("subtitle", 1, "eng", None, None),
+        ];
+        let mut preference = TrackPreference {
+            selection: TrackSelection {
+                audio_stream_index: Some(0),
+                subtitle_stream_index: Some(0),
+                subtitles_disabled: false,
+            },
+            ..Default::default()
+        };
+        preference.audio_track_key = Some(streams[1].track_key());
+        preference.subtitle_track_key = Some(streams[3].track_key());
+
+        let resolved = resolve_track_preference(&preference, &streams);
+        assert_eq!(resolved.selection.audio_stream_index, Some(1));
+        assert_eq!(resolved.selection.subtitle_stream_index, Some(1));
+        assert!(!resolved.selection.subtitles_disabled);
+    }
+
+    #[test]
+    fn preferencia_de_pista_inexistente_no_reutiliza_otra_pista() {
+        let streams = vec![stream("subtitle", 0, "spa", None, None)];
+        let preference = TrackPreference {
+            selection: TrackSelection {
+                audio_stream_index: None,
+                subtitle_stream_index: Some(0),
+                subtitles_disabled: false,
+            },
+            subtitle_track_key: Some("embedded:subtitle:eng:aac:".to_string()),
+            ..Default::default()
+        };
+
+        let resolved = resolve_track_preference(&preference, &streams);
+        assert_eq!(resolved.selection.subtitle_stream_index, None);
+        assert!(resolved.selection.subtitles_disabled);
+    }
+
+    #[test]
+    fn preferencia_de_sidecar_conserva_su_ruta_como_identidad() {
+        let external = stream("subtitle", 1, "spa", Some("es"), Some("/tmp/video.es.srt"));
+        let streams = vec![stream("subtitle", 0, "eng", None, None), external.clone()];
+        let preference = TrackPreference {
+            selection: TrackSelection {
+                audio_stream_index: None,
+                subtitle_stream_index: None,
+                subtitles_disabled: false,
+            },
+            subtitle_track_key: Some(external.track_key()),
+            subtitle_external_path: external.external_path.clone(),
+            ..Default::default()
+        };
+
+        let resolved = resolve_track_preference(&preference, &streams);
+        assert_eq!(resolved.selection.subtitle_stream_index, Some(1));
+        assert_eq!(
+            resolved.external_subtitles,
+            vec!["/tmp/video.es.srt".to_string()]
+        );
     }
 }
