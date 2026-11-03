@@ -1365,4 +1365,52 @@ mod tests {
             "el siguiente episodio no puede ser uno ya reproducido"
         );
     }
+
+    #[test]
+    fn next_episode_salta_a_siguiente_temporada_cuando_la_actual_esta_vista() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path)
+             VALUES ('series', 'Serie', 'serie', '/tmp/serie')",
+            [],
+        )
+        .expect("insertar serie");
+        let media_id = conn.last_insert_rowid();
+
+        let paths = [
+            "/tmp/serie/S01E01.mkv",
+            "/tmp/serie/S01E02.mkv",
+            "/tmp/serie/S02E01.mkv",
+        ];
+        for path in paths {
+            let season = if path.contains("S02") { 2 } else { 1 };
+            let episode = if path.contains("S02") { 1 } else { 2 };
+            conn.execute(
+                "INSERT INTO media_files (media_id, season, episode, file_path)
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![media_id, season, episode, path],
+            )
+            .expect("insertar episodio");
+        }
+
+        let mut repo = MediaRepository::new(&mut conn);
+
+        // Marcar como vistos todos los episodios de la temporada 1.
+        repo.record_playback(media_id, paths[0], 0.0, 0.0)
+            .expect("reproducir S01E01");
+        repo.record_playback(media_id, paths[1], 0.0, 0.0)
+            .expect("reproducir S01E02");
+
+        // El siguiente no visto global debe ser S02E01 (temporada 2),
+        // no quedarse en el primero de la temporada 1 (ya visto).
+        let next = repo
+            .get_next_episode_to_watch(media_id)
+            .expect("siguiente episodio")
+            .expect("hay episodios pendientes");
+        assert_eq!(
+            next.1, paths[2],
+            "debe saltar al primer no visto de la temporada 2 (estilo Netflix)"
+        );
+    }
 }

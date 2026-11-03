@@ -371,24 +371,10 @@ impl MediaDetails {
             (children, direct_files, first_file, next_episode)
         };
 
-        let (label, file_path) = if media.r#type == "movie" {
-            match first_file {
-                Some(path) => (self.t("button.play"), Some(path)),
-                None => (self.t("button.play"), None),
-            }
-        } else if let Some((_id, path, episode_label)) = next_episode {
-            (
-                format!("{} {}", self.t("button.continue_prefix"), episode_label),
-                Some(path),
-            )
-        } else if let Some(path) = first_file {
-            (self.t("button.play"), Some(path))
-        } else {
-            (self.t("button.play"), None)
-        };
-        *self.main_button_file_path.borrow_mut() = file_path;
-        self.main_button_label = label;
-        self.play_button.set_label(&self.main_button_label);
+        // Botón principal al estilo Netflix/Prime/Crunchyroll: siempre apunta
+        // al siguiente episodio no visto de toda la serie/anime, independientemente
+        // de la temporada mostrada en el desplegable.
+        self.update_main_button(media, first_file, next_episode);
 
         while let Some(child) = self.content_container.first_child() {
             self.content_container.remove(&child);
@@ -480,6 +466,36 @@ impl MediaDetails {
 
     pub fn media_id(&self) -> i64 {
         self.media_id
+    }
+
+    /// Calcula y aplica el botón principal al estilo Netflix/Prime/Crunchyroll:
+    /// siempre apunta al siguiente episodio no visto de toda la serie/anime
+    /// (independiente de la temporada mostrada en el desplegable).
+    /// Para películas usa el único archivo disponible.
+    fn update_main_button(
+        &mut self,
+        media: &Media,
+        first_file: Option<String>,
+        next_episode: Option<(i64, String, String)>,
+    ) {
+        let (label, file_path) = if media.r#type == "movie" {
+            match first_file {
+                Some(path) => (self.t("button.play"), Some(path)),
+                None => (self.t("button.play"), None),
+            }
+        } else if let Some((_id, path, episode_label)) = next_episode {
+            (
+                format!("{} {}", self.t("button.continue_prefix"), episode_label),
+                Some(path),
+            )
+        } else if let Some(path) = first_file {
+            (self.t("button.play"), Some(path))
+        } else {
+            (self.t("button.play"), None)
+        };
+        *self.main_button_file_path.borrow_mut() = file_path;
+        self.main_button_label = label;
+        self.play_button.set_label(&self.main_button_label);
     }
 
     pub fn parent_id(&self) -> Option<i64> {
