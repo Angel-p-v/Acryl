@@ -460,6 +460,8 @@ impl SettingsView {
         // --- Sección: Rutas de medios ---
         let folders_section = Box::new(Orientation::Vertical, 10);
         folders_section.set_hexpand(true);
+        folders_section.set_margin_top(10);
+        folders_section.set_margin_bottom(20);
 
         let folders_title = Label::new(Some(&t("settings.folders.title")));
         folders_title.set_halign(gtk4::Align::Start);
@@ -521,6 +523,8 @@ impl SettingsView {
         // --- Sección: Idioma ---
         let language_section = Box::new(Orientation::Vertical, 10);
         language_section.set_hexpand(true);
+        language_section.set_margin_top(20);
+        language_section.set_margin_bottom(20);
 
         let language_title = Label::new(Some(&t("settings.language.title")));
         language_title.set_halign(gtk4::Align::Start);
@@ -541,6 +545,8 @@ impl SettingsView {
         // --- Sección: Metadatos ---
         let metadata_section = Box::new(Orientation::Vertical, 10);
         metadata_section.set_hexpand(true);
+        metadata_section.set_margin_top(20);
+        metadata_section.set_margin_bottom(20);
 
         let metadata_title = Label::new(Some(&t("settings.metadata.title")));
         metadata_title.set_halign(gtk4::Align::Start);
@@ -580,16 +586,13 @@ impl SettingsView {
         // --- Sección: Pistas predeterminadas ---
         let default_tracks_section = Box::new(Orientation::Vertical, 10);
         default_tracks_section.set_hexpand(true);
+        default_tracks_section.set_margin_top(20);
+        default_tracks_section.set_margin_bottom(20);
 
         let default_tracks_title = Label::new(Some(&t("settings.default_tracks.title")));
         default_tracks_title.set_halign(gtk4::Align::Start);
         default_tracks_title.add_css_class("subheading");
         default_tracks_section.append(&default_tracks_title);
-
-        let default_tracks_label = Label::new(Some(&t("settings.default_tracks.description")));
-        default_tracks_label.set_halign(gtk4::Align::Start);
-        default_tracks_label.set_wrap(true);
-        default_tracks_section.append(&default_tracks_label);
 
         // Audio y subtítulos predeterminados en la misma línea.
         let default_tracks_row = Box::new(Orientation::Horizontal, 12);
