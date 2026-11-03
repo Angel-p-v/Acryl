@@ -591,25 +591,38 @@ impl SettingsView {
         default_tracks_label.set_wrap(true);
         default_tracks_section.append(&default_tracks_label);
 
+        // Audio y subtítulos predeterminados en la misma línea.
+        let default_tracks_row = Box::new(Orientation::Horizontal, 12);
+        default_tracks_row.set_hexpand(true);
+        default_tracks_row.set_valign(gtk4::Align::Start);
+
         // Audio predeterminado.
+        let audio_box = Box::new(Orientation::Vertical, 6);
+        audio_box.set_hexpand(true);
         let default_audio_title = Label::new(Some(&t("settings.default_tracks.audio")));
         default_audio_title.set_halign(gtk4::Align::Start);
-        default_tracks_section.append(&default_audio_title);
+        audio_box.append(&default_audio_title);
 
         let default_audio_dropdown = DropDown::from_strings(&["Ninguno"]);
         default_audio_dropdown.set_hexpand(false);
-        default_audio_dropdown.set_width_request(320);
-        default_tracks_section.append(&default_audio_dropdown);
+        default_audio_dropdown.set_width_request(340);
+        audio_box.append(&default_audio_dropdown);
+        default_tracks_row.append(&audio_box);
 
         // Subtítulos predeterminados.
+        let subtitle_box = Box::new(Orientation::Vertical, 6);
+        subtitle_box.set_hexpand(true);
         let default_subtitle_title = Label::new(Some(&t("settings.default_tracks.subtitle")));
         default_subtitle_title.set_halign(gtk4::Align::Start);
-        default_tracks_section.append(&default_subtitle_title);
+        subtitle_box.append(&default_subtitle_title);
 
         let default_subtitle_dropdown = DropDown::from_strings(&["Ninguno"]);
         default_subtitle_dropdown.set_hexpand(false);
-        default_subtitle_dropdown.set_width_request(320);
-        default_tracks_section.append(&default_subtitle_dropdown);
+        default_subtitle_dropdown.set_width_request(340);
+        subtitle_box.append(&default_subtitle_dropdown);
+        default_tracks_row.append(&subtitle_box);
+
+        default_tracks_section.append(&default_tracks_row);
 
         content.append(&default_tracks_section);
 

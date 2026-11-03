@@ -272,8 +272,10 @@ pub fn launch_mpv_with_tracks(
 }
 
 /// Lee la preferencia guardada y la resuelve contra los streams actuales del
-/// archivo. La preferencia por-archivo tiene prioridad sobre las pistas
-/// predeterminadas del usuario. Un fallo de la base de datos no impide la
+/// archivo. Audio y subtítulos se resuelven de forma independiente: para cada
+/// tipo, primero se usa la preferencia guardada por archivo; si no hay, se usa
+/// la pista predeterminada del usuario (Ajustes); si tampoco hay, se deja a
+/// mpv en automático. Un fallo de la base de datos no impide la
 /// reproducción: se usa el comportamiento automático de mpv.
 fn saved_tracks(
     db_path: &str,
@@ -313,88 +315,99 @@ fn saved_tracks(
         }
     }
 
-    // La preferencia guardada por archivo tiene prioridad sobre las pistas
-    // predeterminadas. Si el usuario configuró pistas para este archivo
-    // concreto, se usan esas y se ignoran las predeterminadas.
-    let has_file_preference = preference.audio_track_key.is_some()
-        || preference.subtitle_track_key.is_some()
-        || preference.selection.subtitle_stream_index.is_some()
-        || preference.selection.audio_stream_index.is_some()
-        || preference.selection.subtitles_disabled;
+    let audio_streams: Vec<_> = streams
+        .iter()
+        .filter(|stream| stream.stream_type == "audio")
+        .collect();
+    let subtitle_streams: Vec<_> = streams
+        .iter()
+        .filter(|stream| stream.stream_type == "subtitle")
+        .collect();
 
-    if has_file_preference {
-        let resolved = resolve_track_preference(&preference, &streams);
-        return TrackResolution {
-            tracks: resolved,
-            used_defaults: false,
-            defaults_applicable: true,
-        };
-    }
-
-    // Solo si no hay preferencia por archivo, se intentan las predeterminadas.
-    if let Some(defaults) = default_tracks {
-        let audio_key = defaults.audio.as_deref();
-        let subtitle_key = defaults.subtitle.as_deref();
-
-        let audio_streams: Vec<_> = streams
+    // --- Resolución de audio: preferencia por-archivo > predeterminada > auto ---
+    let resolved_audio = preference.audio_track_key.as_deref().and_then(|key| {
+        audio_streams
             .iter()
-            .filter(|stream| stream.stream_type == "audio")
-            .collect();
-        let subtitle_streams: Vec<_> = streams
+            .find(|stream| stream.track_key() == key)
+            .map(|stream| stream.stream_index)
+    });
+    let audio_used_default = resolved_audio.is_none() && default_tracks.is_some();
+    let resolved_audio = resolved_audio.or_else(|| {
+        default_tracks
+            .and_then(|d| d.audio.as_deref())
+            .and_then(|key| {
+                audio_streams
+                    .iter()
+                    .find(|stream| stream.track_key() == key)
+                    .map(|stream| stream.stream_index)
+            })
+    });
+
+    // --- Resolución de subtítulos: preferencia por-archivo > predeterminada > auto ---
+    let resolved_subtitle = preference.subtitle_track_key.as_deref().and_then(|key| {
+        subtitle_streams
             .iter()
-            .filter(|stream| stream.stream_type == "subtitle")
-            .collect();
+            .find(|stream| stream.track_key() == key)
+            .map(|stream| stream.stream_index)
+    });
+    let subtitle_used_default = resolved_subtitle.is_none() && default_tracks.is_some();
+    let resolved_subtitle = resolved_subtitle.or_else(|| {
+        default_tracks
+            .and_then(|d| d.subtitle.as_deref())
+            .and_then(|key| {
+                subtitle_streams
+                    .iter()
+                    .find(|stream| stream.track_key() == key)
+                    .map(|stream| stream.stream_index)
+            })
+    });
 
-        let resolved_audio = audio_key.and_then(|key| {
-            audio_streams
-                .iter()
-                .find(|stream| stream.track_key() == key)
-                .map(|stream| stream.stream_index)
-        });
-        let resolved_subtitle = subtitle_key.and_then(|key| {
-            subtitle_streams
-                .iter()
-                .find(|stream| stream.track_key() == key)
-                .map(|stream| stream.stream_index)
-        });
-
-        // Si se configuraron predeterminadas pero alguna no existe en el
-        // video, no son aplicables y se necesita un diálogo de fallback.
-        let defaults_applicable = matches!(
-            (audio_key, subtitle_key, resolved_audio, resolved_subtitle),
-            (Some(_), Some(_), Some(_), Some(_))
-                | (Some(_), None, Some(_), _)
-                | (None, Some(_), _, Some(_))
-        );
-
-        let selection = TrackSelection {
-            audio_stream_index: resolved_audio,
-            subtitle_stream_index: resolved_subtitle,
-            subtitles_disabled: resolved_subtitle.is_none() && subtitle_key.is_some(),
+    // Si el usuario configuró predeterminadas pero alguna no existe en el
+    // video y no hay preferencia por-archivo para ese campo, se necesita
+    // un diálogo de fallback.
+    let defaults_applicable = if let Some(defaults) = default_tracks {
+        // Determinar si cada predeterminada es aplicable (existe en el video
+        // o no se configuró para ese tipo).
+        let audio_ok = match defaults.audio.as_deref() {
+            Some(_) => resolved_audio.is_some(),
+            None => true,
         };
-
-        let mut external_subtitles: Vec<String> = subtitle_streams
-            .iter()
-            .filter_map(|stream| stream.external_path.clone())
-            .collect();
-        external_subtitles.sort();
-        external_subtitles.dedup();
-
-        return TrackResolution {
-            tracks: ResolvedTracks {
-                selection,
-                external_subtitles,
-            },
-            used_defaults: true,
-            defaults_applicable,
+        let subtitle_ok = match defaults.subtitle.as_deref() {
+            Some(_) => resolved_subtitle.is_some(),
+            None => true,
         };
-    }
+        audio_ok && subtitle_ok
+    } else {
+        true
+    };
 
-    let resolved = resolve_track_preference(&preference, &streams);
+    let mut external_subtitles: Vec<String> = subtitle_streams
+        .iter()
+        .filter_map(|stream| stream.external_path.clone())
+        .collect();
+    external_subtitles.sort();
+    external_subtitles.dedup();
+
+    // Si se usaron predeterminadas pero alguna no es aplicable, notificar a la UI.
+    let used_defaults = audio_used_default || subtitle_used_default;
+
+    let selection = TrackSelection {
+        audio_stream_index: resolved_audio,
+        subtitle_stream_index: resolved_subtitle,
+        subtitles_disabled: resolved_subtitle.is_none()
+            && (preference.selection.subtitles_disabled
+                || default_tracks
+                    .map(|d| d.subtitle.is_some())
+                    .unwrap_or(false)),
+    };
+
     TrackResolution {
-        tracks: resolved,
-        used_defaults: false,
-        defaults_applicable: true,
+        tracks: ResolvedTracks {
+            selection,
+            external_subtitles,
+        },
+        used_defaults,
+        defaults_applicable,
     }
 }
 
