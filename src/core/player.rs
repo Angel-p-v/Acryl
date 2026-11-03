@@ -6,6 +6,7 @@
 
 use crate::config::DefaultTracks;
 use crate::db::file_repo::{FileRepository, TrackPreference, TrackSelection};
+use crate::db::media_repo::MediaStream;
 use crate::db::{MediaRepository, close_db, open_db};
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
@@ -325,64 +326,22 @@ fn saved_tracks(
         .collect();
 
     // --- Resolución de audio: preferencia por-archivo > predeterminada > auto ---
-    let resolved_audio = preference.audio_track_key.as_deref().and_then(|key| {
-        // Clave especial: usar predeterminada de audio de Ajustes.
-        if key == "default:audio" {
-            return default_tracks
-                .and_then(|d| d.audio.as_deref())
-                .and_then(|default_key| {
-                    audio_streams
-                        .iter()
-                        .find(|stream| stream.track_key() == default_key)
-                        .map(|stream| stream.stream_index)
-                });
-        }
-        audio_streams
-            .iter()
-            .find(|stream| stream.track_key() == key)
-            .map(|stream| stream.stream_index)
-    });
-    let audio_used_default = resolved_audio.is_none() && default_tracks.is_some();
-    let resolved_audio = resolved_audio.or_else(|| {
-        default_tracks
-            .and_then(|d| d.audio.as_deref())
-            .and_then(|key| {
-                audio_streams
-                    .iter()
-                    .find(|stream| stream.track_key() == key)
-                    .map(|stream| stream.stream_index)
-            })
-    });
+    let resolved_audio = resolve_audio_stream(
+        &audio_streams,
+        preference.audio_track_key.as_deref(),
+        default_tracks,
+    );
+    let audio_used_default =
+        preference.audio_track_key.is_none() && default_tracks.is_some_and(|d| d.audio.is_some());
 
     // --- Resolución de subtítulos: preferencia por-archivo > predeterminada > auto ---
-    let resolved_subtitle = preference.subtitle_track_key.as_deref().and_then(|key| {
-        // Clave especial: usar predeterminada de subtítulos de Ajustes.
-        if key == "default:subtitle" {
-            return default_tracks
-                .and_then(|d| d.subtitle.as_deref())
-                .and_then(|default_key| {
-                    subtitle_streams
-                        .iter()
-                        .find(|stream| stream.track_key() == default_key)
-                        .map(|stream| stream.stream_index)
-                });
-        }
-        subtitle_streams
-            .iter()
-            .find(|stream| stream.track_key() == key)
-            .map(|stream| stream.stream_index)
-    });
-    let subtitle_used_default = resolved_subtitle.is_none() && default_tracks.is_some();
-    let resolved_subtitle = resolved_subtitle.or_else(|| {
-        default_tracks
-            .and_then(|d| d.subtitle.as_deref())
-            .and_then(|key| {
-                subtitle_streams
-                    .iter()
-                    .find(|stream| stream.track_key() == key)
-                    .map(|stream| stream.stream_index)
-            })
-    });
+    let resolved_subtitle = resolve_subtitle_stream(
+        &subtitle_streams,
+        preference.subtitle_track_key.as_deref(),
+        default_tracks,
+    );
+    let subtitle_used_default = preference.subtitle_track_key.is_none()
+        && default_tracks.is_some_and(|d| d.subtitle.is_some());
 
     // Si el usuario configuró predeterminadas pero alguna no existe en el
     // video y no hay preferencia por-archivo para ese campo, se necesita
@@ -519,6 +478,122 @@ pub fn resolve_track_preference(
         },
         external_subtitles,
     }
+}
+
+/// Resuelve el stream de audio para reproducir.
+///
+/// Orden de prioridad:
+/// 1. Clave exacta guardada por archivo (si no es "default:audio").
+/// 2. Predeterminada de audio de Ajustes (si la clave es "default:audio" o no hay preferencia por-archivo).
+/// 3. Matching flexible por idioma (si la clave exacta no existe pero hay un stream con el mismo idioma).
+///
+/// Devuelve `None` si no se puede resolver ninguna pista.
+fn resolve_audio_stream(
+    streams: &[&MediaStream],
+    preference_key: Option<&str>,
+    default_tracks: Option<&DefaultTracks>,
+) -> Option<i32> {
+    // 1. Clave exacta guardada por archivo (salvo que sea "default:audio").
+    if let Some(key) = preference_key.filter(|k| *k != "default:audio")
+        && let Some(stream) = streams.iter().find(|s| s.track_key() == key)
+    {
+        return Some(stream.stream_index);
+    }
+
+    // 2. Predeterminada de audio de Ajustes.
+    if let Some(default_key) = default_tracks.and_then(|d| d.audio.as_deref()) {
+        // Intentar clave exacta primero.
+        if let Some(stream) = streams.iter().find(|s| s.track_key() == default_key) {
+            return Some(stream.stream_index);
+        }
+        // Matching flexible por idioma si la clave exacta no existe.
+        if let Some(stream) = find_stream_by_language(streams, "audio", default_key) {
+            return Some(stream.stream_index);
+        }
+    }
+
+    None
+}
+
+/// Resuelve el stream de subtítulos para reproducir.
+///
+/// Orden de prioridad:
+/// 1. Clave exacta guardada por archivo (si no es "default:subtitle").
+/// 2. Predeterminada de subtítulos de Ajustes (si la clave es "default:subtitle" o no hay preferencia por-archivo).
+/// 3. Matching flexible por idioma (si la clave exacta no existe pero hay un stream con el mismo idioma).
+///
+/// Devuelve `None` si no se puede resolver ninguna pista.
+fn resolve_subtitle_stream(
+    streams: &[&MediaStream],
+    preference_key: Option<&str>,
+    default_tracks: Option<&DefaultTracks>,
+) -> Option<i32> {
+    // 1. Clave exacta guardada por archivo (salvo que sea "default:subtitle").
+    if let Some(key) = preference_key.filter(|k| *k != "default:subtitle")
+        && let Some(stream) = streams.iter().find(|s| s.track_key() == key)
+    {
+        return Some(stream.stream_index);
+    }
+
+    // 2. Predeterminada de subtítulos de Ajustes.
+    if let Some(default_key) = default_tracks.and_then(|d| d.subtitle.as_deref()) {
+        // Intentar clave exacta primero.
+        if let Some(stream) = streams.iter().find(|s| s.track_key() == default_key) {
+            return Some(stream.stream_index);
+        }
+        // Matching flexible por idioma si la clave exacta no existe.
+        if let Some(stream) = find_stream_by_language(streams, "subtitle", default_key) {
+            return Some(stream.stream_index);
+        }
+    }
+
+    None
+}
+
+/// Busca un stream por idioma, haciendo matching flexible cuando la clave
+/// exacta no coincide pero el idioma es el mismo (o compatible).
+///
+/// Esto permite que, si el usuario seleccionó "jpn" en Ajustes pero el video
+/// tiene un track con idioma "japonese" o "Japanese", se encuentre la pista
+/// correcta.
+fn find_stream_by_language<'a>(
+    streams: &'a [&MediaStream],
+    stream_type: &str,
+    default_key: &str,
+) -> Option<&'a MediaStream> {
+    // Extraer el idioma de la clave predeterminada (formato: embedded:audio:jpn:aac:japanese).
+    let default_lang = default_key
+        .splitn(3, ':')
+        .nth(2)
+        .map(|s| s.trim().to_lowercase());
+
+    let default_lang = match default_lang {
+        Some(lang) if !lang.is_empty() => lang,
+        _ => return None,
+    };
+
+    // Primero intentar coincidencia exacta de idioma.
+    if let Some(stream) = streams.iter().find(|s| {
+        s.stream_type == stream_type
+            && s.language
+                .as_deref()
+                .is_some_and(|l| l.trim().to_lowercase() == default_lang)
+    }) {
+        return Some(stream);
+    }
+
+    // Luego intentar coincidencia por prefijo (ej. "jpn" vs "japonese").
+    if let Some(stream) = streams.iter().find(|s| {
+        s.stream_type == stream_type
+            && s.language.as_deref().is_some_and(|l| {
+                let l = l.trim().to_lowercase();
+                l.starts_with(&default_lang) || default_lang.starts_with(&l)
+            })
+    }) {
+        return Some(stream);
+    }
+
+    None
 }
 
 /// Lanza mpv y registra la reproducción en el historial si se conoce el medio.
