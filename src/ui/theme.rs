@@ -337,19 +337,8 @@ pub fn install_theme_css() {
         /* Sobrelay de estado visto en episodio */
         css.push_str(".watched-overlay { background-color: rgba(0, 0, 0, 0.5); border-radius: 6px; }\n");
 
-        /* Botón de marcar temporada como vista/no vista */
-        css.push_str(&format!(
-            ".season-watched-btn {{ background-color: transparent; color: {}; border: 1px solid {}; border-radius: {}; font-weight: 600; min-height: 30px; padding: 0 10px; }}\n",
-            colors::TEXT_SECONDARY, colors::BORDER, radius::SMALL,
-        ));
-        css.push_str(&format!(
-            ".season-watched-btn:hover {{ color: {}; border-color: {}; }}\n",
-            colors::TEXT_PRIMARY, colors::BORDER_HOVER,
-        ));
-        css.push_str(&format!(
-            ".season-watched-btn.watched {{ color: {}; border-color: {}; background-color: {}; }}\n",
-            colors::BTN_PRIMARY_TEXT, colors::ACCENT, colors::ACCENT,
-        ));
+        /* Desplegable de marcar temporada como vista/no vista */
+        css.push_str(".season-watched-dropdown { min-height: 30px; min-width: 150px; }\n");
 
         /* Estrellas de calificación */
         css.push_str(&format!(".star {{ color: {}; }}\n", colors::TEXT_MUTED));

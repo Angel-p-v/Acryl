@@ -688,36 +688,44 @@ fn render_files(
 
     if let Some(title) = title.filter(|title| !title.is_empty()) {
         let season_header = Box::new(Orientation::Horizontal, 6);
-        season_header.set_halign(gtk4::Align::Start);
+        season_header.set_halign(gtk4::Align::Fill);
         season_header.set_hexpand(true);
+        season_header.set_valign(gtk4::Align::Center);
+        season_header.set_margin_top(24);
 
         let season_title = Label::new(Some(title));
         season_title.set_xalign(0.0);
         season_title.add_css_class("season-grid-title");
         season_header.append(&season_title);
 
-        // Botón para marcar toda la temporada como vista/no vista, solo
+        // Spacer para empujar el desplegable a la derecha del encabezado.
+        let spacer = Box::new(Orientation::Horizontal, 0);
+        spacer.set_hexpand(true);
+        season_header.append(&spacer);
+
+        // Desplegable para marcar toda la temporada como vista/no vista, solo
         // cuando se conoce el número de temporada (temporadas por número,
         // no temporadas hijas).
         if let Some(season_number) = season {
-            let season_btn_label = if files.iter().any(|f| f.is_watched) {
-                translations.borrow().t("button.mark_season_unwatched")
-            } else {
-                translations.borrow().t("button.mark_season_watched")
-            };
-            let season_btn = Button::with_label(&season_btn_label);
-            season_btn.add_css_class("season-watched-btn");
-            if files.iter().all(|f| f.is_watched) {
-                season_btn.add_css_class("watched");
-            }
+            let model = gtk4::StringList::new(&[
+                &translations.borrow().t("button.mark_season_watched"),
+                &translations.borrow().t("button.mark_season_unwatched"),
+            ]);
+            let season_dropdown = gtk4::DropDown::builder().model(&model).build();
+            season_dropdown.add_css_class("season-watched-dropdown");
+            season_dropdown.set_halign(gtk4::Align::End);
+            season_dropdown.set_valign(gtk4::Align::Center);
+            season_dropdown.set_margin_top(14);
+
             let cb = callbacks.on_toggle_season_watched.borrow().clone();
             if let Some(callback) = cb {
-                let all_watched = files.iter().all(|f| f.is_watched);
-                season_btn.connect_clicked(move |_| {
-                    callback(season_number, !all_watched);
+                season_dropdown.connect_selected_notify(move |dd| {
+                    let index = dd.selected() as usize;
+                    // Índice 0 = marcar como vista, 1 = marcar como no vista.
+                    callback(season_number, index == 0);
                 });
             }
-            season_header.append(&season_btn);
+            season_header.append(&season_dropdown);
         }
 
         container.append(&season_header);
