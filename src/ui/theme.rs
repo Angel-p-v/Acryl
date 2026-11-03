@@ -296,20 +296,6 @@ pub fn install_theme_css() {
             colors::ACCENT_HOVER,
         ));
 
-        /* Botón de pistas de un episodio concreto */
-        css.push_str(&format!(
-            ".episode-tracks-btn {{ background-color: transparent; color: {}; border: 1px solid {}; border-radius: {}; font-weight: 600; min-height: 30px; padding: 0 10px; }}\n",
-            colors::TEXT_SECONDARY, colors::BORDER, radius::SMALL,
-        ));
-        css.push_str(&format!(
-            ".episode-tracks-btn:hover {{ color: {}; border-color: {}; }}\n",
-            colors::TEXT_PRIMARY, colors::BORDER_HOVER,
-        ));
-        css.push_str(&format!(
-            ".episode-tracks-btn.custom {{ color: {}; border-color: {}; }}\n",
-            colors::ACCENT, colors::ACCENT,
-        ));
-
         /* Tarjeta de episodio en rejilla */
         css.push_str(&format!(
             ".episode-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; transition: all {}; }}\n",
