@@ -1411,9 +1411,7 @@ mod tests {
     #[test]
     fn pistas_predeterminadas_se_aplican_cuando_existen_en_el_video() {
         use crate::config::DefaultTracks;
-        use crate::db::file_repo::{
-            FileRepository, MediaFileInput,
-        };
+        use crate::db::file_repo::{FileRepository, MediaFileInput};
         use crate::db::media_repo::{MediaInput, MediaRepository};
         use rusqlite::params;
         use tempfile::TempDir;

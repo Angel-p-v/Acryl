@@ -87,6 +87,11 @@
   "settings.language.en": "English",
   "settings.metadata.title": "Metadata",
   "settings.metadata.description": "Queries TVmaze (and AniList for anime) again and overwrites title, year, synopsis, poster and banner of all indexed media.",
+  "settings.default_tracks.title": "Default tracks",
+  "settings.default_tracks.description": "Default audio and subtitle track used when playing any media. They take priority over the per-file selection and over automatic tracks.",
+  "settings.default_tracks.audio": "Default audio",
+  "settings.default_tracks.subtitle": "Default subtitles",
+  "settings.default_tracks.none": "None",
 
   "content.no_seasons": "No seasons or episodes available",
   "content.no_episodes_season": "No episodes in this season",

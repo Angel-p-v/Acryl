@@ -3,6 +3,16 @@
 use crate::db::file_repo::FileRepository;
 use rusqlite::{Connection, Result as RusqliteResult, params};
 
+/// Tipo auxiliar para las filas de `list_available_tracks`:
+/// (stream_type, language, codec, title, external_path).
+type StreamRow = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Media {
     pub id: i64,
@@ -948,6 +958,79 @@ impl<'a> MediaRepository<'a> {
             .filter_map(Result::ok)
             .collect();
         Ok(rows)
+    }
+
+    /// Lista las pistas únicas disponibles en la biblioteca, agrupadas por tipo.
+    ///
+    /// Devuelve un vector de tuplas `(track_key, etiqueta_legible)` para cada
+    /// tipo de pista (`audio` o `subtitle`). Las claves repetidas se deduplican.
+    pub fn list_available_tracks(
+        &mut self,
+        stream_type: &str,
+    ) -> RusqliteResult<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT stream_type, language, codec, title, external_path
+             FROM media_streams WHERE stream_type = ?1
+             ORDER BY language, title",
+        )?;
+        let rows: Vec<StreamRow> = stmt
+            .query_map(params![stream_type], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })?
+            .filter_map(Result::ok)
+            .collect();
+
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut result: Vec<(String, String)> = Vec::new();
+
+        for (stype, language, codec, title, external_path) in rows {
+            let language_clone = language.clone();
+            let codec_clone = codec.clone();
+            let title_clone = title.clone();
+            let external_path_clone = external_path.clone();
+            let stream = MediaStream {
+                id: 0,
+                media_id: 0,
+                file_path: String::new(),
+                stream_type: stype,
+                stream_index: 0,
+                language,
+                codec,
+                title,
+                external_path,
+            };
+            let key = stream.track_key();
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.insert(key.clone());
+
+            let label = if let Some(path) = external_path_clone.filter(|p| !p.is_empty()) {
+                format!("{} (externo)", path)
+            } else {
+                let lang = language_clone.as_deref().unwrap_or("?").to_uppercase();
+                let t = title_clone.as_deref().unwrap_or("");
+                if t.is_empty() {
+                    format!("{} ({})", lang, codec_clone.as_deref().unwrap_or("?"))
+                } else {
+                    format!(
+                        "{} · {} ({})",
+                        lang,
+                        t,
+                        codec_clone.as_deref().unwrap_or("?")
+                    )
+                }
+            };
+            result.push((key, label));
+        }
+
+        Ok(result)
     }
 
     /// Lista el historial de reproducción ordenado por fecha descendente.
