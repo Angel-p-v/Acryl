@@ -24,6 +24,15 @@ pub struct MediaFile {
     pub episode_image_checked_at: Option<String>,
 }
 
+impl MediaFile {
+    /// Indica si el archivo usa la selección automática de pistas de mpv.
+    pub fn is_automatic_tracks(&self) -> bool {
+        self.audio_stream_index.is_none()
+            && self.subtitle_stream_index.is_none()
+            && !self.subtitles_disabled
+    }
+}
+
 /// Preferencia de pistas de audio y subtítulos de un archivo.
 ///
 /// Los índices son relativos al tipo y empiezan en 0, igual que los devuelve
@@ -366,6 +375,38 @@ mod tests {
             .expect("leer selección");
         assert_eq!(stored, selection);
         assert!(!stored.is_automatic());
+    }
+
+    #[test]
+    fn is_automatic_tracks_solo_cuando_no_hay_preferencia() {
+        let mut file = MediaFile {
+            id: 1,
+            media_id: 1,
+            season: Some(1),
+            episode: Some(1),
+            title: None,
+            file_path: "/tmp/video.mkv".to_string(),
+            size_bytes: None,
+            mtime_ms: None,
+            indexed_at: String::new(),
+            audio_stream_index: None,
+            subtitle_stream_index: None,
+            subtitles_disabled: false,
+            streams_indexed_at: None,
+            episode_image_path: None,
+            episode_image_checked_at: None,
+        };
+        assert!(file.is_automatic_tracks());
+
+        file.subtitles_disabled = true;
+        assert!(
+            !file.is_automatic_tracks(),
+            "desactivar subtítulos es una preferencia"
+        );
+
+        file.subtitles_disabled = false;
+        file.audio_stream_index = Some(0);
+        assert!(!file.is_automatic_tracks());
     }
 
     #[test]

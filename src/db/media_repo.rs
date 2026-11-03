@@ -185,11 +185,12 @@ impl<'a> MediaRepository<'a> {
             "SELECT mf.id, mf.file_path,
                     mf.season, mf.episode, mf.title
              FROM media_files mf
-             WHERE mf.media_id = ?1 OR mf.media_id IN (
+             WHERE (mf.media_id = ?1 OR mf.media_id IN (
                  SELECT id FROM media WHERE parent_id = ?1
-             )
-             AND mf.id NOT IN (
-                 SELECT DISTINCT ph.media_id FROM playback_history ph WHERE ph.media_id = mf.id
+             ))
+             AND mf.file_path NOT IN (
+                 SELECT ph.file_path FROM playback_history ph
+                 WHERE ph.file_path IS NOT NULL
              )
              ORDER BY mf.season NULLS LAST, mf.episode NULLS LAST, mf.id ASC
              LIMIT 1",
@@ -1316,5 +1317,51 @@ mod tests {
         assert_eq!(by_file.len(), 2);
         assert!(!by_file.iter().any(|s| s.language.as_deref() == Some("spa")));
         assert!(by_file.iter().any(|s| s.stream_type == "subtitle"));
+    }
+
+    #[test]
+    fn next_episode_ignora_los_archivos_ya_reproducidos() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path)
+             VALUES ('series', 'Serie', 'serie', '/tmp/serie')",
+            [],
+        )
+        .expect("insertar serie");
+        let media_id = conn.last_insert_rowid();
+
+        let paths = [
+            "/tmp/serie/S01E01.mkv",
+            "/tmp/serie/S01E02.mkv",
+            "/tmp/serie/S01E03.mkv",
+        ];
+        for (position, path) in paths.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO media_files (media_id, season, episode, file_path)
+                 VALUES (?1, 1, ?2, ?3)",
+                rusqlite::params![media_id, position as i32 + 1, path],
+            )
+            .expect("insertar episodio");
+        }
+
+        let mut repo = MediaRepository::new(&mut conn);
+        let next = repo
+            .get_next_episode_to_watch(media_id)
+            .expect("siguiente episodio")
+            .expect("hay episodios pendientes");
+        assert_eq!(next.1, paths[0]);
+
+        repo.record_playback(media_id, paths[0], 0.0, 0.0)
+            .expect("registrar reproducción");
+
+        let next = repo
+            .get_next_episode_to_watch(media_id)
+            .expect("siguiente episodio")
+            .expect("hay episodios pendientes");
+        assert_eq!(
+            next.1, paths[1],
+            "el siguiente episodio no puede ser uno ya reproducido"
+        );
     }
 }

@@ -47,6 +47,11 @@ struct SeasonOption {
 type PlayEpisodeCallback = Rc<dyn Fn(String)>;
 type SharedPlayEpisodeCallback = Rc<RefCell<Option<PlayEpisodeCallback>>>;
 
+/// Callback para abrir el selector de pistas de un archivo concreto. Se
+/// comparte con las tarjetas para que cada episodio edite sus propias pistas.
+type EditTracksCallback = Rc<dyn Fn(String)>;
+type SharedEditTracksCallback = Rc<RefCell<Option<EditTracksCallback>>>;
+
 /// Callback compartido para abrir el selector de póster y banner.
 type ChooseImagesCallback = Rc<dyn Fn()>;
 
@@ -76,7 +81,7 @@ pub struct MediaDetails {
     suppress_season_change: Rc<Cell<bool>>,
     on_back: Option<Rc<dyn Fn()>>,
     on_play_episode: SharedPlayEpisodeCallback,
-    on_edit_tracks: Option<Rc<dyn Fn(String)>>,
+    on_edit_tracks: SharedEditTracksCallback,
     on_choose_images: Option<ChooseImagesCallback>,
     translations: TranslationsRef,
 }
@@ -174,6 +179,7 @@ impl MediaDetails {
         let selected_season = Rc::new(RefCell::new(None));
         let suppress_season_change = Rc::new(Cell::new(false));
         let on_play_episode: SharedPlayEpisodeCallback = Rc::new(RefCell::new(None));
+        let on_edit_tracks: SharedEditTracksCallback = Rc::new(RefCell::new(None));
         let db_path = Rc::new(RefCell::new(db_path.to_string()));
         let root_media_id = Rc::new(Cell::new(media_id));
 
@@ -189,6 +195,7 @@ impl MediaDetails {
             let content_container = content_container.clone();
             let translations = translations.clone();
             let on_play_episode = on_play_episode.clone();
+            let on_edit_tracks = on_edit_tracks.clone();
 
             season_dropdown.connect_selected_notify(move |dropdown| {
                 if suppress.get() {
@@ -209,6 +216,7 @@ impl MediaDetails {
                     selection,
                     &translations,
                     &on_play_episode,
+                    &on_edit_tracks,
                 );
             });
         }
@@ -236,7 +244,7 @@ impl MediaDetails {
             suppress_season_change,
             on_back: None,
             on_play_episode,
-            on_edit_tracks: None,
+            on_edit_tracks,
             on_choose_images: None,
             translations,
         }
@@ -401,6 +409,7 @@ impl MediaDetails {
                     &direct_files,
                     &self.translations,
                     &self.on_play_episode,
+                    &self.on_edit_tracks,
                 );
             }
             return;
@@ -435,6 +444,7 @@ impl MediaDetails {
             selection,
             &self.translations,
             &self.on_play_episode,
+            &self.on_edit_tracks,
         );
     }
 
@@ -485,7 +495,7 @@ impl MediaDetails {
     where
         F: Fn(String) + 'static,
     {
-        let cb = Rc::new(f);
+        let cb: EditTracksCallback = Rc::new(f);
         let cb_clone = cb.clone();
         let file_path_rc = self.main_button_file_path.clone();
         self.tracks_button.connect_clicked(move |_| {
@@ -493,7 +503,7 @@ impl MediaDetails {
                 cb_clone(path.clone());
             }
         });
-        self.on_edit_tracks = Some(cb);
+        *self.on_edit_tracks.borrow_mut() = Some(cb);
     }
 
     pub fn on_choose_images<F>(&mut self, f: F)
@@ -524,6 +534,7 @@ fn render_selection(
     selection: SeasonSelection,
     translations: &TranslationsRef,
     on_play_episode: &SharedPlayEpisodeCallback,
+    on_edit_tracks: &SharedEditTracksCallback,
 ) {
     let (title, files) = match selection {
         SeasonSelection::Child(season_id) => {
@@ -581,6 +592,7 @@ fn render_selection(
         &files,
         translations,
         on_play_episode,
+        on_edit_tracks,
     );
 }
 
@@ -590,6 +602,7 @@ fn render_files(
     files: &[MediaFile],
     translations: &TranslationsRef,
     on_play_episode: &SharedPlayEpisodeCallback,
+    on_edit_tracks: &SharedEditTracksCallback,
 ) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
@@ -615,7 +628,12 @@ fn render_files(
 
     let mut cards = Vec::with_capacity(files.len());
     for file in files {
-        cards.push(build_episode_card(file, translations, on_play_episode));
+        cards.push(build_episode_card(
+            file,
+            translations,
+            on_play_episode,
+            on_edit_tracks,
+        ));
     }
     container.append(&episode_grid(cards));
 }
@@ -640,6 +658,7 @@ fn build_episode_card(
     file: &MediaFile,
     translations: &TranslationsRef,
     on_play_episode: &SharedPlayEpisodeCallback,
+    on_edit_tracks: &SharedEditTracksCallback,
 ) -> Box {
     let t = |key: &str| translations.borrow().t(key);
     let (_episode_label, episode_number) = episode_texts(file, translations);
@@ -708,6 +727,10 @@ fn build_episode_card(
     title_label.add_css_class("episode-title");
     card.append(&title_label);
 
+    let actions = Box::new(Orientation::Horizontal, 6);
+    actions.set_halign(gtk4::Align::Center);
+    actions.set_valign(gtk4::Align::Center);
+
     let play_btn = Button::with_label("▶");
     play_btn.add_css_class("episode-play-btn");
     play_btn.set_halign(gtk4::Align::Center);
@@ -716,13 +739,29 @@ fn build_episode_card(
         t("button.play_episode"),
         title_text
     )));
-    let file_path = file.file_path.clone();
-    let callback = on_play_episode.borrow().clone();
-    if let Some(callback) = callback {
-        let file_path = file_path.clone();
-        play_btn.connect_clicked(move |_| callback(file_path.clone()));
+    let file_path_for_play = file.file_path.clone();
+    if let Some(callback) = on_play_episode.borrow().clone() {
+        play_btn.connect_clicked(move |_| callback(file_path_for_play.clone()));
     }
-    card.append(&play_btn);
+    actions.append(&play_btn);
+
+    // La preferencia de pistas se guarda por archivo. Este botón permite
+    // elegirla para este episodio concreto sin depender del «siguiente
+    // episodio» que muestre la cabecera de la vista.
+    let tracks_btn = Button::with_label(&t("button.tracks"));
+    tracks_btn.add_css_class("episode-tracks-btn");
+    tracks_btn.set_halign(gtk4::Align::Center);
+    if !file.is_automatic_tracks() {
+        tracks_btn.add_css_class("custom");
+    }
+    tracks_btn.set_tooltip_text(Some(&format!("{} {}", t("tooltip.tracks"), title_text)));
+    let file_path_for_tracks = file.file_path.clone();
+    if let Some(callback) = on_edit_tracks.borrow().clone() {
+        tracks_btn.connect_clicked(move |_| callback(file_path_for_tracks.clone()));
+    }
+    actions.append(&tracks_btn);
+
+    card.append(&actions);
 
     card
 }
