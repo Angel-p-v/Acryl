@@ -216,12 +216,14 @@ impl<'a> MediaRepository<'a> {
     }
 
     /// Obtiene la última posición de reproducción guardada para un archivo.
-    /// Devuelve la posición en segundos, o None si no hay registro previo.
+    /// Devuelve la posición en segundos, o None si no hay una reproducción
+    /// activa (por ejemplo, si la anterior ya terminó y se quiere volver a ver
+    /// desde el principio).
     pub fn get_playback_position(&mut self, file_path: &str) -> RusqliteResult<Option<f64>> {
         let mut stmt = self.conn.prepare(
             "SELECT position FROM playback_history
-             WHERE file_path = ?1
-             ORDER BY played_at DESC
+             WHERE file_path = ?1 AND completed_at IS NULL
+             ORDER BY played_at DESC, id DESC
              LIMIT 1",
         )?;
         let row = stmt.query_row(params![file_path], |row| row.get::<_, f64>(0));
@@ -245,9 +247,13 @@ impl<'a> MediaRepository<'a> {
         }
     }
 
-    /// Actualiza la posición y duración del último registro de reproducción
-    /// de un archivo. Se llama cuando el usuario termina o detiene la
-    /// reproducción para conservar el progreso.
+    /// Actualiza la posición y duración de la entrada activa de un archivo.
+    /// Se llama cuando el usuario termina o detiene la reproducción para
+    /// conservar el progreso. Si no existe una entrada activa (por ejemplo,
+    /// porque la anterior ya se completó), crea una nueva.
+    ///
+    /// La posición nunca retrocede: si el guardado anterior era más avanzado,
+    /// se conserva para no perder progreso cuando dos guardados se cruzan.
     pub fn update_playback_position(
         &mut self,
         media_id: i64,
@@ -255,21 +261,62 @@ impl<'a> MediaRepository<'a> {
         position: f64,
         duration: f64,
     ) -> RusqliteResult<()> {
+        self.upsert_active_playback(media_id, file_path, position, duration)?;
+        Ok(())
+    }
+
+    /// Inserta o actualiza la entrada activa de un archivo.
+    ///
+    /// El índice único parcial `idx_playback_history_active_file` hace que el
+    /// UPSERT sea atómico: dos guardados concurrentes del mismo archivo no
+    /// pueden crear dos entradas pendientes.
+    fn upsert_active_playback(
+        &mut self,
+        media_id: i64,
+        file_path: &str,
+        position: f64,
+        duration: f64,
+    ) -> RusqliteResult<()> {
         self.conn.execute(
-            "UPDATE playback_history
-             SET position = ?2, duration = ?3
-             WHERE file_path = ?1
-             AND id = (
-                 SELECT MAX(id) FROM playback_history WHERE file_path = ?1
-             )",
-            params![file_path, position, duration],
+            "INSERT INTO playback_history
+               (media_id, file_path, position, duration, played_at, completed_at)
+             VALUES (?1, ?2, ?3, ?4, datetime('now'), NULL)
+             ON CONFLICT(file_path) WHERE completed_at IS NULL AND file_path IS NOT NULL
+             DO UPDATE SET
+               media_id = excluded.media_id,
+               position = CASE
+                 WHEN excluded.position > playback_history.position
+                 THEN excluded.position
+                 ELSE playback_history.position
+               END,
+               duration = CASE
+                 WHEN excluded.duration > 0 THEN excluded.duration
+                 ELSE playback_history.duration
+               END,
+               played_at = datetime('now')",
+            params![media_id, file_path, position, duration],
         )?;
-        // Si no se actualizó ninguna fila (registro inexistente), insertar uno nuevo.
-        if self.conn.changes() == 0 {
+        Ok(())
+    }
+
+    /// Marca la entrada activa de un archivo como completada.
+    ///
+    /// A partir de ese momento una nueva reproducción puede crear otra entrada
+    /// activa sin reutilizar el progreso terminado (se empieza desde el
+    /// principio). Las entradas completadas se conservan como historial.
+    pub fn complete_playback(&mut self, media_id: i64, file_path: &str) -> RusqliteResult<()> {
+        let updated = self.conn.execute(
+            "UPDATE playback_history
+             SET completed_at = datetime('now')
+             WHERE file_path = ?1 AND completed_at IS NULL",
+            params![file_path],
+        )?;
+        if updated == 0 {
             self.conn.execute(
-                "INSERT INTO playback_history (media_id, file_path, position, duration)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![media_id, file_path, position, duration],
+                "INSERT INTO playback_history
+                   (media_id, file_path, position, duration, played_at, completed_at)
+                 VALUES (?1, ?2, 0, 0, datetime('now'), datetime('now'))",
+                params![media_id, file_path],
             )?;
         }
         Ok(())
@@ -800,6 +847,11 @@ impl<'a> MediaRepository<'a> {
         Ok(())
     }
 
+    /// Registra el inicio o la continuación de una reproducción.
+    ///
+    /// Si ya existe una entrada activa para el mismo archivo, se actualiza en
+    /// lugar de insertar otra. Esto evita que el historial acumule duplicados
+    /// cada vez que el usuario sale y vuelve a entrar antes de terminar.
     pub fn record_playback(
         &mut self,
         media_id: i64,
@@ -807,12 +859,7 @@ impl<'a> MediaRepository<'a> {
         position: f64,
         duration: f64,
     ) -> RusqliteResult<()> {
-        self.conn.execute(
-            "INSERT INTO playback_history (media_id, file_path, position, duration)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![media_id, file_path, position, duration],
-        )?;
-        Ok(())
+        self.upsert_active_playback(media_id, file_path, position, duration)
     }
 
     pub fn get_details(&mut self, media_id: i64) -> RusqliteResult<Option<MediaDetails>> {
@@ -855,8 +902,9 @@ impl<'a> MediaRepository<'a> {
 
         for stream in streams {
             tx.execute(
-                "INSERT INTO media_streams (media_id, file_path, stream_type, stream_index, language, codec, title)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO media_streams
+                   (media_id, file_path, stream_type, stream_index, language, codec, title, external_path)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     media_id,
                     file_path,
@@ -865,6 +913,7 @@ impl<'a> MediaRepository<'a> {
                     stream.language,
                     stream.codec,
                     stream.title,
+                    stream.external_path,
                 ],
             )?;
         }
@@ -876,7 +925,7 @@ impl<'a> MediaRepository<'a> {
     /// Lista los streams de un medio (todos sus archivos).
     pub fn list_streams_by_media(&mut self, media_id: i64) -> RusqliteResult<Vec<MediaStream>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, media_id, file_path, stream_type, stream_index, language, codec, title
+            "SELECT id, media_id, file_path, stream_type, stream_index, language, codec, title, external_path
              FROM media_streams WHERE media_id = ?1
              ORDER BY stream_type, stream_index",
         )?;
@@ -890,7 +939,7 @@ impl<'a> MediaRepository<'a> {
     /// Lista los streams de un archivo concreto.
     pub fn list_streams_by_file(&mut self, file_path: &str) -> RusqliteResult<Vec<MediaStream>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, media_id, file_path, stream_type, stream_index, language, codec, title
+            "SELECT id, media_id, file_path, stream_type, stream_index, language, codec, title, external_path
              FROM media_streams WHERE file_path = ?1
              ORDER BY stream_type, stream_index",
         )?;
@@ -910,13 +959,25 @@ impl<'a> MediaRepository<'a> {
         offset: Option<i64>,
     ) -> RusqliteResult<Vec<PlaybackHistoryEntry>> {
         let mut stmt = self.conn.prepare(
-            "SELECT ph.id, ph.media_id, m.title, m.type, m.year, m.poster_path,
+            "WITH ranked AS (
+                 SELECT ph.id, ph.media_id, ph.file_path, ph.played_at,
+                        ph.position, ph.duration, ph.completed_at,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY COALESCE(ph.file_path, 'media:' || ph.media_id)
+                            ORDER BY (ph.completed_at IS NULL) DESC,
+                                     ph.played_at DESC,
+                                     ph.id DESC
+                        ) AS row_number
+                 FROM playback_history ph
+             )
+             SELECT ph.id, ph.media_id, m.title, m.type, m.year, m.poster_path,
                     mf.season, mf.episode, mf.title,
                     ph.played_at, ph.position, ph.duration
-             FROM playback_history ph
+             FROM ranked ph
              JOIN media m ON m.id = ph.media_id
              LEFT JOIN media_files mf ON mf.file_path = ph.file_path
-             ORDER BY ph.played_at DESC
+             WHERE ph.row_number = 1
+             ORDER BY ph.played_at DESC, ph.id DESC
              LIMIT ?1 OFFSET ?2",
         )?;
         let rows: Vec<PlaybackHistoryEntry> = stmt
@@ -977,6 +1038,8 @@ pub struct NewMediaStream {
     pub language: Option<String>,
     pub codec: Option<String>,
     pub title: Option<String>,
+    /// Ruta del subtítulo externo (sidecar), si el stream no está embebido.
+    pub external_path: Option<String>,
 }
 
 /// Stream de audio o subtítulo leído de la base de datos.
@@ -990,6 +1053,64 @@ pub struct MediaStream {
     pub language: Option<String>,
     pub codec: Option<String>,
     pub title: Option<String>,
+    /// Ruta del subtítulo externo (sidecar), si el stream no está embebido.
+    pub external_path: Option<String>,
+}
+
+impl NewMediaStream {
+    /// Convierte una pista recién descubierta (aún sin fila en la base de
+    /// datos) al tipo que usa la UI y el reproductor.
+    pub fn into_media_stream(self) -> MediaStream {
+        MediaStream {
+            id: 0,
+            media_id: 0,
+            file_path: self.file_path,
+            stream_type: self.stream_type,
+            stream_index: self.stream_index,
+            language: self.language,
+            codec: self.codec,
+            title: self.title,
+            external_path: self.external_path,
+        }
+    }
+}
+
+impl MediaStream {
+    /// Clave estable que identifica la pista con independencia de su índice.
+    ///
+    /// Para subtítulos externos la ruta es la identidad. Para pistas embebidas
+    /// se combinan tipo, idioma, códec y título: si el contenedor reordena los
+    /// streams, la misma pista sigue encontrándose por sus metadatos.
+    pub fn track_key(&self) -> String {
+        stream_track_key(
+            &self.stream_type,
+            self.language.as_deref(),
+            self.codec.as_deref(),
+            self.title.as_deref(),
+            self.external_path.as_deref(),
+        )
+    }
+}
+
+/// Construye la clave estable de una pista a partir de sus metadatos.
+pub fn stream_track_key(
+    stream_type: &str,
+    language: Option<&str>,
+    codec: Option<&str>,
+    title: Option<&str>,
+    external_path: Option<&str>,
+) -> String {
+    if let Some(path) = external_path.filter(|path| !path.is_empty()) {
+        return format!("external:{}", path);
+    }
+    let normalize = |value: Option<&str>| value.unwrap_or_default().trim().to_lowercase();
+    format!(
+        "embedded:{}:{}:{}:{}",
+        stream_type,
+        normalize(language),
+        normalize(codec),
+        normalize(title)
+    )
 }
 
 fn map_media_stream_row(row: &rusqlite::Row<'_>) -> RusqliteResult<MediaStream> {
@@ -1002,6 +1123,7 @@ fn map_media_stream_row(row: &rusqlite::Row<'_>) -> RusqliteResult<MediaStream> 
         language: row.get(5)?,
         codec: row.get(6)?,
         title: row.get(7)?,
+        external_path: row.get(8)?,
     })
 }
 
@@ -1198,6 +1320,7 @@ mod tests {
                 language: Some("spa".to_string()),
                 codec: Some("aac".to_string()),
                 title: Some("Español".to_string()),
+                external_path: None,
             },
             NewMediaStream {
                 file_path: "/tmp/test/video.mkv".to_string(),
@@ -1206,6 +1329,7 @@ mod tests {
                 language: Some("eng".to_string()),
                 codec: Some("opus".to_string()),
                 title: Some("English".to_string()),
+                external_path: None,
             },
             NewMediaStream {
                 file_path: "/tmp/test/video.mkv".to_string(),
@@ -1214,6 +1338,7 @@ mod tests {
                 language: Some("spa".to_string()),
                 codec: Some("subrip".to_string()),
                 title: Some("Subtítulos ES".to_string()),
+                external_path: None,
             },
         ];
 
@@ -1355,6 +1480,7 @@ mod tests {
             language: Some("spa".to_string()),
             codec: None,
             title: None,
+            external_path: None,
         }];
         repo.replace_streams_for_file(media_id, "/tmp/test/video.mkv", &streams_v1)
             .expect("insertar v1");
@@ -1367,6 +1493,7 @@ mod tests {
                 language: Some("eng".to_string()),
                 codec: None,
                 title: None,
+                external_path: None,
             },
             NewMediaStream {
                 file_path: "/tmp/test/video.mkv".to_string(),
@@ -1375,6 +1502,7 @@ mod tests {
                 language: None,
                 codec: None,
                 title: None,
+                external_path: None,
             },
         ];
         repo.replace_streams_for_file(media_id, "/tmp/test/video.mkv", &streams_v2)

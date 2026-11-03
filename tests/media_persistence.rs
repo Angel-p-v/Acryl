@@ -1143,3 +1143,165 @@ fn episode_image_path_en_media_files() {
         Some("https://example.com/episode1.jpg")
     );
 }
+
+#[test]
+fn historial_mantiene_una_entrada_activa_por_archivo() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let media = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "series".to_string(),
+            title: "Serie".to_string(),
+            sort_title: "serie".to_string(),
+            year: None,
+            folder_path: "/media/serie".to_string(),
+            parent_id: None,
+        })
+        .expect("insertar medio")
+    };
+    let file_path = "/media/serie/s01e01.mkv";
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.record_playback(media.id, file_path, 10.0, 100.0)
+            .expect("primer guardado");
+        repo.record_playback(media.id, file_path, 40.0, 100.0)
+            .expect("segundo guardado");
+
+        let probe = open_db(db_path.to_str().unwrap()).expect("abrir conexión de prueba");
+        let active: i64 = probe
+            .query_row(
+                "SELECT COUNT(*) FROM playback_history
+                 WHERE file_path = ?1 AND completed_at IS NULL",
+                [file_path],
+                |row| row.get(0),
+            )
+            .expect("contar entradas activas");
+        assert_eq!(active, 1, "no debe duplicar la reproducción pendiente");
+
+        let stored = repo
+            .get_playback_position(file_path)
+            .expect("leer posición");
+        assert_eq!(stored, Some(40.0), "se conserva el progreso más avanzado");
+
+        let history = repo
+            .list_playback_history(Some(10), Some(0))
+            .expect("listar historial");
+        assert_eq!(history.len(), 1);
+
+        // El índice único parcial también protege ante inserciones directas.
+        let duplicate = probe.execute(
+            "INSERT INTO playback_history (media_id, file_path, position, duration)
+             VALUES (?1, ?2, 0, 0)",
+            rusqlite::params![media.id, file_path],
+        );
+        assert!(duplicate.is_err(), "no debe admitir dos entradas activas");
+
+        repo.complete_playback(media.id, file_path)
+            .expect("completar reproducción");
+        assert_eq!(
+            repo.get_playback_position(file_path)
+                .expect("leer tras completar"),
+            None,
+            "una reproducción completada no debe reanudarse"
+        );
+    }
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.record_playback(media.id, file_path, 0.0, 100.0)
+            .expect("nueva reproducción");
+        let probe = open_db(db_path.to_str().unwrap()).expect("abrir conexión de prueba");
+        let total: i64 = probe
+            .query_row(
+                "SELECT COUNT(*) FROM playback_history WHERE file_path = ?1",
+                [file_path],
+                |row| row.get(0),
+            )
+            .expect("contar historial");
+        assert_eq!(total, 2, "se conserva la entrada completada como historial");
+        assert_eq!(
+            repo.get_playback_position(file_path).expect("leer nueva"),
+            Some(0.0)
+        );
+
+        let history = repo
+            .list_playback_history(Some(10), Some(0))
+            .expect("listar historial");
+        assert_eq!(
+            history.len(),
+            1,
+            "el historial muestra solo la entrada más reciente del archivo"
+        );
+    }
+}
+
+#[test]
+fn migracion_archiva_duplicados_de_historial_sin_borrarlos() {
+    let (db_path, _dir) = temp_db();
+
+    {
+        let conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path)
+             VALUES ('movie', 'Pelicula', 'pelicula', '/media/pelicula')",
+            [],
+        )
+        .expect("insertar medio");
+
+        // Simula una base de datos anterior a la migración 15 con tres
+        // reproducciones pendientes del mismo archivo.
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS idx_playback_history_active_file;
+             DROP INDEX IF EXISTS idx_playback_history_file;
+             ALTER TABLE playback_history DROP COLUMN completed_at;
+             DELETE FROM schema_migrations WHERE version = 15;",
+        )
+        .expect("simular BD antigua");
+
+        for position in [10.0, 20.0, 30.0] {
+            conn.execute(
+                "INSERT INTO playback_history (media_id, file_path, position, duration)
+                 VALUES (1, '/media/pelicula/video.mkv', ?1, 100)",
+                rusqlite::params![position],
+            )
+            .expect("insertar duplicado");
+        }
+    }
+
+    let conn = open_db(db_path.to_str().unwrap()).expect("reabrir BD");
+    let rows: Vec<(i64, Option<String>)> = conn
+        .prepare(
+            "SELECT id, completed_at FROM playback_history
+             WHERE file_path = '/media/pelicula/video.mkv' ORDER BY id",
+        )
+        .expect("preparar consulta")
+        .query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let completed: Option<String> = row.get(1)?;
+            Ok((id, completed))
+        })
+        .expect("leer historial")
+        .map(Result::unwrap)
+        .collect();
+
+    assert_eq!(rows.len(), 3, "no se elimina el historial legítimo");
+    assert!(rows[0].1.is_some(), "el duplicado antiguo queda archivado");
+    assert!(rows[1].1.is_some(), "el duplicado antiguo queda archivado");
+    assert!(
+        rows[2].1.is_none(),
+        "solo la entrada más reciente sigue activa"
+    );
+
+    let index_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'index' AND name = 'idx_playback_history_active_file'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("comprobar índice");
+    assert_eq!(index_exists, 1);
+}
