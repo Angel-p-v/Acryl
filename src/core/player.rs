@@ -236,7 +236,7 @@ pub fn play_with_resume(
         let mut connect_failures = 0usize;
         loop {
             // Si mpv ya terminó, salir del bucle.
-            if child.try_wait().map_or(false, |s| s.is_some()) {
+            if child.try_wait().is_ok_and(|s| s.is_some()) {
                 break;
             }
 
@@ -318,12 +318,13 @@ pub fn play_with_resume(
         let threshold: f64 = if is_movie { 600.0 } else { 300.0 }; // 10 min / 5 min
         if last_duration > 0.0 {
             let remaining = last_duration - last_position;
-            if remaining > 0.0 && remaining < threshold {
-                if let Ok(mut conn) = open_db(&db_path_owned) {
-                    let mut repo = MediaRepository::new(&mut conn);
-                    let _ = repo.set_file_watched(&file_path_owned, true);
-                    close_db(conn);
-                }
+            if remaining > 0.0
+                && remaining < threshold
+                && let Ok(mut conn) = open_db(&db_path_owned)
+            {
+                let mut repo = MediaRepository::new(&mut conn);
+                let _ = repo.set_file_watched(&file_path_owned, true);
+                close_db(conn);
             }
         }
 
