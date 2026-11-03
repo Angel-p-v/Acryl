@@ -891,6 +891,9 @@ impl MainWindow {
             .on_edit_tracks(move |file_path| {
                 let this = this_clone.clone();
                 let w = this.borrow();
+                // Las pistas predeterminadas de Ajustes para ofrecerlas como opción
+                // en el diálogo de pistas de este archivo.
+                let default_tracks = w.config.borrow().default_tracks.clone();
                 crate::ui::track_dialog::show_track_dialog(
                     &w.window,
                     &w.db_path,
@@ -903,6 +906,7 @@ impl MainWindow {
                             w2.show_toast(&w2.t("toast.tracks_saved"));
                         }
                     }),
+                    Some(default_tracks.clone()),
                 );
             });
 
@@ -2023,6 +2027,7 @@ impl MainWindow {
                         &file_path_for_choose,
                         translations.clone(),
                         Rc::new(move || {}),
+                        Some(default_tracks.clone()),
                     );
                 }
                 _ => {}

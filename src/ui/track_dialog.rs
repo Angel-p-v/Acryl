@@ -6,6 +6,7 @@
 //! Si el archivo aún no tiene pistas analizadas, se ejecuta `ffprobe` en
 //! segundo plano para no bloquear la interfaz.
 
+use crate::config::DefaultTracks;
 use crate::core::library::{discover_external_subtitles, ensure_media_streams};
 use crate::db::media_repo::MediaStream;
 use crate::db::{FileRepository, TrackPreference, TrackSelection, close_db, open_db};
@@ -21,12 +22,18 @@ use std::time::Duration;
 ///
 /// `on_saved` se invoca solo cuando la preferencia se ha guardado
 /// correctamente. La ventana se cierra al guardar o al cancelar.
+///
+/// `default_tracks` son las pistas predeterminadas configuradas en Ajustes.
+/// Si se proporcionan, se añade una opción "Usar predeterminadas de Ajustes"
+/// a cada desplegable para que el usuario pueda elegir usarlas para este
+/// archivo concreto.
 pub fn show_track_dialog(
     parent: &impl IsA<gtk4::Window>,
     db_path: &str,
     file_path: &str,
     translations: TranslationsRef,
     on_saved: Rc<dyn Fn()>,
+    default_tracks: Option<DefaultTracks>,
 ) {
     let window = Window::builder()
         .transient_for(parent)
@@ -131,6 +138,7 @@ pub fn show_track_dialog(
         &subtitle_streams.borrow(),
         &preference.borrow(),
         &translations,
+        default_tracks.as_ref(),
     );
 
     if has_stored_streams {
@@ -148,6 +156,7 @@ pub fn show_track_dialog(
             subtitle_streams.clone(),
             preference.clone(),
             translations.clone(),
+            default_tracks.clone(),
         );
     }
 
@@ -165,12 +174,14 @@ pub fn show_track_dialog(
     let db_path_for_save = db_path.to_string();
     let file_path_for_save = file_path.to_string();
     let translations_for_save = translations.clone();
+    let default_tracks_for_save = default_tracks.clone();
     save_button.connect_clicked(move |_| {
         let preference = current_preference(
             &audio_for_save,
             &subtitle_for_save,
             &audio_streams_for_save.borrow(),
             &subtitle_streams_for_save.borrow(),
+            default_tracks_for_save.as_ref(),
         );
 
         match save_preference(&db_path_for_save, &file_path_for_save, &preference) {
@@ -205,7 +216,9 @@ pub fn show_track_dialog(
     let subtitle_streams_red = subtitle_streams.clone();
     let preference_red = preference.clone();
     let translations_red = translations.clone();
+    let default_tracks_for_redetect = default_tracks.clone();
     redetect_for_click.connect_clicked(move |_| {
+        let default_tracks_for_redetect = default_tracks_for_redetect.clone();
         status_red.set_label(&translations_red.borrow().t("status.detecting"));
         status_red.set_visible(true);
         detect_streams_in_background(
@@ -219,6 +232,7 @@ pub fn show_track_dialog(
             subtitle_streams_red.clone(),
             preference_red.clone(),
             translations_red.clone(),
+            default_tracks_for_redetect,
         );
     });
 
@@ -314,6 +328,7 @@ fn detect_streams_in_background(
     subtitle_streams: Rc<RefCell<Vec<MediaStream>>>,
     preference: Rc<RefCell<TrackPreference>>,
     translations: TranslationsRef,
+    default_tracks: Option<DefaultTracks>,
 ) {
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
@@ -343,6 +358,7 @@ fn detect_streams_in_background(
                     &subtitle_streams.borrow(),
                     &preference.borrow(),
                     &translations,
+                    default_tracks.as_ref(),
                 );
 
                 if audio_streams.borrow().is_empty() && subtitle_streams.borrow().is_empty() {
@@ -373,6 +389,9 @@ fn detect_streams_in_background(
 }
 
 /// Reconstruye los desplegables conservando la selección guardada.
+///
+/// Si `default_tracks` tiene alguna predeterminada configurada, se añade una
+/// opción "Usar predeterminadas de Ajustes" en cada desplegable correspondiente.
 fn refresh_dropdowns(
     audio_dropdown: &DropDown,
     subtitle_dropdown: &DropDown,
@@ -380,11 +399,18 @@ fn refresh_dropdowns(
     subtitle_streams: &[MediaStream],
     preference: &TrackPreference,
     translations: &TranslationsRef,
+    default_tracks: Option<&DefaultTracks>,
 ) {
     let auto_label = translations.borrow().t("track.auto");
     let none_label = translations.borrow().t("track.none");
+    let default_label = translations.borrow().t("track.use_defaults");
 
+    // --- Audio ---
     let mut audio_options = vec![auto_label.clone()];
+    // Opción "Usar predeterminadas de Ajustes" si hay predeterminada de audio.
+    if default_tracks.map(|d| d.audio.is_some()).unwrap_or(false) {
+        audio_options.push(default_label.clone());
+    }
     audio_options.extend(
         audio_streams
             .iter()
@@ -393,9 +419,17 @@ fn refresh_dropdowns(
     let audio_model =
         gtk4::StringList::new(&audio_options.iter().map(String::as_str).collect::<Vec<_>>());
     audio_dropdown.set_model(Some(&audio_model));
-    audio_dropdown.set_selected(audio_position(audio_streams, preference));
+    audio_dropdown.set_selected(audio_position(audio_streams, preference, default_tracks));
 
+    // --- Subtítulos ---
     let mut subtitle_options = vec![auto_label, none_label];
+    // Opción "Usar predeterminadas de Ajustes" si hay predeterminada de subtítulos.
+    if default_tracks
+        .map(|d| d.subtitle.is_some())
+        .unwrap_or(false)
+    {
+        subtitle_options.push(default_label.clone());
+    }
     subtitle_options.extend(
         subtitle_streams
             .iter()
@@ -408,14 +442,30 @@ fn refresh_dropdowns(
             .collect::<Vec<_>>(),
     );
     subtitle_dropdown.set_model(Some(&subtitle_model));
-    subtitle_dropdown.set_selected(subtitle_position(subtitle_streams, preference));
+    subtitle_dropdown.set_selected(subtitle_position(
+        subtitle_streams,
+        preference,
+        default_tracks,
+    ));
 }
 
-/// Posición de la pista de audio en el desplegable (0 = automático).
+/// Posición de la pista de audio en el desplegable (0 = automático, 1 = predeterminadas).
 ///
 /// La clave estable tiene prioridad. El índice guardado solo se usa como
 /// respaldo para bases de datos antiguas que no tienen clave.
-fn audio_position(streams: &[MediaStream], preference: &TrackPreference) -> u32 {
+fn audio_position(
+    streams: &[MediaStream],
+    preference: &TrackPreference,
+    default_tracks: Option<&DefaultTracks>,
+) -> u32 {
+    // Si el usuario eligió "Usar predeterminadas de Ajustes", devolver directamente
+    // la posición 1 (el desplegable tiene: 0=Automático, 1=Predeterminadas, 2+=pistas).
+    if preference.audio_track_key.as_deref() == Some("default:audio")
+        && default_tracks.map(|d| d.audio.is_some()).unwrap_or(false)
+    {
+        return 1;
+    }
+
     let position = match preference.audio_track_key.as_deref() {
         Some(key) => streams.iter().position(|stream| stream.track_key() == key),
         None => preference.selection.audio_stream_index.and_then(|index| {
@@ -424,14 +474,29 @@ fn audio_position(streams: &[MediaStream], preference: &TrackPreference) -> u32 
                 .position(|stream| stream.stream_index == index)
         }),
     };
-    position.map(|position| position as u32 + 1).unwrap_or(0)
+    // 0 = Automático, 2+ = pistas del vec (índice del stream + 2)
+    position.map(|position| position as u32 + 2).unwrap_or(0)
 }
 
-/// Posición de la pista de subtítulos (0 = automático, 1 = ninguno).
-fn subtitle_position(streams: &[MediaStream], preference: &TrackPreference) -> u32 {
+/// Posición de la pista de subtítulos (0 = automático, 1 = ninguno, 2 = predeterminadas).
+fn subtitle_position(
+    streams: &[MediaStream],
+    preference: &TrackPreference,
+    default_tracks: Option<&DefaultTracks>,
+) -> u32 {
     if preference.selection.subtitles_disabled {
         return 1;
     }
+    // Si el usuario eligió "Usar predeterminadas de Ajustes", devolver directamente
+    // la posición 2 (el desplegable tiene: 0=Automático, 1=Ninguno, 2=Predeterminadas, 3+=pistas).
+    if preference.subtitle_track_key.as_deref() == Some("default:subtitle")
+        && default_tracks
+            .map(|d| d.subtitle.is_some())
+            .unwrap_or(false)
+    {
+        return 2;
+    }
+
     let position = match preference.subtitle_track_key.as_deref() {
         Some(key) => streams.iter().position(|stream| stream.track_key() == key),
         None => preference
@@ -443,28 +508,46 @@ fn subtitle_position(streams: &[MediaStream], preference: &TrackPreference) -> u
                     .position(|stream| stream.stream_index == index)
             }),
     };
-    position.map(|position| position as u32 + 2).unwrap_or(0)
+    // 0 = Automático, 1 = Ninguno, 3+ = pistas del vec (índice del stream + 3)
+    position.map(|position| position as u32 + 3).unwrap_or(0)
 }
 
 /// Traduce la posición de los desplegables a una preferencia con identidad
 /// estable. Guardar las claves permite recuperar la misma pista aunque cambie
 /// el orden de los streams o se trate de un subtítulo externo.
+///
+/// Si se selecciona "Usar predeterminadas de Ajustes", se guarda la clave
+/// especial `default:audio` o `default:subtitle` para que el reproductor sepa
+/// que debe aplicar las pistas predeterminadas de Ajustes para este archivo.
 fn current_preference(
     audio_dropdown: &DropDown,
     subtitle_dropdown: &DropDown,
     audio_streams: &[MediaStream],
     subtitle_streams: &[MediaStream],
+    default_tracks: Option<&DefaultTracks>,
 ) -> TrackPreference {
     let audio_position = audio_dropdown.selected() as usize;
-    let audio_stream = audio_position
-        .checked_sub(1)
-        .and_then(|position| audio_streams.get(position));
+    let (audio_stream, audio_use_defaults) = match audio_position {
+        0 => (None, false),
+        1 if default_tracks.map(|d| d.audio.is_some()).unwrap_or(false) => (None, true),
+        position => (audio_streams.get(position.saturating_sub(1)), false),
+    };
 
     let subtitle_position = subtitle_dropdown.selected() as usize;
-    let (subtitle_stream, subtitles_disabled) = match subtitle_position {
-        0 => (None, false),
-        1 => (None, true),
-        position => (subtitle_streams.get(position.saturating_sub(2)), false),
+    let (subtitle_stream, subtitle_use_defaults, subtitles_disabled) = match subtitle_position {
+        0 => (None, false, false),
+        1 => (None, false, true),
+        2 if default_tracks
+            .map(|d| d.subtitle.is_some())
+            .unwrap_or(false) =>
+        {
+            (None, true, false)
+        }
+        position => (
+            subtitle_streams.get(position.saturating_sub(2)),
+            false,
+            false,
+        ),
     };
 
     TrackPreference {
@@ -473,8 +556,16 @@ fn current_preference(
             subtitle_stream_index: subtitle_stream.map(|stream| stream.stream_index),
             subtitles_disabled,
         },
-        audio_track_key: audio_stream.map(MediaStream::track_key),
-        subtitle_track_key: subtitle_stream.map(MediaStream::track_key),
+        audio_track_key: if audio_use_defaults {
+            Some("default:audio".to_string())
+        } else {
+            audio_stream.map(MediaStream::track_key)
+        },
+        subtitle_track_key: if subtitle_use_defaults {
+            Some("default:subtitle".to_string())
+        } else {
+            subtitle_stream.map(MediaStream::track_key)
+        },
         subtitle_external_path: subtitle_stream.and_then(|stream| stream.external_path.clone()),
     }
 }
@@ -547,10 +638,11 @@ mod tests {
     #[test]
     fn posicion_de_audio_traduce_indice_relativo_a_desplegable() {
         let audio = vec![stream("audio", 0, "spa"), stream("audio", 1, "eng")];
-        assert_eq!(audio_position(&audio, &TrackPreference::default()), 0);
-        assert_eq!(audio_position(&audio, &preference(Some(0))), 1);
-        assert_eq!(audio_position(&audio, &preference(Some(1))), 2);
-        assert_eq!(audio_position(&audio, &preference(Some(9))), 0);
+        assert_eq!(audio_position(&audio, &TrackPreference::default(), None), 0);
+        // Posición 1 = "Usar predeterminadas de Ajustes", las pistas empiezan en 2
+        assert_eq!(audio_position(&audio, &preference(Some(0)), None), 2);
+        assert_eq!(audio_position(&audio, &preference(Some(1)), None), 3);
+        assert_eq!(audio_position(&audio, &preference(Some(9)), None), 0);
     }
 
     #[test]
@@ -559,23 +651,23 @@ mod tests {
         let mut saved = preference(Some(0));
         saved.audio_track_key = Some(audio[1].track_key());
 
-        assert_eq!(audio_position(&audio, &saved), 2);
+        assert_eq!(audio_position(&audio, &saved, None), 3);
     }
 
     #[test]
     fn posicion_de_subtitulos_distingue_automatico_y_ninguno() {
         let subtitles = vec![stream("subtitle", 0, "spa"), stream("subtitle", 1, "eng")];
         assert_eq!(
-            subtitle_position(&subtitles, &TrackPreference::default()),
+            subtitle_position(&subtitles, &TrackPreference::default(), None),
             0
         );
         let mut disabled = TrackPreference::default();
         disabled.selection.subtitles_disabled = true;
-        assert_eq!(subtitle_position(&subtitles, &disabled), 1);
+        assert_eq!(subtitle_position(&subtitles, &disabled, None), 1);
 
         let mut saved = TrackPreference::default();
         saved.selection.subtitle_stream_index = Some(1);
-        assert_eq!(subtitle_position(&subtitles, &saved), 3);
+        assert_eq!(subtitle_position(&subtitles, &saved, None), 4);
     }
 
     #[test]
@@ -588,7 +680,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(subtitle_position(&subtitles, &saved), 3);
+        assert_eq!(subtitle_position(&subtitles, &saved, None), 4);
     }
 
     #[test]

@@ -2,6 +2,8 @@
 
 use crate::config::AppConfig;
 use crate::core::library::{IndexResult, LibraryService};
+use crate::db::media_repo::MediaRepository;
+use crate::db::{close_db, open_db};
 use crate::ui::i18n::TranslationsRef;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, DropDown, Entry, Label, Orientation, ScrolledWindow, Spinner, gio, glib};
@@ -426,6 +428,9 @@ pub struct SettingsView {
     on_save: Option<Rc<dyn Fn(AppConfig)>>,
     on_refresh_metadata: Option<Rc<dyn Fn()>>,
     translations: TranslationsRef,
+    default_audio_dropdown: DropDown,
+    default_subtitle_dropdown: DropDown,
+    db_path: String,
 }
 
 impl SettingsView {
@@ -455,6 +460,8 @@ impl SettingsView {
         // --- Sección: Rutas de medios ---
         let folders_section = Box::new(Orientation::Vertical, 10);
         folders_section.set_hexpand(true);
+        folders_section.set_margin_top(10);
+        folders_section.set_margin_bottom(20);
 
         let folders_title = Label::new(Some(&t("settings.folders.title")));
         folders_title.set_halign(gtk4::Align::Start);
@@ -516,6 +523,8 @@ impl SettingsView {
         // --- Sección: Idioma ---
         let language_section = Box::new(Orientation::Vertical, 10);
         language_section.set_hexpand(true);
+        language_section.set_margin_top(20);
+        language_section.set_margin_bottom(20);
 
         let language_title = Label::new(Some(&t("settings.language.title")));
         language_title.set_halign(gtk4::Align::Start);
@@ -536,6 +545,8 @@ impl SettingsView {
         // --- Sección: Metadatos ---
         let metadata_section = Box::new(Orientation::Vertical, 10);
         metadata_section.set_hexpand(true);
+        metadata_section.set_margin_top(20);
+        metadata_section.set_margin_bottom(20);
 
         let metadata_title = Label::new(Some(&t("settings.metadata.title")));
         metadata_title.set_halign(gtk4::Align::Start);
@@ -572,6 +583,52 @@ impl SettingsView {
         content.append(&language_section);
         content.append(&metadata_section);
 
+        // --- Sección: Pistas predeterminadas ---
+        let default_tracks_section = Box::new(Orientation::Vertical, 10);
+        default_tracks_section.set_hexpand(true);
+        default_tracks_section.set_margin_top(20);
+        default_tracks_section.set_margin_bottom(20);
+
+        let default_tracks_title = Label::new(Some(&t("settings.default_tracks.title")));
+        default_tracks_title.set_halign(gtk4::Align::Start);
+        default_tracks_title.add_css_class("subheading");
+        default_tracks_section.append(&default_tracks_title);
+
+        // Audio y subtítulos predeterminados en la misma línea.
+        let default_tracks_row = Box::new(Orientation::Horizontal, 12);
+        default_tracks_row.set_hexpand(true);
+        default_tracks_row.set_valign(gtk4::Align::Start);
+
+        // Audio predeterminado.
+        let audio_box = Box::new(Orientation::Vertical, 6);
+        audio_box.set_hexpand(true);
+        let default_audio_title = Label::new(Some(&t("settings.default_tracks.audio")));
+        default_audio_title.set_halign(gtk4::Align::Start);
+        audio_box.append(&default_audio_title);
+
+        let default_audio_dropdown = DropDown::from_strings(&["Ninguno"]);
+        default_audio_dropdown.set_hexpand(false);
+        default_audio_dropdown.set_width_request(340);
+        audio_box.append(&default_audio_dropdown);
+        default_tracks_row.append(&audio_box);
+
+        // Subtítulos predeterminados.
+        let subtitle_box = Box::new(Orientation::Vertical, 6);
+        subtitle_box.set_hexpand(true);
+        let default_subtitle_title = Label::new(Some(&t("settings.default_tracks.subtitle")));
+        default_subtitle_title.set_halign(gtk4::Align::Start);
+        subtitle_box.append(&default_subtitle_title);
+
+        let default_subtitle_dropdown = DropDown::from_strings(&["Ninguno"]);
+        default_subtitle_dropdown.set_hexpand(false);
+        default_subtitle_dropdown.set_width_request(340);
+        subtitle_box.append(&default_subtitle_dropdown);
+        default_tracks_row.append(&subtitle_box);
+
+        default_tracks_section.append(&default_tracks_row);
+
+        content.append(&default_tracks_section);
+
         // --- Botones Guardar / Volver ---
         let button_box = Box::new(Orientation::Horizontal, 10);
         button_box.set_halign(gtk4::Align::End);
@@ -588,6 +645,54 @@ impl SettingsView {
 
         let config_rc = Rc::new(RefCell::new(config.clone()));
         let window = parent.upcast_ref::<gtk4::Window>().clone();
+
+        // Llenar los desplegables de pistas predeterminadas con las disponibles
+        // en la biblioteca.
+        let (audio_options, subtitle_options) = match open_db(db_path) {
+            Ok(mut conn) => {
+                let mut repo = MediaRepository::new(&mut conn);
+                let audio = repo.list_available_tracks("audio").unwrap_or_default();
+                let subtitle = repo.list_available_tracks("subtitle").unwrap_or_default();
+                close_db(conn);
+                (audio, subtitle)
+            }
+            Err(_) => (Vec::new(), Vec::new()),
+        };
+
+        // Rellenar desplegable de audio: "Ninguno" + pistas disponibles.
+        let mut audio_labels: Vec<String> = vec![t("settings.default_tracks.none")];
+        audio_labels.extend(audio_options.iter().map(|(_, label)| label.clone()));
+        let audio_model =
+            gtk4::StringList::new(&audio_labels.iter().map(String::as_str).collect::<Vec<_>>());
+        default_audio_dropdown.set_model(Some(&audio_model));
+        // Seleccionar la que coincida con la configuración actual, si existe.
+        if let Some(default_audio) = &config.default_tracks.audio
+            && let Some((idx, _)) = audio_options
+                .iter()
+                .enumerate()
+                .find(|(_, (k, _))| k == default_audio)
+        {
+            default_audio_dropdown.set_selected((idx + 1) as u32); // +1 por "Ninguno"
+        }
+
+        // Rellenar desplegable de subtítulos: "Ninguno" + pistas disponibles.
+        let mut subtitle_labels: Vec<String> = vec![t("settings.default_tracks.none")];
+        subtitle_labels.extend(subtitle_options.iter().map(|(_, label)| label.clone()));
+        let subtitle_model = gtk4::StringList::new(
+            &subtitle_labels
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+        );
+        default_subtitle_dropdown.set_model(Some(&subtitle_model));
+        if let Some(default_subtitle) = &config.default_tracks.subtitle
+            && let Some((idx, _)) = subtitle_options
+                .iter()
+                .enumerate()
+                .find(|(_, (k, _))| k == default_subtitle)
+        {
+            default_subtitle_dropdown.set_selected((idx + 1) as u32);
+        }
 
         let folder_manager = FolderManager {
             config: config_rc.clone(),
@@ -688,6 +793,9 @@ impl SettingsView {
             on_save: None,
             on_refresh_metadata: None,
             translations,
+            default_audio_dropdown,
+            default_subtitle_dropdown,
+            db_path: db_path.to_string(),
         }
     }
 
@@ -742,6 +850,9 @@ impl SettingsView {
         let config = self.config.clone();
         let language_combo = self.language_combo.clone();
         let on_save = self.on_save.clone();
+        let default_audio_dropdown_clone = self.default_audio_dropdown.clone();
+        let default_subtitle_dropdown_clone = self.default_subtitle_dropdown.clone();
+        let db_path_clone = self.db_path.clone();
 
         self.save_button.connect_clicked(move |_| {
             {
@@ -751,6 +862,32 @@ impl SettingsView {
                 } else {
                     "en".to_string()
                 };
+
+                // Guardar pistas predeterminadas seleccionadas en los desplegables.
+                let audio_selected = default_audio_dropdown_clone.selected() as usize;
+                let subtitle_selected = default_subtitle_dropdown_clone.selected() as usize;
+
+                if let Ok(mut conn) = open_db(&db_path_clone) {
+                    let mut repo = MediaRepository::new(&mut conn);
+                    let audio_tracks = repo.list_available_tracks("audio").unwrap_or_default();
+                    let subtitle_tracks =
+                        repo.list_available_tracks("subtitle").unwrap_or_default();
+                    close_db(conn);
+
+                    // Índice 0 = "Ninguno", así que restamos 1 para obtener la pista real.
+                    config.default_tracks.audio =
+                        if audio_selected > 0 && audio_selected <= audio_tracks.len() {
+                            Some(audio_tracks[audio_selected - 1].0.clone())
+                        } else {
+                            None
+                        };
+                    config.default_tracks.subtitle =
+                        if subtitle_selected > 0 && subtitle_selected <= subtitle_tracks.len() {
+                            Some(subtitle_tracks[subtitle_selected - 1].0.clone())
+                        } else {
+                            None
+                        };
+                }
             }
 
             if let Some(callback) = &on_save {
