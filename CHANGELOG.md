@@ -6,6 +6,15 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 versionado [SemVer](https://semver.org/lang/es/). A partir de `v1.0.0`, release-please
 mantiene este archivo a partir de los commits convencionales.
 
+## [Unreleased]
+
+### Bug Fixes
+
+* **player:** respetar el estado real de la ventana (normal, maximizado o pantalla completa) al abrir mpv, evitando que Hyprland encoja la ventana principal.
+* **tracks:** guardar la identidad estable de audio y subtítulos por archivo e indexar subtítulos externos junto al vídeo, sin reutilizar pistas de otro episodio.
+* **seasons:** permitir marcar y desmarcar como vista una temporada guardada en su propia carpeta hija.
+* **history:** mantener una única entrada activa por archivo, actualizar su progreso al reanudar y archivar los duplicados antiguos sin borrar el historial.
+
 ## [0.2.1](https://github.com/Angel-p-v/Acryl/compare/v0.2.0...v0.2.1) (2026-11-01)
 
 ### Features

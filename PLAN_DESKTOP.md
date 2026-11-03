@@ -568,4 +568,51 @@ No hay trabajo pendiente en el plan.
 ### 19.8. Limitaciones conocidas
 Ninguna.
 
+## 20. Correcciones de pistas, ventana, temporadas e historial
+
+> Estado: implementado en rama `fix/subtitles-window-season-history`.
+
+### 20.1. Subtítulos y preferencias por archivo
+- La preferencia de audio/subtítulos se guarda por archivo con una clave
+  estable (`embedded:<tipo>:<idioma>:<códec>:<título>` o `external:<ruta>`)
+  además del índice, que queda solo como respaldo de bases antiguas.
+- Se indexan subtítulos externos junto al vídeo (`.srt`, `.ass`, `.ssa`,
+  `.vtt`, `.sub`, `.idx`, `.sup`, `.ttml`, `.dfxp`) y se pasan a mpv con
+  `--sub-file` y `--sub-auto=no` para que `--sid` sea determinista.
+- Si la pista guardada ya no existe, no se reutiliza otra pista parecida: se
+  desactivan los subtítulos.
+
+### 20.2. Ventana durante la reproducción
+- El modo de mpv se deriva del estado real de Acryl: `Normal` no añade opción,
+  `Maximized` usa `--window-maximized=yes` y `Fullscreen` usa `--fullscreen`.
+- Al cerrar mpv se reafirma el estado original de la ventana, evitando que
+  Hyprland encoja o desmaximice Acryl.
+
+### 20.3. Temporadas en carpeta hija
+- La acción de marcar/desmarcar temporada usa la selección completa
+  (`SeasonSelection::Child` o `Number`).
+- Las temporadas hijas actualizan sus archivos por `media_id` mediante
+  `set_season_media_watched`, sin depender del número de temporada.
+
+### 20.4. Historial de reproducción
+- `completed_at IS NULL` identifica la entrada activa.
+- Un índice único parcial garantiza una sola entrada pendiente por archivo.
+- El guardado usa UPSERT, conserva la posición más avanzada y actualiza la
+  fecha; al terminar se marca la entrada como completada.
+- La migración archiva duplicados antiguos sin borrarlos y el listado muestra
+  solo la entrada más reciente por archivo.
+
+### 20.5. Migraciones
+- `13 media-file-track-identity`: claves de pista y ruta de subtítulo externo.
+- `14 media-stream-external-path`: ruta externa en `media_streams`.
+- `15 playback-history-active-entry`: `completed_at`, consolidación de
+  duplicados e índice único parcial.
+
+### 20.6. Pruebas
+- Unitarias: resolución de pistas por clave, sidecars, modos de ventana,
+  preferencias y temporadas hijas.
+- Integración: persistencia de claves/rutas, migración de duplicados,
+  entrada activa única y conservación del historial completado.
+- Integración mpv: selección de pistas embebidas y desactivación de subtítulos.
+
 *Nota: Este plan es un borrador inicial. A medida que se avanza en la implementación, se deben actualizar los hitos y criterios de aceptación.*
