@@ -211,6 +211,15 @@ const PLAYBACK_HISTORY_FILE_PATH_SQL: &str = r#"
 ALTER TABLE playback_history ADD COLUMN file_path TEXT;
 "#;
 
+/// Marca de episodio visto por archivo.
+///
+/// Permite al usuario marcar manualmente un episodio como visto sin necesidad
+/// de haberlo reproducido realmente. El botón "Continuar" la respeta junto con
+/// `playback_history` para saltar episodios ya vistos.
+const MEDIA_FILE_WATCHED_SQL: &str = r#"
+ALTER TABLE media_files ADD COLUMN is_watched INTEGER NOT NULL DEFAULT 0 CHECK (is_watched IN (0, 1));
+"#;
+
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -266,5 +275,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 11,
         name: "playback-history-file-path",
         sql: PLAYBACK_HISTORY_FILE_PATH_SQL,
+    },
+    Migration {
+        version: 12,
+        name: "media-file-watched",
+        sql: MEDIA_FILE_WATCHED_SQL,
     },
 ];

@@ -3,7 +3,7 @@
 use crate::core::metadata::{ImageOption, RefreshMetadataResult};
 use crate::core::poster_service::cached_path;
 use crate::db::media_repo::ListMediaOptions;
-use crate::db::{MediaRepository, close_db, open_db};
+use crate::db::{FileRepository, MediaRepository, close_db, open_db};
 use crate::ui::i18n::{Translations, TranslationsRef, load_translations};
 use crate::ui::media_details::{MediaDetails, SeasonSelection};
 use crate::ui::media_list::MediaList;
@@ -1135,6 +1135,67 @@ impl MainWindow {
                         Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
                     }
                 });
+            });
+
+        // Callback: marcar un episodio individual como visto/no visto.
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_toggle_file_watched(move |file_path, watched| {
+                let this = this_clone.clone();
+                let w = this.borrow();
+                let db_path = w.db_path.clone();
+                let mut conn = match open_db(&db_path) {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        eprintln!("Error abriendo BD: {}", e);
+                        return;
+                    }
+                };
+                let mut repo = FileRepository::new(&mut conn);
+                if let Err(e) = repo.set_file_watched(&file_path, watched) {
+                    eprintln!("Error marcando archivo como visto: {}", e);
+                }
+                close_db(conn);
+                // Recargar la vista para reflejar el cambio de estado.
+                let media_id = w.media_details.borrow().media_id();
+                let season = w.media_details.borrow().season_selection();
+                drop(w);
+                let w2 = this.borrow();
+                w2.show_details(media_id, season);
+            });
+
+        // Callback: marcar una temporada completa como vista/no vista.
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_toggle_season_watched(move |season, watched| {
+                let this = this_clone.clone();
+                let w = this.borrow();
+                let db_path = w.db_path.clone();
+                let media_id = w.media_details.borrow().media_id();
+                drop(w);
+                let mut conn = match open_db(&db_path) {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        eprintln!("Error abriendo BD: {}", e);
+                        return;
+                    }
+                };
+                let mut repo = FileRepository::new(&mut conn);
+                if let Err(e) = repo.set_season_watched(media_id, season, watched) {
+                    eprintln!("Error marcando temporada como vista: {}", e);
+                }
+                close_db(conn);
+                // Recargar la vista para reflejar el cambio de estado.
+                let w2 = this.borrow();
+                let media_id2 = w2.media_details.borrow().media_id();
+                let season2 = w2.media_details.borrow().season_selection();
+                drop(w2);
+                let w3 = this.borrow();
+                w3.show_details(media_id2, season2);
             });
 
         // Completar metadatos y pósters que falten sin bloquear la UI.
