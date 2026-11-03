@@ -236,7 +236,7 @@ impl<'a> MediaRepository<'a> {
     pub fn get_media_type(&mut self, media_id: i64) -> RusqliteResult<Option<String>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT r#type FROM media WHERE id = ?1")?;
+            .prepare(r#"SELECT "type" FROM media WHERE id = ?1"#)?;
         let row = stmt.query_row(params![media_id], |row| row.get::<_, String>(0));
         match row {
             Ok(t) => Ok(Some(t)),
