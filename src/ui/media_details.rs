@@ -195,7 +195,6 @@ impl MediaDetails {
             let content_container = content_container.clone();
             let translations = translations.clone();
             let on_play_episode = on_play_episode.clone();
-            let on_edit_tracks = on_edit_tracks.clone();
 
             season_dropdown.connect_selected_notify(move |dropdown| {
                 if suppress.get() {
@@ -216,7 +215,6 @@ impl MediaDetails {
                     selection,
                     &translations,
                     &on_play_episode,
-                    &on_edit_tracks,
                 );
             });
         }
@@ -409,7 +407,6 @@ impl MediaDetails {
                     &direct_files,
                     &self.translations,
                     &self.on_play_episode,
-                    &self.on_edit_tracks,
                 );
             }
             return;
@@ -444,7 +441,6 @@ impl MediaDetails {
             selection,
             &self.translations,
             &self.on_play_episode,
-            &self.on_edit_tracks,
         );
     }
 
@@ -534,7 +530,6 @@ fn render_selection(
     selection: SeasonSelection,
     translations: &TranslationsRef,
     on_play_episode: &SharedPlayEpisodeCallback,
-    on_edit_tracks: &SharedEditTracksCallback,
 ) {
     let (title, files) = match selection {
         SeasonSelection::Child(season_id) => {
@@ -592,7 +587,6 @@ fn render_selection(
         &files,
         translations,
         on_play_episode,
-        on_edit_tracks,
     );
 }
 
@@ -602,7 +596,6 @@ fn render_files(
     files: &[MediaFile],
     translations: &TranslationsRef,
     on_play_episode: &SharedPlayEpisodeCallback,
-    on_edit_tracks: &SharedEditTracksCallback,
 ) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
@@ -628,12 +621,7 @@ fn render_files(
 
     let mut cards = Vec::with_capacity(files.len());
     for file in files {
-        cards.push(build_episode_card(
-            file,
-            translations,
-            on_play_episode,
-            on_edit_tracks,
-        ));
+        cards.push(build_episode_card(file, translations, on_play_episode));
     }
     container.append(&episode_grid(cards));
 }
@@ -658,7 +646,6 @@ fn build_episode_card(
     file: &MediaFile,
     translations: &TranslationsRef,
     on_play_episode: &SharedPlayEpisodeCallback,
-    on_edit_tracks: &SharedEditTracksCallback,
 ) -> Box {
     let t = |key: &str| translations.borrow().t(key);
     let (_episode_label, episode_number) = episode_texts(file, translations);
@@ -744,22 +731,6 @@ fn build_episode_card(
         play_btn.connect_clicked(move |_| callback(file_path_for_play.clone()));
     }
     actions.append(&play_btn);
-
-    // La preferencia de pistas se guarda por archivo. Este botón permite
-    // elegirla para este episodio concreto sin depender del «siguiente
-    // episodio» que muestre la cabecera de la vista.
-    let tracks_btn = Button::with_label(&t("button.tracks"));
-    tracks_btn.add_css_class("episode-tracks-btn");
-    tracks_btn.set_halign(gtk4::Align::Center);
-    if !file.is_automatic_tracks() {
-        tracks_btn.add_css_class("custom");
-    }
-    tracks_btn.set_tooltip_text(Some(&format!("{} {}", t("tooltip.tracks"), title_text)));
-    let file_path_for_tracks = file.file_path.clone();
-    if let Some(callback) = on_edit_tracks.borrow().clone() {
-        tracks_btn.connect_clicked(move |_| callback(file_path_for_tracks.clone()));
-    }
-    actions.append(&tracks_btn);
 
     card.append(&actions);
 
