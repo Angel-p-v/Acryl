@@ -168,34 +168,26 @@ pub fn play_with_resume(
     media_id: i64,
     file_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Consultar tipo de medio para saber el umbral de "visto".
-    let media_type = {
+    // 1. Consultar tipo de medio y última posición guardada (rápido, en hilo principal).
+    let (media_type, start_position) = {
         let mut conn = open_db(db_path)?;
         let mut repo = MediaRepository::new(&mut conn);
-        let t = repo.get_media_type(media_id)?;
+        let t = repo.get_media_type(media_id)?.unwrap_or_default();
+        let pos = repo.get_playback_position(file_path)?.unwrap_or(0.0);
         close_db(conn);
-        t.unwrap_or_default()
+        (t, pos)
     };
 
-    // 2. Leer la última posición guardada.
-    let start_position = {
-        let mut conn = open_db(db_path)?;
-        let mut repo = MediaRepository::new(&mut conn);
-        let pos = repo.get_playback_position(file_path)?;
-        close_db(conn);
-        pos.unwrap_or(0.0)
-    };
-
-    // 3. Selección de pistas guardada.
+    // 2. Selección de pistas guardada.
     let selection = saved_track_selection(db_path, file_path);
 
-    // 4. Crear socket IPC único para mpv.
+    // 3. Crear socket IPC único para mpv.
     let socket_path = format!(
         "/tmp/acryl-mpv-{}.socket",
         NEXT_SOCKET_ID.fetch_add(1, Ordering::Relaxed)
     );
 
-    // 5. Construir argumentos de mpv con IPC, start-position y pistas.
+    // 4. Construir argumentos de mpv con IPC, start-position y pistas.
     let mut args = vec![
         "--force-window=immediate".to_string(),
         format!("--input-ipc-server={}", socket_path),
@@ -205,7 +197,7 @@ pub fn play_with_resume(
     append_track_args(&mut args, selection);
     args.push(file_path.to_string());
 
-    // 6. Lanzar mpv.
+    // 5. Lanzar mpv.
     let mut child = Command::new(MPV_COMMAND)
         .args(&args)
         .stdout(Stdio::null())
@@ -214,85 +206,106 @@ pub fn play_with_resume(
         .spawn()
         .map_err(|e| format!("no se pudo lanzar '{}': {}", MPV_COMMAND, e))?;
 
-    // 7. Hilo para hacer polling de la posición y duración cada segundo.
-    let poll_socket = socket_path.clone();
-    let poll_handle = std::thread::spawn(move || -> (f64, f64) {
-        let mut last_position = start_position;
-        let mut last_duration = 0.0;
-        while let Ok(mut stream) = UnixStream::connect(&poll_socket) {
-            let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
-            let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
-
-            // Leer time-pos
-            let msg = r#"{"command":["get_property","time-pos"]}"#;
-            let _ = stream.write_all(format!("{}\n", msg).as_bytes());
-            let mut reader = BufReader::new(&stream);
-            let mut response = String::new();
-            if reader.read_line(&mut response).is_ok()
-                && let Ok(v) = serde_json::from_str::<Value>(&response)
-                && let Some(pos) = v.get("data").and_then(|d| d.as_f64())
-            {
-                last_position = pos;
-            }
-
-            // Leer duration (nueva conexión para evitar bloqueos)
-            drop(stream);
-            if let Ok(mut stream) = UnixStream::connect(&poll_socket) {
-                let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
-                let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
-                let msg = r#"{"command":["get_property","duration"]}"#;
-                let _ = stream.write_all(format!("{}\n", msg).as_bytes());
-                let mut reader = BufReader::new(&stream);
-                let mut response = String::new();
-                if reader.read_line(&mut response).is_ok()
-                    && let Ok(v) = serde_json::from_str::<Value>(&response)
-                    && let Some(dur) = v.get("data").and_then(|d| d.as_f64())
-                {
-                    last_duration = dur;
-                }
-            }
-
-            std::thread::sleep(Duration::from_secs(1));
-            // Si el socket se cierra, mpv terminó; salir del bucle.
-        }
-        (last_position, last_duration)
-    });
-
-    // 8. Registrar inicio de reproducción en historial.
+    // 6. Registrar inicio de reproducción en historial.
     {
         let mut conn = open_db(db_path)?;
         let mut repo = MediaRepository::new(&mut conn);
         let _ = repo.record_playback(media_id, file_path, start_position, 0.0);
         close_db(conn);
     }
-    let _ = child.wait();
 
-    // 10. Obtener la última posición y duración conocidas.
-    let (final_position, final_duration) = poll_handle.join().unwrap_or((start_position, 0.0));
+    // 7. Hilo separado para monitorear mpv: hace polling de posición,
+    //    espera a que termine, actualiza historial y marca como visto si
+    //    faltan pocos minutos. Todo esto se hace fuera del hilo de GTK
+    //    para no bloquear la interfaz.
+    let db_path_owned = db_path.to_string();
+    let file_path_owned = file_path.to_string();
+    let media_type_owned = media_type;
+    let socket_owned = socket_path.clone();
 
-    // 11. Actualizar el registro de reproducción con la posición final.
-    {
-        let mut conn = open_db(db_path)?;
-        let mut repo = MediaRepository::new(&mut conn);
-        let _ = repo.update_playback_position(media_id, file_path, final_position, final_duration);
-        close_db(conn);
-    }
+    std::thread::spawn(move || {
+        let mut last_position = start_position;
+        let mut last_duration = 0.0;
 
-    // 12. Marcar como visto si faltan menos del umbral.
-    let is_movie = media_type == "movie";
-    let threshold: f64 = if is_movie { 600.0 } else { 300.0 }; // 10 min / 5 min
-    if final_duration > 0.0 {
-        let remaining = final_duration - final_position;
-        if remaining > 0.0 && remaining < threshold {
-            let mut conn = open_db(db_path)?;
+        // Polling de posición y duración cada segundo hasta que mpv cierre el socket.
+        loop {
+            match UnixStream::connect(&socket_owned) {
+                Ok(mut stream) => {
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+
+                    // Leer time-pos
+                    let msg = r#"{"command":["get_property","time-pos"]}"#;
+                    let _ = stream.write_all(format!("{}\n", msg).as_bytes());
+                    let mut reader = BufReader::new(&stream);
+                    let mut response = String::new();
+                    if reader.read_line(&mut response).is_ok()
+                        && let Ok(v) = serde_json::from_str::<Value>(&response)
+                        && let Some(pos) = v.get("data").and_then(|d| d.as_f64())
+                    {
+                        last_position = pos;
+                    }
+                    drop(stream);
+                }
+                Err(_) => break, // Socket cerrado: mpv terminó.
+            }
+
+            // Leer duration (nueva conexión para evitar bloqueos).
+            match UnixStream::connect(&socket_owned) {
+                Ok(mut stream) => {
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+                    let msg = r#"{"command":["get_property","duration"]}"#;
+                    let _ = stream.write_all(format!("{}\n", msg).as_bytes());
+                    let mut reader = BufReader::new(&stream);
+                    let mut response = String::new();
+                    if reader.read_line(&mut response).is_ok()
+                        && let Ok(v) = serde_json::from_str::<Value>(&response)
+                        && let Some(dur) = v.get("data").and_then(|d| d.as_f64())
+                    {
+                        last_duration = dur;
+                    }
+                    drop(stream);
+                }
+                Err(_) => break,
+            }
+
+            std::thread::sleep(Duration::from_secs(1));
+        }
+
+        // Esperar a que el proceso mpv termine realmente.
+        let _ = child.wait();
+
+        // Actualizar el registro de reproducción con la posición final.
+        if let Ok(mut conn) = open_db(&db_path_owned) {
             let mut repo = MediaRepository::new(&mut conn);
-            repo.set_file_watched(file_path, true)?;
+            let _ = repo.update_playback_position(
+                media_id,
+                &file_path_owned,
+                last_position,
+                last_duration,
+            );
             close_db(conn);
         }
-    }
 
-    // 13. Limpiar socket IPC.
-    let _ = std::fs::remove_file(&socket_path);
+        // Marcar como visto si faltan menos del umbral.
+        let is_movie = media_type_owned == "movie";
+        let threshold: f64 = if is_movie { 600.0 } else { 300.0 }; // 10 min / 5 min
+        if last_duration > 0.0 {
+            let remaining = last_duration - last_position;
+            if let Ok(mut conn) = open_db(&db_path_owned)
+                && remaining > 0.0
+                && remaining < threshold
+            {
+                let mut repo = MediaRepository::new(&mut conn);
+                let _ = repo.set_file_watched(&file_path_owned, true);
+                close_db(conn);
+            }
+        }
+
+        // Limpiar socket IPC.
+        let _ = std::fs::remove_file(&socket_owned);
+    });
 
     Ok(())
 }
