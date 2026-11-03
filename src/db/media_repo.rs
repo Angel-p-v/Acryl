@@ -962,8 +962,13 @@ impl<'a> MediaRepository<'a> {
 
     /// Lista las pistas únicas disponibles en la biblioteca, agrupadas por tipo.
     ///
+    /// Para pistas externas (sidecars) se deduplica por ruta absoluta.
+    /// Para pistas embebidas se agrupa por idioma (y códec) para que no
+    /// aparezcan repetidas en Ajustes cuando el mismo idioma tenga varios
+    /// títulos distintos.
+    ///
     /// Devuelve un vector de tuplas `(track_key, etiqueta_legible)` para cada
-    /// tipo de pista (`audio` o `subtitle`). Las claves repetidas se deduplican.
+    /// tipo de pista (`audio` o `subtitle`).
     pub fn list_available_tracks(
         &mut self,
         stream_type: &str,
@@ -971,7 +976,7 @@ impl<'a> MediaRepository<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT stream_type, language, codec, title, external_path
              FROM media_streams WHERE stream_type = ?1
-             ORDER BY language, title",
+             ORDER BY language, codec, title",
         )?;
         let rows: Vec<StreamRow> = stmt
             .query_map(params![stream_type], |row| {
@@ -990,6 +995,7 @@ impl<'a> MediaRepository<'a> {
         let mut result: Vec<(String, String)> = Vec::new();
 
         for (stype, language, codec, title, external_path) in rows {
+            let stype_clone = stype.to_string();
             let language_clone = language.clone();
             let codec_clone = codec.clone();
             let title_clone = title.clone();
@@ -1006,10 +1012,31 @@ impl<'a> MediaRepository<'a> {
                 external_path,
             };
             let key = stream.track_key();
-            if seen.contains(&key) {
+
+            // Para pistas externas (sidecars) se deduplica por ruta absoluta.
+            // Para pistas embebidas se agrupa por idioma + códec, ignorando
+            // el título para evitar duplicados cuando el mismo idioma tiene
+            // varios títulos distintos.
+            let dedup_key = if external_path_clone
+                .as_ref()
+                .filter(|p| !p.is_empty())
+                .is_some()
+            {
+                key.clone()
+            } else {
+                let normalize =
+                    |value: Option<&str>| value.unwrap_or_default().trim().to_lowercase();
+                format!(
+                    "dedup:{}:{}:{}",
+                    stype_clone,
+                    normalize(language_clone.as_deref()),
+                    normalize(codec_clone.as_deref())
+                )
+            };
+            if seen.contains(&dedup_key) {
                 continue;
             }
-            seen.insert(key.clone());
+            seen.insert(dedup_key);
 
             let label = if let Some(path) = external_path_clone.filter(|p| !p.is_empty()) {
                 format!("{} (externo)", path)
