@@ -38,6 +38,12 @@
   "button.continue_prefix": "▶ Continuar",
   "button.continue_format": "▶ Continuar {}",
   "button.play_episode": "Reproducir",
+  "button.mark_watched": "✓ Visto",
+  "button.mark_unwatched": "○ No visto",
+  "button.mark_season_watched": "Marcar temporada como vista",
+  "button.mark_season_unwatched": "Marcar temporada como no vista",
+  "status.watched": "Visto",
+  "status.unwatched": "No visto",
   "button.redetect": "🔄 Volver a detectar pistas",
 
   "back.list": "← Volver a la lista",
@@ -104,6 +110,8 @@
   "tooltip.tracks": "Elegir pista de audio y subtítulos",
   "tooltip.choose_images": "Elegir un póster o banner diferente, o eliminar el actual",
   "tooltip.redetect": "Ejecuta ffprobe de nuevo para leer todas las pistas del archivo",
+  "tooltip.mark_watched": "Marcar episodio como visto",
+  "tooltip.mark_unwatched": "Marcar episodio como no visto",
 
   "track.title": "Pistas de audio y subtítulos",
   "track.heading": "Pistas de audio y subtítulos",

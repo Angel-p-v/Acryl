@@ -188,6 +188,7 @@ impl<'a> MediaRepository<'a> {
              WHERE (mf.media_id = ?1 OR mf.media_id IN (
                  SELECT id FROM media WHERE parent_id = ?1
              ))
+             AND mf.is_watched = 0
              AND mf.file_path NOT IN (
                  SELECT ph.file_path FROM playback_history ph
                  WHERE ph.file_path IS NOT NULL
