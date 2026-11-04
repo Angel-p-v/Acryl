@@ -187,10 +187,9 @@ impl MediaList {
         glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
             let width = scrolled_for_timeout.width() as f64;
             let card_total_width = CARD_WIDTH as f64 + 16.0 + 8.0;
-            let columns = (width / card_total_width).floor() as i32;
-            let columns = columns.clamp(MIN_COLUMNS as i32, MAX_COLUMNS as i32);
-            grid_for_timeout.set_min_columns(columns as u32);
-            grid_for_timeout.set_max_columns(columns as u32);
+            let columns = columns_for_width(width, card_total_width, MIN_COLUMNS, MAX_COLUMNS);
+            grid_for_timeout.set_min_columns(columns);
+            grid_for_timeout.set_max_columns(columns);
             true.into()
         });
 
@@ -217,10 +216,9 @@ impl MediaList {
     pub fn update_columns(&self) {
         let width = self.scrolled.width() as f64;
         let card_total_width = CARD_WIDTH as f64 + 16.0 + 8.0;
-        let columns = (width / card_total_width).floor() as i32;
-        let columns = columns.clamp(MIN_COLUMNS as i32, MAX_COLUMNS as i32);
-        self.grid_view.set_min_columns(columns as u32);
-        self.grid_view.set_max_columns(columns as u32);
+        let columns = columns_for_width(width, card_total_width, MIN_COLUMNS, MAX_COLUMNS);
+        self.grid_view.set_min_columns(columns);
+        self.grid_view.set_max_columns(columns);
     }
 
     /// Registra un callback que se invoca cuando una descarga de póster termina
@@ -357,6 +355,23 @@ impl MediaList {
     {
         *self.on_media_select.borrow_mut() = Some(Rc::new(f));
     }
+}
+
+/// Calcula el número de columnas de una rejilla dado el ancho disponible y
+/// el ancho total de cada tarjeta (incluido el espaciado entre columnas),
+/// respetando los límites mínimo y máximo. Devuelve siempre al menos
+/// `min_columns` columnas.
+fn columns_for_width(
+    available_width: f64,
+    card_total_width: f64,
+    min_columns: u32,
+    max_columns: u32,
+) -> u32 {
+    if card_total_width <= 0.0 {
+        return min_columns;
+    }
+    let columns = (available_width / card_total_width).floor() as i32;
+    columns.clamp(min_columns as i32, max_columns as i32) as u32
 }
 
 /// Sustituye el ítem del modelo en `position` por una instancia nueva del
@@ -534,5 +549,31 @@ mod tests {
             })
             .collect();
         assert_eq!(names, vec!["uno", "dos", "tres"]);
+    }
+
+    #[test]
+    fn columnas_por_ancho_respetan_minimo_y_maximo() {
+        // Cada tarjeta ocupa 176 px de ancho + 16 px de espaciado + 8 px de
+        // margen = 200 px por columna. Límites: 1 a 8 columnas.
+        const CARD_TOTAL: f64 = 176.0 + 16.0 + 8.0;
+
+        // Menos del ancho de una tarjeta: sigue mostrando una columna.
+        assert_eq!(super::columns_for_width(0.0, CARD_TOTAL, 1, 8), 1);
+        assert_eq!(super::columns_for_width(199.0, CARD_TOTAL, 1, 8), 1);
+        // Exactamente una tarjeta.
+        assert_eq!(super::columns_for_width(200.0, CARD_TOTAL, 1, 8), 1);
+        // Dos tarjetas caben a partir de 400 px.
+        assert_eq!(super::columns_for_width(399.0, CARD_TOTAL, 1, 8), 1);
+        assert_eq!(super::columns_for_width(400.0, CARD_TOTAL, 1, 8), 2);
+        // Pantalla ancha: cinco columnas.
+        assert_eq!(super::columns_for_width(1000.0, CARD_TOTAL, 1, 8), 5);
+        // Pantalla muy ancha: se clampea al máximo de 8.
+        assert_eq!(super::columns_for_width(2000.0, CARD_TOTAL, 1, 8), 8);
+    }
+
+    #[test]
+    fn columnas_por_ancho_con_limites_personalizados() {
+        assert_eq!(super::columns_for_width(500.0, 100.0, 2, 3), 3);
+        assert_eq!(super::columns_for_width(50.0, 100.0, 2, 3), 2);
     }
 }

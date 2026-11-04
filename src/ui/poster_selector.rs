@@ -16,7 +16,9 @@ use crate::core::poster_service::{PosterService, cached_path};
 use crate::ui::poster::poster_picture;
 use gtk4::gdk_pixbuf::{InterpType, Pixbuf as GtkPixbuf};
 use gtk4::prelude::*;
-use gtk4::{Align, Box, Button, Dialog, FlowBox, Image, Label, Orientation, Window};
+use gtk4::{
+    Align, Box, Button, Dialog, FlowBox, Image, Label, Orientation, ScrolledWindow, Window,
+};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -100,6 +102,22 @@ impl PosterSelector {
         content.set_margin_start(8);
         content.set_margin_end(8);
 
+        // Área scrollable: si hay muchas opciones de póster o banner, el
+        // contenido se desplaza en lugar de salirse de la ventana en pantallas
+        // pequeñas. Los botones Cancelar / Aplicar se añaden al área de acción
+        // del diálogo y permanecen siempre accesibles.
+        let scrolled = ScrolledWindow::new();
+        scrolled.set_hexpand(true);
+        scrolled.set_vexpand(true);
+        scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
+        scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
+        content.append(&scrolled);
+
+        let inner = Box::new(Orientation::Vertical, 0);
+        inner.set_hexpand(true);
+        inner.set_vexpand(false);
+        scrolled.set_child(Some(&inner));
+
         // ---------- Sección: Póster ----------
         let poster_section = section_box("Póster");
         let poster_flow = thumbnail_flow();
@@ -148,7 +166,7 @@ impl PosterSelector {
             poster_flow.append(&btn);
         }
 
-        content.append(&poster_section);
+        inner.append(&poster_section);
 
         // ---------- Sección: Banner ----------
         let banner_section = section_box("Banner");
@@ -196,7 +214,7 @@ impl PosterSelector {
             banner_flow.append(&btn);
         }
 
-        content.append(&banner_section);
+        inner.append(&banner_section);
 
         // ---------- Botones de acción ----------
         dialog.add_button("Cancelar", gtk4::ResponseType::Cancel);
