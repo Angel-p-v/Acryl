@@ -12,7 +12,7 @@ use crate::db::media_repo::MediaStream;
 use crate::db::{FileRepository, TrackPreference, TrackSelection, close_db, open_db};
 use crate::ui::i18n::TranslationsRef;
 use gtk4::prelude::*;
-use gtk4::{Box, Button, DropDown, Label, Orientation, Window};
+use gtk4::{Box, Button, DropDown, Label, Orientation, ScrolledWindow, Window};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc::{self, TryRecvError};
@@ -38,8 +38,10 @@ pub fn show_track_dialog(
     let window = Window::builder()
         .transient_for(parent)
         .modal(true)
+        .resizable(true)
         .title(translations.borrow().t("track.title"))
-        .default_width(460)
+        .default_width(520)
+        .default_height(640)
         .build();
 
     let content = Box::new(Orientation::Vertical, 12);
@@ -47,6 +49,11 @@ pub fn show_track_dialog(
     content.set_margin_bottom(18);
     content.set_margin_start(18);
     content.set_margin_end(18);
+    content.set_hexpand(true);
+    // El contenido no se expande verticalmente: su altura natural es la suma
+    // de los controles y el ScrolledWindow desplaza cuando supera la altura
+    // disponible, evitando que quede fuera de área en pantallas pequeñas.
+    content.set_vexpand(false);
 
     let heading = Label::new(None);
     heading.set_markup(&format!(
@@ -55,6 +62,15 @@ pub fn show_track_dialog(
     ));
     heading.set_halign(gtk4::Align::Start);
     content.append(&heading);
+
+    let scrolled = ScrolledWindow::new();
+    scrolled.set_hexpand(true);
+    scrolled.set_vexpand(true);
+    scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
+    scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
+    scrolled.set_child(Some(&content));
+
+    window.set_child(Some(&scrolled));
 
     let file_label = Label::new(Some(file_path));
     file_label.add_css_class("dim-label");

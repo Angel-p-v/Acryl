@@ -405,8 +405,16 @@ impl FolderManager {
 }
 
 /// Vista de ajustes integrada (se muestra dentro del Stack de MainWindow).
+///
+/// El contenido desplegable (secciones de carpetas, idioma, metadatos y
+/// pistas predeterminadas) vive dentro de un `ScrolledWindow` para que, cuando
+/// la ventana no tenga suficiente altura, el usuario pueda desplazarse y llegar
+/// hasta los botones de guardar y volver sin que quede nada fuera de área
+/// visible. Los botones de acción se mantienen fijos al final de la página.
 pub struct SettingsView {
-    content: Box,
+    /// Página completa: área scrollable con las secciones de configuración y
+    /// los botones de acción fijados al final.
+    page: Box,
     title: Label,
     folders_title: Label,
     folders_label: Label,
@@ -442,15 +450,51 @@ impl SettingsView {
         parent: &P,
         translations: TranslationsRef,
     ) -> Self {
+        // Área scrollable con todas las secciones de configuración. Se
+        // coloca dentro de un ScrolledWindow para que, cuando el contenido no
+        // quepa en la altura de la ventana, el usuario pueda desplazarse
+        // verticalmente sin que quede nada fuera de área visible.
         let content = Box::new(Orientation::Vertical, 10);
         content.set_margin_top(20);
         content.set_margin_bottom(20);
         content.set_margin_start(20);
         content.set_margin_end(20);
-        content.set_vexpand(true);
         content.set_hexpand(true);
+        // El contenido interno no se expande verticalmente: su altura natural
+        // es la suma de las secciones y el ScrolledWindow proporciona el
+        // desplazamiento cuando supera el espacio disponible.
+        content.set_vexpand(false);
 
         let t = |key: &str| -> String { translations.borrow().t(key) };
+
+        let scrolled = ScrolledWindow::new();
+        scrolled.set_hexpand(true);
+        scrolled.set_vexpand(true);
+        scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
+        scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
+        scrolled.set_child(Some(&content));
+
+        // Botones de acción, fijados al final de la página (fuera del área
+        // scrollable) para que siempre sean accesibles.
+        let button_box = Box::new(Orientation::Horizontal, 10);
+        button_box.set_halign(gtk4::Align::End);
+        button_box.set_hexpand(true);
+        button_box.set_margin_top(12);
+        button_box.set_margin_end(0);
+
+        let cancel_button = Button::with_label(&t("button.cancel"));
+        button_box.append(&cancel_button);
+
+        let save_button = Button::with_label(&t("button.save"));
+        save_button.add_css_class("suggested-action");
+        button_box.append(&save_button);
+
+        // Página completa: área scrollable + botones fijos al final.
+        let page = Box::new(Orientation::Vertical, 0);
+        page.set_hexpand(true);
+        page.set_vexpand(true);
+        page.append(&scrolled);
+        page.append(&button_box);
 
         let title = Label::new(Some(&t("settings.title")));
         title.set_halign(gtk4::Align::Start);
@@ -608,7 +652,8 @@ impl SettingsView {
 
         let default_audio_dropdown = DropDown::from_strings(&["Ninguno"]);
         default_audio_dropdown.set_hexpand(false);
-        default_audio_dropdown.set_width_request(340);
+        // Sin ancho fijo: el desplegable se adapta al espacio disponible en
+        // ventanas estrechas y no obliga a un mínimo de 340 px.
         audio_box.append(&default_audio_dropdown);
         default_tracks_row.append(&audio_box);
 
@@ -621,7 +666,7 @@ impl SettingsView {
 
         let default_subtitle_dropdown = DropDown::from_strings(&["Ninguno"]);
         default_subtitle_dropdown.set_hexpand(false);
-        default_subtitle_dropdown.set_width_request(340);
+        // Sin ancho fijo: se adapta al espacio disponible en ventanas estrechas.
         subtitle_box.append(&default_subtitle_dropdown);
         default_tracks_row.append(&subtitle_box);
 
@@ -629,19 +674,8 @@ impl SettingsView {
 
         content.append(&default_tracks_section);
 
-        // --- Botones Guardar / Volver ---
-        let button_box = Box::new(Orientation::Horizontal, 10);
-        button_box.set_halign(gtk4::Align::End);
-        button_box.set_hexpand(true);
-
-        let cancel_button = Button::with_label(&t("button.cancel"));
-        button_box.append(&cancel_button);
-
-        let save_button = Button::with_label(&t("button.save"));
-        save_button.add_css_class("suggested-action");
-        button_box.append(&save_button);
-
-        content.append(&button_box);
+        // Los botones Guardar / Volver ya se añadieron a `button_box` más
+        // arriba y se ensamblan en `page` junto al área scrollable.
 
         let config_rc = Rc::new(RefCell::new(config.clone()));
         let window = parent.upcast_ref::<gtk4::Window>().clone();
@@ -771,7 +805,7 @@ impl SettingsView {
         });
 
         Self {
-            content,
+            page,
             title,
             folders_title,
             folders_label,
@@ -799,9 +833,11 @@ impl SettingsView {
         }
     }
 
-    /// Devuelve el widget Gtk.
+    /// Devuelve el widget raíz de la vista de ajustes: un contenedor vertical
+    /// con el área scrollable de secciones y los botones de acción fijos al
+    /// final.
     pub fn widget(&self) -> &Box {
-        &self.content
+        &self.page
     }
 
     /// Reescribe todas las etiquetas de la vista con el idioma actual, de modo

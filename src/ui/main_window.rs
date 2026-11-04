@@ -13,8 +13,8 @@ use crate::ui::settings_window::SettingsView;
 use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
 use gtk4::{
-    Box, Button, CenterBox, FlowBox, GestureClick, Grid, Label, Orientation, Revealer,
-    ScrolledWindow, SearchEntry, Spinner, Stack, gio, glib,
+    Box, Button, CenterBox, FlowBox, GestureClick, Label, Orientation, Revealer, ScrolledWindow,
+    SearchEntry, Spinner, Stack, gio, glib,
 };
 use libadwaita::prelude::*;
 use libadwaita::{ApplicationWindow as AdwApplicationWindow, StatusPage, Toast, ToastOverlay};
@@ -131,7 +131,7 @@ pub struct MainWindow {
     /// Nombre de la categoría activa, para mostrarlo en la interfaz.
     current_category_name: Rc<RefCell<Option<String>>>,
     /// Rejilla de tarjetas del historial de reproducción.
-    history_list: Grid,
+    history_list: FlowBox,
     /// Botón «Volver» de la página de historial.
     history_back_button: Button,
     /// Botón para borrar todo el historial de reproducción.
@@ -207,8 +207,10 @@ impl MainWindow {
         let search_entry = SearchEntry::new();
         let placeholder_text = t("search.placeholder");
         search_entry.set_placeholder_text(Some(placeholder_text.as_str()));
-        search_entry.set_hexpand(false);
-        search_entry.set_width_request(420);
+        // Sin ancho fijo: el buscador se adapta al espacio disponible de la
+        // barra superior. En ventanas estrechas se reduce y en pantallas
+        // amplias ocupa el centro sin forzar un mínimo de 420 px.
+        search_entry.set_hexpand(true);
         search_entry.set_valign(gtk4::Align::Center);
         center_section.append(&search_entry);
         top_bar.set_center_widget(Some(&center_section));
@@ -503,17 +505,26 @@ impl MainWindow {
 
         history_page.append(&history_header);
 
-        let history_list = Grid::new();
-        history_list.set_column_spacing(16);
-        history_list.set_row_spacing(16);
-        history_list.set_column_homogeneous(true);
-        history_list.set_row_homogeneous(false);
-        history_list.set_halign(gtk4::Align::Start);
+        // Rejilla de tarjetas del historial. Se usa FlowBox en lugar de Grid
+        // para que las tarjetas se envuelvan al número de columnas que quepa
+        // en el ancho disponible (responsive) en lugar de forzar un número
+        // fijo de columnas que se cortaría en ventanas estrechas.
+        let history_list = FlowBox::new();
+        history_list.add_css_class("history-grid");
+        history_list.set_hexpand(true);
         history_list.set_valign(gtk4::Align::Start);
+        history_list.set_homogeneous(false);
+        history_list.set_selection_mode(gtk4::SelectionMode::None);
+        history_list.set_row_spacing(16);
+        history_list.set_column_spacing(16);
         history_list.set_margin_top(24);
         history_list.set_margin_bottom(24);
         history_list.set_margin_start(24);
         history_list.set_margin_end(24);
+        // Empieza con una columna; `recompute_history_columns` ajusta el
+        // máximo real según el ancho del contenedor.
+        history_list.set_min_children_per_line(1);
+        history_list.set_max_children_per_line(1);
 
         let history_scrolled = ScrolledWindow::new();
         history_scrolled.set_hexpand(true);
@@ -522,6 +533,22 @@ impl MainWindow {
         history_scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
         history_scrolled.set_child(Some(&history_list));
         history_page.append(&history_scrolled);
+
+        // Recalcular el número de columnas del historial cuando cambie el
+        // ancho del contenedor (responsive en tiempo real).
+        let history_list_for_timeout = history_list.clone();
+        let scrolled_for_history_timeout = history_scrolled.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
+            let width = scrolled_for_history_timeout.width() as f64;
+            const CARD_WIDTH: i32 = 216;
+            const SPACING: i32 = 16 + 24 + 24; // columna + márgenes izquierdo/derecho
+            let card_total = CARD_WIDTH as f64 + SPACING as f64;
+            let columns = (width / card_total).floor() as i32;
+            let columns = columns.clamp(1, 12);
+            history_list_for_timeout.set_max_children_per_line(columns as u32);
+            history_list_for_timeout.set_min_children_per_line(columns as u32);
+            true.into()
+        });
 
         stack.add_titled(&history_page, Some("history"), &t("stack.history"));
 
@@ -1337,7 +1364,7 @@ impl MainWindow {
             empty_label.add_css_class("dim-label");
 
             empty_box.append(&empty_label);
-            w.history_list.attach(&empty_box, 0, 0, 1, 1);
+            w.history_list.append(&empty_box);
             return;
         }
 
@@ -1347,9 +1374,8 @@ impl MainWindow {
         const CARD_POSTER_HEIGHT: i32 = 300;
         const CARD_WIDTH: i32 = CARD_POSTER_WIDTH + 16;
         const CARD_HEIGHT: i32 = 404;
-        const COLUMNS: i32 = 6;
 
-        for (index, entry) in history.iter().enumerate() {
+        for entry in history.iter() {
             let card = Box::new(Orientation::Vertical, 6);
             card.add_css_class("media-card");
             card.set_halign(gtk4::Align::Start);
@@ -1466,9 +1492,7 @@ impl MainWindow {
             });
             card.add_controller(click);
 
-            let row = (index as i32) / COLUMNS;
-            let col = (index as i32) % COLUMNS;
-            w.history_list.attach(&card, col, row, 1, 1);
+            w.history_list.append(&card);
         }
     }
 
