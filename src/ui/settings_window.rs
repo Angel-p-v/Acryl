@@ -524,8 +524,30 @@ impl TrackSelector {
             entry.set_text(label);
         }
 
-        // Poblar el listbox según el filtro del entry
-        let populate = {
+        // Poblar el listbox con TODAS las opciones (al abrir el popover)
+        let populate_all = {
+            let list_box_c = list_box.clone();
+            let options_c = options_rc.clone();
+            move || {
+                let opts = options_c.borrow();
+
+                while let Some(child) = list_box_c.first_child() {
+                    list_box_c.remove(&child);
+                }
+
+                for (_key, label) in opts.iter() {
+                    let row = ListBoxRow::new();
+                    let lbl = Label::new(Some(label));
+                    lbl.set_halign(gtk4::Align::Start);
+                    lbl.set_xalign(0.0);
+                    row.set_child(Some(&lbl));
+                    list_box_c.append(&row);
+                }
+            }
+        };
+
+        // Poblar el listbox filtrado según el texto del entry (al escribir)
+        let populate_filtered = {
             let entry_c = entry.clone();
             let list_box_c = list_box.clone();
             let options_c = options_rc.clone();
@@ -587,23 +609,23 @@ impl TrackSelector {
         // Al escribir, filtrar y mostrar el popover
         let entry_for_filter = entry.clone();
         let popover_for_filter = popover.clone();
-        let populate_for_filter = populate.clone();
+        let populate_filtered_clone = populate_filtered.clone();
         entry.connect_changed(move |_| {
-            populate_for_filter();
+            populate_filtered_clone();
             if !entry_for_filter.text().is_empty() {
                 popover_for_filter.popup();
             }
         });
 
-        // Al hacer clic en el entry, (re)poblar y mostrar el popover.
+        // Al hacer clic en el entry, (re)poblar con TODAS las opciones y mostrar el popover.
         // Usamos PropagationPhase::Capture para que el clic se dispare antes
         // de que el Entry lo consuma internamente.
         let popover_for_click = popover.clone();
-        let populate_for_click = populate.clone();
+        let populate_all_clone = populate_all.clone();
         let click = GestureClick::new();
         click.set_propagation_phase(gtk4::PropagationPhase::Capture);
         click.connect_pressed(move |_, _, _, _| {
-            populate_for_click();
+            populate_all_clone();
             popover_for_click.popup();
         });
         entry.add_controller(click);
