@@ -450,17 +450,40 @@ pub struct SettingsView {
     default_subtitle_selector: TrackSelector,
 }
 
+/// Filtra las opciones de pista según el texto escrito en el buscador.
+///
+/// Si el texto está vacío devuelve todas las opciones. En caso contrario
+/// devuelve solo aquellas cuya etiqueta empieza por el texto indicado,
+/// sin distinguir mayúsculas de minúsculas.
+pub fn filtrar_opciones(texto: &str, opciones: &[(String, String)]) -> Vec<(String, String)> {
+    let texto_lower = texto.to_lowercase();
+    opciones
+        .iter()
+        .filter(|(_, label)| texto.is_empty() || label.to_lowercase().starts_with(&texto_lower))
+        .cloned()
+        .collect()
+}
+
+/// Devuelve la etiqueta asociada a una clave dentro de la lista de opciones.
+///
+/// Devuelve `None` si la clave no existe.
+pub fn obtener_label_para_clave<'a>(
+    opciones: &'a [(String, String)],
+    clave: &str,
+) -> Option<&'a str> {
+    opciones
+        .iter()
+        .find(|(k, _)| k == clave)
+        .map(|(_, label)| label.as_str())
+}
+
 /// Selector de pista con búsqueda y filtrado visual.
 ///
 /// Combina un Entry (para escribir/filtrar), un Popover y un ListBox
 /// dentro de un ScrolledWindow. Escribir en el Entry filtra las opciones
 /// del ListBox (oculta las que no coinciden con el texto escrito).
-#[allow(dead_code)]
 struct TrackSelector {
-    entry_widget: Box,
     entry: Entry,
-    popover: Popover,
-    list_box: ListBox,
     /// Todas las opciones disponibles: (clave, etiqueta mostrada).
     options: Rc<RefCell<Vec<(String, String)>>>,
     /// Clave actualmente seleccionada (None = "Ninguno").
@@ -515,10 +538,14 @@ impl TrackSelector {
 
         let options_rc = Rc::new(RefCell::new(options.to_vec()));
         let selected_key = Rc::new(RefCell::new(current.map(String::from)));
+        // Opciones visibles en el ListBox en este momento (el listado completo
+        // o un subconjunto filtrado). Permite mapear la fila activada a su
+        // clave real cuando el filtro está activo.
+        let displayed = Rc::new(RefCell::new(options.to_vec()));
 
         // Mostrar el valor actual en el entry
         if let Some(current_key) = current
-            && let Some((_, label)) = options.iter().find(|(k, _)| k == current_key)
+            && let Some(label) = obtener_label_para_clave(options, current_key)
         {
             entry.set_text(label);
         }
@@ -537,25 +564,25 @@ impl TrackSelector {
         let populate_all = {
             let list_box_c = list_box.clone();
             let options_c = options_rc.clone();
+            let displayed_c = displayed.clone();
             let scrolled_c = scrolled.clone();
             move || {
-                let opts = options_c.borrow();
+                let opts = options_c.borrow().clone();
+                *displayed_c.borrow_mut() = opts.clone();
 
                 while let Some(child) = list_box_c.first_child() {
                     list_box_c.remove(&child);
                 }
 
-                let mut num = 0;
-                for (_key, label) in opts.iter() {
+                for (_key, label) in &opts {
                     let row = ListBoxRow::new();
                     let lbl = Label::new(Some(label));
                     lbl.set_halign(gtk4::Align::Start);
                     lbl.set_xalign(0.0);
                     row.set_child(Some(&lbl));
                     list_box_c.append(&row);
-                    num += 1;
                 }
-                ajustar_alto_scrolled(&scrolled_c, num);
+                ajustar_alto_scrolled(&scrolled_c, opts.len());
             }
         };
 
@@ -564,29 +591,26 @@ impl TrackSelector {
             let entry_c = entry.clone();
             let list_box_c = list_box.clone();
             let options_c = options_rc.clone();
+            let displayed_c = displayed.clone();
             let scrolled_c = scrolled.clone();
             move || {
                 let text = entry_c.text().to_string();
-                let filter_lower = text.to_lowercase();
-                let opts = options_c.borrow();
+                let filtradas = filtrar_opciones(&text, &options_c.borrow());
+                *displayed_c.borrow_mut() = filtradas.clone();
 
                 while let Some(child) = list_box_c.first_child() {
                     list_box_c.remove(&child);
                 }
 
-                let mut num = 0;
-                for (_key, label) in opts.iter().filter(|(_, label)| {
-                    text.is_empty() || label.to_lowercase().starts_with(&filter_lower)
-                }) {
+                for (_key, label) in &filtradas {
                     let row = ListBoxRow::new();
                     let lbl = Label::new(Some(label));
                     lbl.set_halign(gtk4::Align::Start);
                     lbl.set_xalign(0.0);
                     row.set_child(Some(&lbl));
                     list_box_c.append(&row);
-                    num += 1;
                 }
-                ajustar_alto_scrolled(&scrolled_c, num);
+                ajustar_alto_scrolled(&scrolled_c, filtradas.len());
             }
         };
 
@@ -595,7 +619,7 @@ impl TrackSelector {
         let popover_for_activate = popover.clone();
         let entry_for_activate = entry.clone();
         let selected_key_for_activate = selected_key.clone();
-        let options_for_activate = options_rc.clone();
+        let displayed_for_activate = displayed.clone();
         list_box.connect_row_activated(move |_list_box, row| {
             let index = {
                 let mut idx = 0usize;
@@ -614,8 +638,8 @@ impl TrackSelector {
                 found
             };
             if let Some(index) = index {
-                let opts = options_for_activate.borrow();
-                if let Some((key, label)) = opts.get(index) {
+                let displayed = displayed_for_activate.borrow();
+                if let Some((key, label)) = displayed.get(index) {
                     *selected_key_for_activate.borrow_mut() = Some(key.clone());
                     entry_for_activate.set_text(label);
                 }
@@ -650,10 +674,7 @@ impl TrackSelector {
         (
             container.clone(),
             Self {
-                entry_widget: container,
                 entry,
-                popover,
-                list_box,
                 options: options_rc,
                 selected_key,
             },
@@ -671,7 +692,7 @@ impl TrackSelector {
         *self.selected_key.borrow_mut() = current.map(String::from);
         self.entry.set_text("");
         if let Some(current_key) = current
-            && let Some((_, label)) = options.iter().find(|(k, _)| k == current_key)
+            && let Some(label) = obtener_label_para_clave(options, current_key)
         {
             self.entry.set_text(label);
         }
@@ -1167,5 +1188,113 @@ impl SettingsView {
     /// Devuelve el botón Volver para conectarlo desde MainWindow.
     pub fn cancel_button(&self) -> &Button {
         &self.cancel_button
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opciones() -> Vec<(String, String)> {
+        vec![
+            ("none".to_string(), "Ninguno".to_string()),
+            ("spa".to_string(), "Español".to_string()),
+            ("spa-5.1".to_string(), "Español 5.1".to_string()),
+            ("eng".to_string(), "Inglés".to_string()),
+        ]
+    }
+
+    fn claves(opciones: &[(String, String)]) -> Vec<String> {
+        opciones.iter().map(|(k, _)| k.clone()).collect()
+    }
+
+    #[test]
+    fn filtrar_sin_texto_devuelve_todas_las_opciones() {
+        let original = opciones();
+        let filtradas = filtrar_opciones("", &original);
+        assert_eq!(filtradas, original);
+    }
+
+    #[test]
+    fn filtrar_por_prefijo_ignora_mayusculas() {
+        let filtradas = filtrar_opciones("ESP", &opciones());
+        assert_eq!(claves(&filtradas), vec!["spa", "spa-5.1"]);
+    }
+
+    #[test]
+    fn filtrar_sin_coincidencias_devuelve_lista_vacia() {
+        let filtradas = filtrar_opciones("zzz", &opciones());
+        assert!(filtradas.is_empty());
+    }
+
+    #[test]
+    fn filtrar_no_modifica_las_opciones_originales() {
+        let original = opciones();
+        let _ = filtrar_opciones("spa", &original);
+        assert_eq!(original, opciones());
+    }
+
+    #[test]
+    fn filtrar_sobre_lista_vacia_devuelve_vacio() {
+        assert!(filtrar_opciones("", &[]).is_empty());
+        assert!(filtrar_opciones("spa", &[]).is_empty());
+    }
+
+    #[test]
+    fn obtener_label_devuelve_la_etiqueta_de_una_clave_existente() {
+        assert_eq!(obtener_label_para_clave(&opciones(), "eng"), Some("Inglés"));
+    }
+
+    #[test]
+    fn obtener_label_devuelve_none_si_la_clave_no_existe() {
+        assert_eq!(obtener_label_para_clave(&opciones(), "jpn"), None);
+        assert_eq!(obtener_label_para_clave(&opciones(), ""), None);
+    }
+
+    #[test]
+    fn normalizar_ruta_vacia_o_en_blanco_devuelve_none() {
+        assert_eq!(normalize_folder_path(""), None);
+        assert_eq!(normalize_folder_path("   "), None);
+    }
+
+    #[test]
+    fn normalizar_ruta_inexistente_devuelve_none() {
+        assert_eq!(normalize_folder_path("/ruta/que/no/existe/acryl"), None);
+    }
+
+    #[test]
+    fn normalizar_ruta_de_archivo_devuelve_none() {
+        let dir = tempfile::tempdir().expect("crear directorio temporal");
+        let file = dir.path().join("archivo.txt");
+        std::fs::write(&file, b"contenido").expect("crear archivo temporal");
+        assert_eq!(
+            normalize_folder_path(file.to_str().expect("ruta UTF-8")),
+            None
+        );
+    }
+
+    #[test]
+    fn normalizar_ruta_de_directorio_elimina_separador_final() {
+        let dir = tempfile::tempdir().expect("crear directorio temporal");
+        let canonical = std::fs::canonicalize(dir.path()).expect("canonicalizar");
+        let expected = canonical.to_string_lossy().to_string();
+
+        let con_separador = format!("{}/", expected);
+        assert_eq!(
+            normalize_folder_path(&con_separador),
+            Some(expected.clone())
+        );
+        assert_eq!(normalize_folder_path(&expected), Some(expected));
+    }
+
+    #[test]
+    fn normalizar_ruta_recorta_espacios_exteriores() {
+        let dir = tempfile::tempdir().expect("crear directorio temporal");
+        let esperado = std::fs::canonicalize(dir.path())
+            .expect("canonicalizar")
+            .to_string_lossy()
+            .to_string();
+        let con_espacios = format!("  {}  ", esperado);
+        assert_eq!(normalize_folder_path(&con_espacios), Some(esperado));
     }
 }
