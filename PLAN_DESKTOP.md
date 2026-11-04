@@ -428,14 +428,13 @@ Orden de trabajo vigente:
 4. ✅ Completar **Hito G.4** (selección de audio/subtítulos y `--aid`/`--sid` en `mpv`).
 5. ✅ Completar **Hito G.5** (pruebas de estrés y rendimiento con `tests/media_stress.rs`).
 6. ✅ Virtualización de galería con `GtkGridView` (solo renderiza ítems visibles).
-7. 🔄 Ajustes: selectores de pista con búsqueda, correcciones de guardado y diálogo «Acerca de» (sección 21). Implementado en la rama `feat/settings-improvements-and-tests` (PR #129), pendiente de CI y fusión.
+7. ✅ Ajustes: selectores de pista con búsqueda, correcciones de guardado y diálogo «Acerca de» (sección 21). Implementado y fusionado en `main` mediante la PR [#129](https://github.com/Angel-p-v/Acryl/pull/129) (squash merge del commit `579e059`).
 
-El trabajo de código del plan está completo. Para cerrar la PR #129 queda
-resolver un bloqueo ajeno a esta funcionalidad: dos pruebas preexistentes de
-`tests/media_persistence.rs` dependen de un archivo local que no existe en el
-runner de CI, por lo que `main` también acumula ejecuciones en rojo. Deben
-omitirse cuando el archivo no esté disponible (tarea independiente) antes de
-poder fusionar.
+El trabajo de código del plan está completo. Las pruebas preexistentes de
+`tests/media_persistence.rs` que dependían de un archivo real de la biblioteca
+del usuario se reescribieron para usar archivos y streams de prueba inventados
+en un directorio temporal, por lo que ahora pasan en cualquier entorno sin
+requerir `ffprobe` ni un archivo local.
 
 ---
 
@@ -623,8 +622,9 @@ Ninguna.
 
 ## 21. Ajustes: selectores de pista, robustez y diálogo «Acerca de»
 
-> Estado: implementado en rama `feat/settings-improvements-and-tests`
-> (PR [#129](https://github.com/Angel-p-v/Acryl/pull/129)), pendiente de CI y fusión.
+> Estado: implementado y fusionado en `main` mediante la PR
+> [#129](https://github.com/Angel-p-v/Acryl/pull/129) (squash merge del commit
+> `579e059`).
 
 ### 21.1. Selectores de pista predeterminada
 - Audio y subtítulos se eligen con un desplegable (`GtkDropDown`) que incluye un
@@ -678,8 +678,10 @@ Ninguna.
   `TrackSelector`, y se sustituyeron por construcción explícita.
 
 ### 21.6. Limitaciones conocidas
-- La CI de la PR #129 permanece en rojo por dos pruebas preexistentes de
-  `tests/media_persistence.rs` que exigen un archivo real de la biblioteca del
-  usuario. No están relacionadas con este cambio y afectan también a `main`.
+- Los tests de `tests/mpv_player.rs` que requieren una sesión gráfica real
+  (Wayland/X11) y `mpv` pueden fallar en entornos sin servidor gráfico; no
+  forman parte de la CI de la PR #129.
+- Las pruebas de `tests/media_persistence.rs` ahora usan archivos y streams
+  de prueba inventados, por lo que pasan en cualquier entorno.
 
 *Nota: Este plan es un borrador inicial. A medida que se avanza en la implementación, se deben actualizar los hitos y criterios de aceptación.*
