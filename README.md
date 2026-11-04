@@ -122,6 +122,9 @@ graph TD
 > **GTK 4.10 o superior:** Acryl usa el selector nativo de carpetas `GtkFileDialog`,
 > disponible a partir de GTK 4.10. Las distribuciones con versiones anteriores
 > deberán actualizar GTK para poder compilar y usar la aplicación.
+>
+> **Libadwaita 1.5 o superior:** el diálogo «Acerca de» usa `AdwAboutDialog`,
+> disponible a partir de Libadwaita 1.5.
 
 ### Herramientas de desarrollo
 

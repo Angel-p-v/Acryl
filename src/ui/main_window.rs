@@ -780,6 +780,16 @@ impl MainWindow {
                 w.stack.set_visible_child_name("settings");
             });
 
+        // Callback: botón «Acerca de» -> muestra el diálogo de información.
+        let this_about = this.clone();
+        this.borrow_mut().settings_view.on_about(move || {
+            let (window, translations) = {
+                let w = this_about.borrow();
+                (w.window.clone(), w.translations.clone())
+            };
+            crate::ui::about::show_about_dialog(&window, &translations);
+        });
+
         // Callback: Guardar ajustes -> guarda en disco, limpia medios huérfanos
         // y vuelve a la lista. Aplica el idioma en caliente sin reiniciar.
         let config_rc_save = config_rc.clone();

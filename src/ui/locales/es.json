@@ -26,6 +26,7 @@
   "button.all_categories": "Todas las categorías",
   "button.clear_category": "Ver todo",
   "button.settings": "⚙ Ajustes",
+  "button.about": "Acerca de",
   "button.save": "Guardar",
   "button.cancel": "Volver",
   "button.add_folder": "Agregar carpeta",
@@ -194,5 +195,6 @@
   "status.detect_error_format": "No se pudieron detectar las pistas: {}",
   "status.disconnected": "No se pudieron detectar las pistas del archivo.",
   "status.language_applied": "Idioma aplicado",
-  "status.save_error_format": "No se pudo guardar la selección: {}"
+  "status.save_error_format": "No se pudo guardar la selección: {}",
+  "about.description": "Gestor de colecciones locales de películas, series y anime para Linux."
 }

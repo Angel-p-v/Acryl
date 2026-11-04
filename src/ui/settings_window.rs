@@ -431,6 +431,7 @@ pub struct SettingsView {
     metadata_label: Label,
     save_button: Button,
     cancel_button: Button,
+    about_button: Button,
     metadata_button: Button,
     metadata_spinner: Spinner,
     metadata_status: Label,
@@ -488,6 +489,9 @@ struct TrackSelector {
     options: Rc<RefCell<Vec<(String, String)>>>,
     /// Clave actualmente seleccionada (None = "Ninguno").
     selected_key: Rc<RefCell<Option<String>>>,
+    /// Evita abrir el popover cuando el texto del entry se actualiza por
+    /// código (cambio de idioma o selección programática).
+    suppress_popup: Rc<Cell<bool>>,
 }
 
 impl TrackSelector {
@@ -538,6 +542,7 @@ impl TrackSelector {
 
         let options_rc = Rc::new(RefCell::new(options.to_vec()));
         let selected_key = Rc::new(RefCell::new(current.map(String::from)));
+        let suppress_popup = Rc::new(Cell::new(false));
         // Opciones visibles en el ListBox en este momento (el listado completo
         // o un subconjunto filtrado). Permite mapear la fila activada a su
         // clave real cuando el filtro está activo.
@@ -651,9 +656,10 @@ impl TrackSelector {
         let entry_for_filter = entry.clone();
         let popover_for_filter = popover.clone();
         let populate_filtered_clone = populate_filtered.clone();
+        let suppress_popup_for_filter = suppress_popup.clone();
         entry.connect_changed(move |_| {
             populate_filtered_clone();
-            if !entry_for_filter.text().is_empty() {
+            if !suppress_popup_for_filter.get() && !entry_for_filter.text().is_empty() {
                 popover_for_filter.popup();
             }
         });
@@ -677,6 +683,7 @@ impl TrackSelector {
                 entry,
                 options: options_rc,
                 selected_key,
+                suppress_popup,
             },
         )
     }
@@ -686,16 +693,29 @@ impl TrackSelector {
         self.selected_key.borrow().clone()
     }
 
+    /// Actualiza la clave seleccionada y el texto mostrado en el entry.
+    fn select_key(&self, key: Option<&str>) {
+        *self.selected_key.borrow_mut() = key.map(String::from);
+        let label = key.and_then(|clave| {
+            obtener_label_para_clave(&self.options.borrow(), clave).map(String::from)
+        });
+        self.suppress_popup.set(true);
+        self.entry.set_text(label.as_deref().unwrap_or_default());
+        self.suppress_popup.set(false);
+    }
+
     /// Actualiza las opciones y el valor actual (usado al cambiar de idioma).
     fn set_options(&self, options: &[(String, String)], current: Option<&str>) {
         *self.options.borrow_mut() = options.to_vec();
         *self.selected_key.borrow_mut() = current.map(String::from);
+        self.suppress_popup.set(true);
         self.entry.set_text("");
         if let Some(current_key) = current
             && let Some(label) = obtener_label_para_clave(options, current_key)
         {
             self.entry.set_text(label);
         }
+        self.suppress_popup.set(false);
     }
 }
 
@@ -937,6 +957,15 @@ impl SettingsView {
 
         content.append(&default_tracks_section);
 
+        // --- Sección: Acerca de ---
+        let about_box = Box::new(Orientation::Horizontal, 0);
+        about_box.set_halign(gtk4::Align::Start);
+        about_box.set_margin_top(10);
+        let about_button = Button::with_label(&t("button.about"));
+        about_button.add_css_class("flat");
+        about_box.append(&about_button);
+        content.append(&about_box);
+
         let config_rc = Rc::new(RefCell::new(config.clone()));
         let window = parent.upcast_ref::<gtk4::Window>().clone();
 
@@ -1031,6 +1060,7 @@ impl SettingsView {
             metadata_label,
             save_button,
             cancel_button,
+            about_button,
             metadata_button,
             metadata_spinner,
             metadata_status,
@@ -1085,6 +1115,7 @@ impl SettingsView {
             .set_label(&t("button.refresh_metadata"));
         self.cancel_button.set_label(&t("button.cancel"));
         self.save_button.set_label(&t("button.save"));
+        self.about_button.set_label(&t("button.about"));
 
         // Actualizar los selectores de pista con la nueva etiqueta de "Ninguno",
         // conservando la selección actual.
@@ -1115,8 +1146,11 @@ impl SettingsView {
         let config = self.config.clone();
         let language_combo = self.language_combo.clone();
         let on_save = self.on_save.clone();
-        let default_audio_key = self.default_audio_selector.selected_key();
-        let default_subtitle_key = self.default_subtitle_selector.selected_key();
+        // Se capturan las referencias compartidas, no los valores, para que el
+        // guardado use la selección vigente en el momento del clic y no la que
+        // había al registrar el callback.
+        let default_audio_key = self.default_audio_selector.selected_key.clone();
+        let default_subtitle_key = self.default_subtitle_selector.selected_key.clone();
 
         self.save_button.connect_clicked(move |_| {
             {
@@ -1128,8 +1162,8 @@ impl SettingsView {
                 };
 
                 // Guardar pistas predeterminadas seleccionadas en los selectores.
-                config.default_tracks.audio = default_audio_key.clone();
-                config.default_tracks.subtitle = default_subtitle_key.clone();
+                config.default_tracks.audio = default_audio_key.borrow().clone();
+                config.default_tracks.subtitle = default_subtitle_key.borrow().clone();
             }
 
             if let Some(callback) = &on_save {
@@ -1152,6 +1186,17 @@ impl SettingsView {
         F: Fn() + 'static,
     {
         *self.folder_manager.on_library_changed.borrow_mut() = Some(Rc::new(f));
+    }
+
+    /// Establece el callback del botón «Acerca de».
+    pub fn on_about<F>(&mut self, f: F)
+    where
+        F: Fn() + 'static,
+    {
+        let cb = Rc::new(f);
+        self.about_button.connect_clicked(move |_| {
+            cb();
+        });
     }
 
     /// Establece el callback del botón de actualización de metadatos.
@@ -1180,9 +1225,37 @@ impl SettingsView {
         self.metadata_status.set_visible(!text.is_empty());
     }
 
+    /// Método público para tests E2E: número de carpetas mostradas.
+    pub fn folder_count_for_test(&self) -> usize {
+        let mut count = 0;
+        let mut child = self.folder_manager.folders_list.first_child();
+        while let Some(row) = child {
+            count += 1;
+            child = row.next_sibling();
+        }
+        count
+    }
+
+    /// Método público para tests E2E: selecciona una pista predeterminada.
+    ///
+    /// `audio` indica si se modifica el selector de audio (si es `false`, el
+    /// de subtítulos). `None` representa la opción «Ninguno».
+    pub fn select_default_track_for_test(&mut self, audio: bool, key: Option<&str>) {
+        if audio {
+            self.default_audio_selector.select_key(key);
+        } else {
+            self.default_subtitle_selector.select_key(key);
+        }
+    }
+
     /// Devuelve el botón Guardar para conectarlo desde MainWindow.
     pub fn save_button(&self) -> &Button {
         &self.save_button
+    }
+
+    /// Devuelve el botón «Acerca de» para conectarlo desde MainWindow.
+    pub fn about_button(&self) -> &Button {
+        &self.about_button
     }
 
     /// Devuelve el botón Volver para conectarlo desde MainWindow.

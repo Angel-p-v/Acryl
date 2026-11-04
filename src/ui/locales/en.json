@@ -26,6 +26,7 @@
   "button.all_categories": "All categories",
   "button.clear_category": "Show all",
   "button.settings": "⚙ Settings",
+  "button.about": "About",
   "button.save": "Save",
   "button.cancel": "Back",
   "button.add_folder": "Add folder",
@@ -194,5 +195,6 @@
   "status.detect_error_format": "Could not detect tracks: {}",
   "status.disconnected": "Could not detect the tracks in this file.",
   "status.language_applied": "Language applied",
-  "status.save_error_format": "Could not save selection: {}"
+  "status.save_error_format": "Could not save selection: {}",
+  "about.description": "Local movie, series and anime collection manager for Linux."
 }
