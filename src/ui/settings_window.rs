@@ -440,8 +440,9 @@ pub struct SettingsView {
     /// desplegables al cambiar de idioma.
     audio_options: Vec<(String, String)>,
     subtitle_options: Vec<(String, String)>,
-    /// Desplegables de pista predeterminada con búsqueda habilitada
-    /// (enable-search). Permiten escribir para filtrar las opciones.
+    /// Desplegables de pista predeterminada con búsqueda y filtrado.
+    /// `FilterListModel` permite que escribir en el buscador filtre
+    /// visualmente las opciones (no solo saltar a una por tipo-ahead).
     default_audio_dropdown: DropDown,
     default_subtitle_dropdown: DropDown,
 }
@@ -667,9 +668,9 @@ impl SettingsView {
         let mut all_subtitle: Vec<(String, String)> = vec![("none".to_string(), none_label)];
         all_subtitle.extend(subtitle_options.iter().cloned());
 
-        // Audio predeterminado: desplegable con búsqueda habilitada (escribir
-        // para filtrar las opciones). El modelo incluye "Ninguno" + pistas de
-        // la biblioteca, cada una con su clave y su etiqueta mostrada.
+        // Audio predeterminado: desplegable con búsqueda y filtrado.
+        // `enable-search(true)` permite escribir en el buscador del popup
+        // para filtrar las opciones visualmente.
         let all_audio_labels: Vec<String> =
             all_audio.iter().map(|(_, label)| label.clone()).collect();
         let default_audio_dropdown = DropDown::from_strings(
@@ -873,7 +874,15 @@ impl SettingsView {
         let mut all_subtitle: Vec<(String, String)> = vec![("none".to_string(), none_label)];
         all_subtitle.extend(self.subtitle_options.iter().cloned());
 
-        // Reconstruir los modelos de los desplegables con las nuevas etiquetas.
+        // Reconstruir los modelos de los desplegables con las nuevas etiquetas,
+        // conservando la selección actual del usuario.
+        let none_label = t("settings.default_tracks.none");
+        let mut all_audio: Vec<(String, String)> = vec![("none".to_string(), none_label.clone())];
+        all_audio.extend(self.audio_options.iter().cloned());
+        let mut all_subtitle: Vec<(String, String)> = vec![("none".to_string(), none_label)];
+        all_subtitle.extend(self.subtitle_options.iter().cloned());
+
+        // Audio: recrear el StringList con las nuevas etiquetas.
         let all_audio_labels: Vec<String> = all_audio.iter().map(|(_, l)| l.clone()).collect();
         let audio_model = gtk4::StringList::new(
             &all_audio_labels
@@ -891,6 +900,7 @@ impl SettingsView {
             self.default_audio_dropdown.set_selected(idx as u32);
         }
 
+        // Subtítulos: recrear el StringList con las nuevas etiquetas.
         let all_subtitle_labels: Vec<String> =
             all_subtitle.iter().map(|(_, l)| l.clone()).collect();
         let subtitle_model = gtk4::StringList::new(
