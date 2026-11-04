@@ -10,6 +10,7 @@ use gtk4::{
     Box, Button, DropDown, Entry, GestureClick, Label, ListBox, ListBoxRow, Orientation, Popover,
     ScrolledWindow, Spinner, gio, glib,
 };
+use libadwaita::ButtonContent;
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -432,6 +433,9 @@ pub struct SettingsView {
     save_button: Button,
     cancel_button: Button,
     about_button: Button,
+    about_title: Label,
+    about_label: Label,
+    about_button_content: ButtonContent,
     metadata_button: Button,
     metadata_spinner: Spinner,
     metadata_status: Label,
@@ -958,13 +962,32 @@ impl SettingsView {
         content.append(&default_tracks_section);
 
         // --- Sección: Acerca de ---
-        let about_box = Box::new(Orientation::Horizontal, 0);
-        about_box.set_halign(gtk4::Align::Start);
-        about_box.set_margin_top(10);
-        let about_button = Button::with_label(&t("button.about"));
+        let about_section = Box::new(Orientation::Vertical, 10);
+        about_section.set_hexpand(true);
+        about_section.set_margin_top(20);
+        about_section.set_margin_bottom(20);
+
+        let about_title = Label::new(Some(&t("settings.about.title")));
+        about_title.set_halign(gtk4::Align::Start);
+        about_title.add_css_class("subheading");
+        about_section.append(&about_title);
+
+        let about_label = Label::new(Some(&t("settings.about.description")));
+        about_label.set_halign(gtk4::Align::Start);
+        about_label.set_wrap(true);
+        about_section.append(&about_label);
+
+        let about_button_content = ButtonContent::builder()
+            .icon_name("help-about-symbolic")
+            .label(t("button.about"))
+            .build();
+        let about_button = Button::new();
+        about_button.set_child(Some(&about_button_content));
+        about_button.set_halign(gtk4::Align::Start);
         about_button.add_css_class("flat");
-        about_box.append(&about_button);
-        content.append(&about_box);
+        about_section.append(&about_button);
+
+        content.append(&about_section);
 
         let config_rc = Rc::new(RefCell::new(config.clone()));
         let window = parent.upcast_ref::<gtk4::Window>().clone();
@@ -1061,6 +1084,9 @@ impl SettingsView {
             save_button,
             cancel_button,
             about_button,
+            about_title,
+            about_label,
+            about_button_content,
             metadata_button,
             metadata_spinner,
             metadata_status,
@@ -1115,7 +1141,9 @@ impl SettingsView {
             .set_label(&t("button.refresh_metadata"));
         self.cancel_button.set_label(&t("button.cancel"));
         self.save_button.set_label(&t("button.save"));
-        self.about_button.set_label(&t("button.about"));
+        self.about_title.set_label(&t("settings.about.title"));
+        self.about_label.set_label(&t("settings.about.description"));
+        self.about_button_content.set_label(&t("button.about"));
 
         // Actualizar los selectores de pista con la nueva etiqueta de "Ninguno",
         // conservando la selección actual.

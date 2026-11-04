@@ -94,6 +94,8 @@
   "settings.default_tracks.subtitle": "Subtítulos predeterminados",
   "settings.default_tracks.none": "Ninguno",
   "settings.default_tracks.search_placeholder": "Buscar pista...",
+  "settings.about.title": "Acerca de Acryl",
+  "settings.about.description": "Consulta la versión, la licencia, el autor y los enlaces del proyecto.",
 
   "content.no_seasons": "Sin temporadas ni episodios disponibles",
   "content.no_episodes_season": "Sin episodios en esta temporada",

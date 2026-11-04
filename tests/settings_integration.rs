@@ -249,6 +249,25 @@ fn escenario_dialogo_acerca_de() {
         dialog.website().contains("github.com"),
         "el diálogo debe enlazar al repositorio"
     );
+    assert_eq!(
+        dialog.developers().first().map(|name| name.as_str()),
+        Some("Angel-p-v"),
+        "el autor debe aparecer en los créditos"
+    );
+    assert!(
+        dialog.copyright().contains("Angel-p-v"),
+        "debe mostrarse el aviso de copyright"
+    );
+    assert!(
+        dialog.support_url().contains("/discussions"),
+        "debe ofrecerse un enlace de soporte"
+    );
+    assert!(
+        dialog.debug_info().contains("GTK")
+            && dialog.debug_info().contains("Libadwaita")
+            && dialog.debug_info().contains(env!("CARGO_PKG_VERSION")),
+        "la información de depuración debe incluir las versiones"
+    );
 
     drop(dialog);
 }
