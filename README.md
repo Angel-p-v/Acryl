@@ -226,6 +226,18 @@ sudo ./scripts/update.sh --system
 
 ---
 
+## 🩺 Diagnóstico del sistema
+
+Acryl incluye `diagnostic/acryl-check.sh`, un script que verifica el estado de la instalación y las dependencias del sistema requeridas (GTK4, Libadwaita, gdk-pixbuf2, mpv y ffprobe), el entorno de sesión gráfica, el ejecutable, la base de datos, los logs, la configuración YAML y la entrada `.desktop`:
+
+```bash
+./diagnostic/acryl-check.sh
+```
+
+Úsalo cuando la aplicación no inicie, muestre pantalla en blanco o no encuentre sus dependencias. El script imprime recomendaciones concretas por caso (por ejemplo, instalar XWayland o usar una sesión X11 sobre Wayland/Hyprland).
+
+---
+
 ## 💻 Uso
 
 Una vez iniciada la aplicación:

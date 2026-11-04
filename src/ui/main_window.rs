@@ -1990,6 +1990,8 @@ impl MainWindow {
             config.default_tracks.clone()
         };
 
+        let completion_threshold = Some(self.config.borrow().playback_completion_threshold_seconds);
+
         let playback_start = match media_id {
             Some(media_id) => crate::core::player::play_with_resume_with_mode(
                 &self.db_path,
@@ -1997,6 +1999,7 @@ impl MainWindow {
                 file_path,
                 window_mode,
                 Some(&default_tracks),
+                completion_threshold,
             )?,
             None => crate::core::player::play_external_with_mode(
                 &self.db_path,
@@ -2085,6 +2088,7 @@ impl MainWindow {
                             media_id,
                             &file_path,
                             player_window_mode(&window_for_dialog),
+                            None,
                             None,
                         ),
                         None => crate::core::player::play_external_with_mode(

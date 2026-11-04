@@ -49,6 +49,14 @@ pub struct AppConfig {
     pub default_player: String,
     #[serde(default)]
     pub default_tracks: DefaultTracks,
+    /// Umbral de completado de una reproducción, en segundos.
+    ///
+    /// Una reproducción se marca como completada (y el archivo como visto) cuando
+    /// le quedan menos de este umbral para terminar. Para películas se usa el
+    /// doble de este valor, manteniendo el comportamiento histórico (300s para
+    /// episodios/anime, 600s para películas por defecto).
+    #[serde(default = "default_completion_threshold_seconds")]
+    pub playback_completion_threshold_seconds: u64,
 }
 
 impl Default for AppConfig {
@@ -63,8 +71,14 @@ impl Default for AppConfig {
             auto_sync_metadata: false,
             default_player: "mpv".to_string(),
             default_tracks: DefaultTracks::default(),
+            playback_completion_threshold_seconds: default_completion_threshold_seconds(),
         }
     }
+}
+
+/// Umbral de completado por defecto: 300 segundos (5 minutos).
+fn default_completion_threshold_seconds() -> u64 {
+    300
 }
 
 pub struct Config {

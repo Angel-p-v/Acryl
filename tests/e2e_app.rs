@@ -74,6 +74,7 @@ fn temp_config() -> (Config, TempDir, TempDir) {
         auto_sync_metadata: false,
         default_player: "mpv".to_string(),
         default_tracks: DefaultTracks::default(),
+        playback_completion_threshold_seconds: 300,
     };
 
     let config = Config {
