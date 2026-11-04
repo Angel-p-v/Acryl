@@ -498,12 +498,14 @@ impl TrackSelector {
         // Popover con ListBox scrollable
         let popover = Popover::new();
         popover.set_parent(&entry);
+        popover.set_autohide(true);
 
         let scrolled = ScrolledWindow::new();
         scrolled.set_hexpand(true);
         scrolled.set_vexpand(true);
         scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
         scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
+        scrolled.set_size_request(250, 300);
 
         let list_box = ListBox::new();
         list_box.set_selection_mode(gtk4::SelectionMode::None);
