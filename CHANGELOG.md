@@ -8,12 +8,29 @@ mantiene este archivo a partir de los commits convencionales.
 
 ## [Unreleased]
 
+### Features
+
+* **ui:** añadir el diálogo «Acerca de» con créditos del autor, copyright, licencia MIT, enlaces al repositorio, incidencias y soporte, e información de depuración con las versiones de Acryl, GTK, Libadwaita y el sistema.
+* **settings:** mostrar una sección «Acerca de» con encabezado, descripción y botón con icono, traducida al cambiar de idioma en caliente.
+
 ### Bug Fixes
 
 * **player:** respetar el estado real de la ventana (normal, maximizado o pantalla completa) al abrir mpv, evitando que Hyprland encoja la ventana principal.
 * **tracks:** guardar la identidad estable de audio y subtítulos por archivo e indexar subtítulos externos junto al vídeo, sin reutilizar pistas de otro episodio.
+* **settings:** guardar la pista predeterminada vigente al pulsar Guardar, en lugar de la capturada al registrar el callback.
+* **settings:** seleccionar la pista correcta cuando el filtro de búsqueda está activo, usando la lista visible en vez del índice completo.
+* **settings:** no abrir el desplegable de pistas al actualizar el campo de búsqueda por código.
 * **seasons:** permitir marcar y desmarcar como vista una temporada guardada en su propia carpeta hija.
 * **history:** mantener una única entrada activa por archivo, actualizar su progreso al reanudar y archivar los duplicados antiguos sin borrar el historial.
+
+### Tests
+
+* **settings:** añadir pruebas unitarias para el filtrado de pistas y la normalización de rutas de carpeta.
+* **settings:** añadir `tests/settings_integration.rs` con escenarios de carpetas, pistas predeterminadas, selección tras callbacks y diálogo «Acerca de», ejecutado en CI con `xvfb-run`.
+
+### Documentation
+
+* **docs:** documentar el requisito de Libadwaita ≥ 1.5 para `AdwAboutDialog` y actualizar la estructura y las características del README.
 
 ## [0.2.1](https://github.com/Angel-p-v/Acryl/compare/v0.2.0...v0.2.1) (2026-11-01)
 

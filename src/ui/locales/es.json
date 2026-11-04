@@ -26,6 +26,7 @@
   "button.all_categories": "Todas las categorías",
   "button.clear_category": "Ver todo",
   "button.settings": "⚙ Ajustes",
+  "button.about": "Acerca de",
   "button.save": "Guardar",
   "button.cancel": "Volver",
   "button.add_folder": "Agregar carpeta",
@@ -93,6 +94,8 @@
   "settings.default_tracks.subtitle": "Subtítulos predeterminados",
   "settings.default_tracks.none": "Ninguno",
   "settings.default_tracks.search_placeholder": "Buscar pista...",
+  "settings.about.title": "Acerca de Acryl",
+  "settings.about.description": "Consulta la versión, la licencia, el autor y los enlaces del proyecto.",
 
   "content.no_seasons": "Sin temporadas ni episodios disponibles",
   "content.no_episodes_season": "Sin episodios en esta temporada",
@@ -194,5 +197,6 @@
   "status.detect_error_format": "No se pudieron detectar las pistas: {}",
   "status.disconnected": "No se pudieron detectar las pistas del archivo.",
   "status.language_applied": "Idioma aplicado",
-  "status.save_error_format": "No se pudo guardar la selección: {}"
+  "status.save_error_format": "No se pudo guardar la selección: {}",
+  "about.description": "Gestor de colecciones locales de películas, series y anime para Linux."
 }

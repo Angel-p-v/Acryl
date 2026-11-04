@@ -1,5 +1,6 @@
 //! Interfaz de usuario GTK4 / Libadwaita.
 
+pub mod about;
 pub mod i18n;
 pub mod main_window;
 pub mod media_details;

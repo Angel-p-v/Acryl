@@ -46,7 +46,11 @@ jobs:
       - run: cargo check --all-targets
       - run: cargo test --all-targets --all-features
       - name: Ejecutar tests E2E con display virtual (GTK4)
-        run: xvfb-run -a cargo test --test e2e_app -- --test-threads=1
+        run: >-
+          xvfb-run -a cargo test
+          --test e2e_app
+          --test settings_integration
+          -- --test-threads=1
       - run: cargo audit
       # El umbral del 60 % se aplica a la lógica de negocio (config, core y db):
       # es la parte crítica y verificable de forma determinista. La UI GTK se
