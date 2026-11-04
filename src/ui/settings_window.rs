@@ -593,15 +593,18 @@ impl TrackSelector {
             }
         });
 
-        // Al hacer clic en el contenedor (label o entry), (re)poblar y mostrar el popover
+        // Al hacer clic en el entry, (re)poblar y mostrar el popover.
+        // Usamos PropagationPhase::Capture para que el clic se dispare antes
+        // de que el Entry lo consuma internamente.
         let popover_for_click = popover.clone();
         let populate_for_click = populate.clone();
         let click = GestureClick::new();
+        click.set_propagation_phase(gtk4::PropagationPhase::Capture);
         click.connect_pressed(move |_, _, _, _| {
             populate_for_click();
             popover_for_click.popup();
         });
-        container.add_controller(click);
+        entry.add_controller(click);
 
         (
             container.clone(),
