@@ -505,7 +505,6 @@ impl TrackSelector {
         scrolled.set_vexpand(true);
         scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
         scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
-        scrolled.set_size_request(250, 300);
 
         let list_box = ListBox::new();
         list_box.set_selection_mode(gtk4::SelectionMode::None);
@@ -524,10 +523,21 @@ impl TrackSelector {
             entry.set_text(label);
         }
 
+        // Constantes para el alto dinámico del popover según cantidad de filas
+        const ALTO_FILA: i32 = 34;
+        const ALTO_MIN: i32 = 100;
+        const ALTO_MAX: i32 = 400;
+
+        fn ajustar_alto_scrolled(scrolled: &ScrolledWindow, num_filas: usize) {
+            let alto = (num_filas as i32 * ALTO_FILA).clamp(ALTO_MIN, ALTO_MAX);
+            scrolled.set_size_request(250, alto);
+        }
+
         // Poblar el listbox con TODAS las opciones (al abrir el popover)
         let populate_all = {
             let list_box_c = list_box.clone();
             let options_c = options_rc.clone();
+            let scrolled_c = scrolled.clone();
             move || {
                 let opts = options_c.borrow();
 
@@ -535,6 +545,7 @@ impl TrackSelector {
                     list_box_c.remove(&child);
                 }
 
+                let mut num = 0;
                 for (_key, label) in opts.iter() {
                     let row = ListBoxRow::new();
                     let lbl = Label::new(Some(label));
@@ -542,7 +553,9 @@ impl TrackSelector {
                     lbl.set_xalign(0.0);
                     row.set_child(Some(&lbl));
                     list_box_c.append(&row);
+                    num += 1;
                 }
+                ajustar_alto_scrolled(&scrolled_c, num);
             }
         };
 
@@ -551,6 +564,7 @@ impl TrackSelector {
             let entry_c = entry.clone();
             let list_box_c = list_box.clone();
             let options_c = options_rc.clone();
+            let scrolled_c = scrolled.clone();
             move || {
                 let text = entry_c.text().to_string();
                 let filter_lower = text.to_lowercase();
@@ -560,6 +574,7 @@ impl TrackSelector {
                     list_box_c.remove(&child);
                 }
 
+                let mut num = 0;
                 for (_key, label) in opts.iter().filter(|(_, label)| {
                     text.is_empty() || label.to_lowercase().starts_with(&filter_lower)
                 }) {
@@ -569,7 +584,9 @@ impl TrackSelector {
                     lbl.set_xalign(0.0);
                     row.set_child(Some(&lbl));
                     list_box_c.append(&row);
+                    num += 1;
                 }
+                ajustar_alto_scrolled(&scrolled_c, num);
             }
         };
 
