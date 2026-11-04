@@ -92,6 +92,7 @@
   "settings.default_tracks.audio": "Default audio",
   "settings.default_tracks.subtitle": "Default subtitles",
   "settings.default_tracks.none": "None",
+  "settings.default_tracks.search_placeholder": "Search track...",
 
   "content.no_seasons": "No seasons or episodes available",
   "content.no_episodes_season": "No episodes in this season",
