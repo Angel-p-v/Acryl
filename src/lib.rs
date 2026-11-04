@@ -6,3 +6,4 @@ pub mod db;
 pub mod ui;
 
 pub use config::Config;
+pub use core::library_watcher::{FolderWatcher, WatcherOutcome};

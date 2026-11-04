@@ -920,6 +920,49 @@ impl MainWindow {
                 }
             });
 
+        // Callback: marcar el medio completo (serie, anime o película) como
+        // visto/no visto.
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_toggle_media_watched(move |_new_state| {
+                let w = this_clone.borrow();
+                let media_id = w.media_details.borrow().media_id();
+                let mut conn = match open_db(&w.db_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Error abriendo BD para toggle watched: {}", e);
+                        return;
+                    }
+                };
+                let mut repo = MediaRepository::new(&mut conn);
+                if let Err(e) = repo.toggle_watched(media_id) {
+                    eprintln!("Error toggle watched: {}", e);
+                }
+                close_db(conn);
+                // Refrescar la vista para que el botón y el estado se actualicen.
+                drop(w);
+                let w2 = this_clone.borrow();
+                if let Some(media) = {
+                    let mut conn2 = match open_db(&w2.db_path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Error abriendo BD para refrescar watched: {}", e);
+                            return;
+                        }
+                    };
+                    let mut repo2 = MediaRepository::new(&mut conn2);
+                    let m = repo2.find_by_id(media_id).ok().flatten();
+                    close_db(conn2);
+                    m
+                } {
+                    w2.media_details
+                        .borrow_mut()
+                        .set_media_with_season(&media, None);
+                }
+            });
+
         // Callback: abrir el selector de audio y subtítulos del archivo principal.
         let this_clone = this.clone();
         this.borrow_mut()

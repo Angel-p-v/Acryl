@@ -17,8 +17,9 @@ use gtk4::{
     StringObject, gio,
 };
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 
 /// Tamaño del póster en la galería (relación 2:3).
 /// Tamaño base optimizado para pantallas de portátil (1366px+).
@@ -50,8 +51,6 @@ pub struct MediaList {
     refresh_callback: ViewCallback,
     /// Callback para cargar más medios cuando el scroll llega al final.
     on_scroll_bottom: ViewCallback,
-    /// Canal para señalar descargas de póster completadas (hilo secundario -> principal).
-    download_tx: mpsc::Sender<()>,
     /// Receptor de señales de descarga completada (solo hilo principal).
     download_rx: mpsc::Receiver<()>,
     selection: SingleSelection,
@@ -81,6 +80,9 @@ impl MediaList {
         let on_select_ref = Rc::new(std::cell::RefCell::new(None as Option<SelectCallback>));
         let on_scroll_bottom_ref = ViewCallback::default();
 
+        let (download_tx, download_rx) = mpsc::channel();
+        let downloading_posters = Arc::new(Mutex::new(HashSet::new()));
+
         // connect_setup crea el widget vacío de cada fila y lo asigna al ListItem.
         factory.connect_setup(move |_, list_item| {
             let card = build_card_widget();
@@ -91,6 +93,8 @@ impl MediaList {
             let media_for_bind = Rc::clone(&media_ref);
             let translations_for_bind = translations_clone.clone();
             let on_select_for_bind = Rc::clone(&on_select_ref);
+            let download_tx_for_bind = download_tx.clone();
+            let downloading_posters_for_bind = Arc::clone(&downloading_posters);
             move |_, list_item| {
                 // El modelo (`store`) y el vector `media` están alineados por
                 // posición, así que usamos la posición del ListItem en lugar
@@ -112,7 +116,13 @@ impl MediaList {
                     .downcast_ref::<Box>()
                     .expect("el child debe ser un Box");
 
-                bind_card(box_child, item, &translations_for_bind);
+                bind_card(
+                    box_child,
+                    item,
+                    &translations_for_bind,
+                    &download_tx_for_bind,
+                    &downloading_posters_for_bind,
+                );
 
                 /* Conectar un gestor de clic en la tarjeta para que la navegación a
                  * detalles siempre se dispare al pulsar, incluso si el usuario pulsa
@@ -193,15 +203,12 @@ impl MediaList {
             true.into()
         });
 
-        let (download_tx, download_rx) = mpsc::channel();
-
         Self {
             content,
             store,
             media: media_ref,
             refresh_callback: ViewCallback::default(),
             on_scroll_bottom: Rc::clone(&on_scroll_bottom_ref),
-            download_tx,
             download_rx,
             selection,
             on_media_select: on_select_ref,
@@ -240,34 +247,15 @@ impl MediaList {
     }
 
     /// Inicia la descarga asíncrona de los pósters que aún no están en caché.
-    /// Cada descarga se ejecuta en un hilo secundario para no bloquear la UI.
-    /// Cuando termina, se invoca el `refresh_callback` para refrescar la
-    /// galería y mostrar los pósters descargados.
+    ///
+    /// Con el lazy loading por tarjeta (implementado en `bind_card`), cada
+    /// póster se descarga individualmente cuando su tarjeta se vuelve visible,
+    /// por lo que esta función es un no-op intencional. Se mantiene por
+    /// compatibilidad con las llamadas existentes en `set_media`, `append_media`
+    /// y `update_media_poster`.
     pub fn start_poster_downloads(&self) {
-        let media = self.media.borrow().clone();
-        let download_tx = self.download_tx.clone();
-
-        for m in media {
-            let Some(poster_url) = m.poster_path.as_deref() else {
-                continue;
-            };
-            if cached_path(poster_url).is_some() {
-                continue;
-            }
-
-            let url = poster_url.to_string();
-            let tx = download_tx.clone();
-
-            std::thread::spawn(move || {
-                let service = PosterService::new();
-                let runtime = match tokio::runtime::Runtime::new() {
-                    Ok(rt) => rt,
-                    Err(_) => return,
-                };
-                let _ = runtime.block_on(service.download_async(&url));
-                let _ = tx.send(());
-            });
-        }
+        // No-op: las descargas individuales se disparan desde `bind_card`
+        // solo para los ítems visibles.
     }
 
     /// Devuelve `true` si hay descargas de póster pendientes por procesar.
@@ -386,7 +374,13 @@ fn replace_store_item(store: &gio::ListStore, position: u32, replacement: impl I
 }
 
 /// Rellena una tarjeta ya creada con los datos de un `Media`.
-fn bind_card(card: &Box, media: &Media, translations: &TranslationsRef) {
+fn bind_card(
+    card: &Box,
+    media: &Media,
+    translations: &TranslationsRef,
+    download_tx: &mpsc::Sender<()>,
+    downloading_posters: &Arc<Mutex<HashSet<String>>>,
+) {
     // Limpiar hijos existentes para reutilizar el widget sin fugas.
     while let Some(child) = card.first_child() {
         card.remove(&child);
@@ -398,25 +392,76 @@ fn bind_card(card: &Box, media: &Media, translations: &TranslationsRef) {
     poster_stack.set_valign(gtk4::Align::Start);
     poster_stack.set_size_request(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
 
-    let pixbuf = media
-        .poster_path
-        .as_deref()
-        .and_then(cached_path)
-        .and_then(|cache_path| {
-            GtkPixbuf::from_file_at_scale(&cache_path, CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT, true)
-                .ok()
-        });
+    let poster_url = media.poster_path.as_deref();
+    let is_cached = poster_url.and_then(cached_path).is_some();
+    let is_downloading = poster_url
+        .map(|url| downloading_posters.lock().unwrap().contains(url))
+        .unwrap_or(false);
 
-    match pixbuf {
-        Some(pixbuf) => {
-            let picture = poster_picture(&pixbuf, CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
-            picture.add_css_class("media-poster");
-            poster_stack.append(&picture);
+    match (poster_url, is_cached, is_downloading) {
+        (Some(url), true, _) => {
+            // Póster en caché: decodificar y mostrar.
+            if let Some(cache_path) = cached_path(url) {
+                if let Ok(pixbuf) = GtkPixbuf::from_file_at_scale(
+                    &cache_path,
+                    CARD_POSTER_WIDTH,
+                    CARD_POSTER_HEIGHT,
+                    true,
+                ) {
+                    let picture = poster_picture(&pixbuf, CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
+                    picture.add_css_class("media-poster");
+                    poster_stack.append(&picture);
+                } else {
+                    let placeholder = placeholder_widget(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
+                    placeholder.add_css_class("media-poster");
+                    poster_stack.append(&placeholder);
+                }
+            } else {
+                let placeholder = placeholder_widget(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
+                placeholder.add_css_class("media-poster");
+                poster_stack.append(&placeholder);
+            }
         }
-        None => {
-            let placeholder = placeholder_widget(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
-            placeholder.add_css_class("media-poster");
-            poster_stack.append(&placeholder);
+        (Some(_url), false, true) => {
+            // Se está descargando: mostrar spinner (indicador de progreso).
+            let spinner = gtk4::Spinner::new();
+            spinner.start();
+            spinner.set_size_request(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
+            spinner.add_css_class("media-poster");
+            poster_stack.append(&spinner);
+        }
+        _ => {
+            // No hay póster, no está en caché ni se está descargando:
+            // lanzar descarga individual y mostrar spinner mientras tanto.
+            if let Some(url) = poster_url {
+                let url_owned = url.to_string();
+                downloading_posters
+                    .lock()
+                    .unwrap()
+                    .insert(url_owned.clone());
+                let tx = download_tx.clone();
+                let downloading_posters_clone = Arc::clone(downloading_posters);
+
+                std::thread::spawn(move || {
+                    let service = PosterService::new();
+                    let runtime = match tokio::runtime::Runtime::new() {
+                        Ok(rt) => rt,
+                        Err(_) => {
+                            let _ = tx.send(());
+                            return;
+                        }
+                    };
+                    let _ = runtime.block_on(service.download_async(&url_owned));
+                    let _ = downloading_posters_clone.lock().unwrap().remove(&url_owned);
+                    let _ = tx.send(());
+                });
+            }
+
+            let spinner = gtk4::Spinner::new();
+            spinner.start();
+            spinner.set_size_request(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
+            spinner.add_css_class("media-poster");
+            poster_stack.append(&spinner);
         }
     }
     card.append(&poster_stack);
