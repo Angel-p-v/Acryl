@@ -1927,4 +1927,161 @@ mod tests {
         assert_eq!(recent[1].0, "Película B");
         assert_eq!(recent[1].4.as_deref(), Some("/tmp/b.mkv"));
     }
+
+    #[test]
+    fn busqueda_fts5_con_miles_de_registros_encuentra_resultados_rapido() {
+        use std::time::Instant;
+
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+
+        // Crear tabla mínima y FTS.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS media (
+                id          INTEGER PRIMARY KEY,
+                type        TEXT    NOT NULL,
+                title       TEXT    NOT NULL,
+                sort_title  TEXT    NOT NULL,
+                year        INTEGER,
+                folder_path TEXT    NOT NULL UNIQUE,
+                created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+                updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(
+                 title,
+                 content='media',
+                 content_rowid='id'
+             );
+             CREATE TRIGGER IF NOT EXISTS media_fts_insert AFTER INSERT ON media BEGIN
+                 INSERT INTO media_fts(rowid, title) VALUES (new.id, new.title);
+             END;
+             CREATE TRIGGER IF NOT EXISTS media_fts_delete AFTER DELETE ON media BEGIN
+                 INSERT INTO media_fts(media_fts, rowid, title) VALUES ('delete', old.id, old.title);
+             END;
+             CREATE TRIGGER IF NOT EXISTS media_fts_update AFTER UPDATE ON media BEGIN
+                 INSERT INTO media_fts(media_fts, rowid, title) VALUES ('delete', old.id, old.title);
+                 INSERT INTO media_fts(rowid, title) VALUES (new.id, new.title);
+             END;",
+        )
+        .unwrap();
+
+        // Insertar 1000 medios.
+        let start = Instant::now();
+        for i in 0..1000 {
+            conn.execute(
+                "INSERT INTO media (type, title, sort_title, folder_path)
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![
+                    "movie",
+                    &format!("Película de prueba número {}", i),
+                    &format!("pelicula de prueba numero {}", i),
+                    &format!("/tmp/pelicula_{}.mkv", i)
+                ],
+            )
+            .unwrap();
+        }
+        let insercion_ms = start.elapsed().as_millis();
+        println!("Inserción de 1000 medios: {} ms", insercion_ms);
+
+        let mut repo = MediaRepository::new(&mut conn);
+
+        // Búsqueda FTS5 por título.
+        let start = Instant::now();
+        let resultados = repo
+            .search("prueba número 500", SearchMediaOptions::default())
+            .expect("buscar");
+        let busqueda_ms = start.elapsed().as_millis();
+        println!("Búsqueda FTS5 en 1000 medios: {} ms", busqueda_ms);
+
+        assert!(
+            !resultados.is_empty(),
+            "debe encontrar al menos un resultado"
+        );
+        assert!(
+            resultados.iter().any(|m| m.title.contains("500")),
+            "debe encontrar la película 500"
+        );
+        // La búsqueda FTS5 debe ser rápida (menos de 100 ms en hardware modesto).
+        assert!(
+            busqueda_ms < 500,
+            "búsqueda FTS5 demasiado lenta: {} ms",
+            busqueda_ms
+        );
+    }
+
+    #[test]
+    fn busqueda_fts5_con_tipo_filtra_correctamente() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS media (
+                id          INTEGER PRIMARY KEY,
+                type        TEXT    NOT NULL,
+                title       TEXT    NOT NULL,
+                sort_title  TEXT    NOT NULL,
+                year        INTEGER,
+                folder_path TEXT    NOT NULL UNIQUE,
+                created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+                updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(
+                 title,
+                 content='media',
+                 content_rowid='id'
+             );
+             CREATE TRIGGER IF NOT EXISTS media_fts_insert AFTER INSERT ON media BEGIN
+                 INSERT INTO media_fts(rowid, title) VALUES (new.id, new.title);
+             END;
+             CREATE TRIGGER IF NOT EXISTS media_fts_delete AFTER DELETE ON media BEGIN
+                 INSERT INTO media_fts(media_fts, rowid, title) VALUES ('delete', old.id, old.title);
+             END;
+             CREATE TRIGGER IF NOT EXISTS media_fts_update AFTER UPDATE ON media BEGIN
+                 INSERT INTO media_fts(media_fts, rowid, title) VALUES ('delete', old.id, old.title);
+                 INSERT INTO media_fts(rowid, title) VALUES (new.id, new.title);
+             END;",
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path)
+             VALUES ('movie', 'Película A', 'pelicula a', '/tmp/a.mkv')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path)
+             VALUES ('series', 'Serie A', 'serie a', '/tmp/serie-a')",
+            [],
+        )
+        .unwrap();
+
+        let mut repo = MediaRepository::new(&mut conn);
+
+        // Buscar solo películas.
+        let peliculas = repo
+            .search(
+                "A",
+                SearchMediaOptions {
+                    r#type: Some("movie".to_string()),
+                    ..Default::default()
+                },
+            )
+            .expect("buscar películas");
+        assert_eq!(peliculas.len(), 1);
+        assert_eq!(peliculas[0].title, "Película A");
+
+        // Buscar solo series.
+        let series = repo
+            .search(
+                "A",
+                SearchMediaOptions {
+                    r#type: Some("series".to_string()),
+                    ..Default::default()
+                },
+            )
+            .expect("buscar series");
+        assert_eq!(series.len(), 1);
+        assert_eq!(series[0].title, "Serie A");
+    }
 }
