@@ -7,7 +7,8 @@ use acryl::core::player::{
 use acryl::db::connection::open_db;
 use acryl::db::file_repo::{FileRepository, MediaFileInput, TrackPreference, TrackSelection};
 use acryl::db::media_repo::{
-    ListMediaOptions, MediaInput, MediaMetadataInput, MediaRepository, SearchMediaOptions,
+    ListMediaOptions, MediaInput, MediaMetadataInput, MediaRepository, MediaStream,
+    SearchMediaOptions,
 };
 use rusqlite::params;
 use std::path::PathBuf;
@@ -18,6 +19,136 @@ fn temp_db() -> (PathBuf, TempDir) {
     let dir = TempDir::new().expect("crear directorio temporal");
     let path = dir.path().join("test.db");
     (path, dir)
+}
+
+/// Devuelve la ruta de un archivo de prueba inventado dentro de un directorio temporal.
+/// No necesita existir en disco: los tests solo persisten su ruta en la BD.
+fn invented_video_path(dir: &TempDir) -> String {
+    dir.path()
+        .join("pelicula_de_prueba.mkv")
+        .to_string_lossy()
+        .to_string()
+}
+
+/// Streams de pista inventados, sin depender de ffprobe ni de un archivo real.
+/// Se construyen con metadatos deterministas para probar la persistencia y
+/// resolución de preferencias de audio y subtítulos.
+fn invented_streams(video_path: &str) -> Vec<MediaStream> {
+    vec![
+        MediaStream {
+            id: 0,
+            media_id: 0,
+            file_path: video_path.to_string(),
+            stream_type: "audio".to_string(),
+            stream_index: 0,
+            language: Some("jpn".to_string()),
+            codec: Some("aac".to_string()),
+            title: None,
+            external_path: None,
+        },
+        MediaStream {
+            id: 0,
+            media_id: 0,
+            file_path: video_path.to_string(),
+            stream_type: "audio".to_string(),
+            stream_index: 1,
+            language: Some("eng".to_string()),
+            codec: Some("aac".to_string()),
+            title: None,
+            external_path: None,
+        },
+        MediaStream {
+            id: 0,
+            media_id: 0,
+            file_path: video_path.to_string(),
+            stream_type: "subtitle".to_string(),
+            stream_index: 2,
+            language: Some("spa".to_string()),
+            codec: Some("ass".to_string()),
+            title: Some("Spanish[ESP]".to_string()),
+            external_path: None,
+        },
+        MediaStream {
+            id: 0,
+            media_id: 0,
+            file_path: video_path.to_string(),
+            stream_type: "subtitle".to_string(),
+            stream_index: 3,
+            language: Some("spa".to_string()),
+            codec: Some("ass".to_string()),
+            title: Some("Spanish[LAT]".to_string()),
+            external_path: None,
+        },
+        MediaStream {
+            id: 0,
+            media_id: 0,
+            file_path: video_path.to_string(),
+            stream_type: "subtitle".to_string(),
+            stream_index: 4,
+            language: Some("eng".to_string()),
+            codec: Some("ass".to_string()),
+            title: Some("English".to_string()),
+            external_path: None,
+        },
+    ]
+}
+
+/// Inserta un medio, su archivo y una lista de streams en la BD temporal.
+/// Devuelve el id del medio insertado.
+fn insertar_medio_archivo_y_streams(
+    conn: &mut rusqlite::Connection,
+    dir: &TempDir,
+    video_path: &str,
+    streams: &[MediaStream],
+) -> i64 {
+    let media_id = {
+        let mut repo = MediaRepository::new(conn);
+        repo.upsert(&MediaInput {
+            r#type: "series".to_string(),
+            title: "Serie de prueba".to_string(),
+            sort_title: "serie de prueba".to_string(),
+            year: Some(2023),
+            folder_path: dir.path().to_string_lossy().to_string(),
+            parent_id: None,
+        })
+        .expect("upsert media de prueba")
+        .id
+    };
+
+    {
+        let mut repo = FileRepository::new(conn);
+        repo.upsert_many(&[MediaFileInput {
+            media_id,
+            season: Some(1),
+            episode: Some(1),
+            title: Some("S01E01".to_string()),
+            file_path: video_path.to_string(),
+            size_bytes: None,
+            mtime_ms: None,
+        }])
+        .expect("insertar media_file de prueba");
+    }
+
+    for stream in streams {
+        conn.execute(
+            "INSERT INTO media_streams
+             (media_id, file_path, stream_type, stream_index, language, codec, title, external_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                media_id,
+                video_path,
+                stream.stream_type,
+                stream.stream_index,
+                stream.language,
+                stream.codec,
+                stream.title,
+                stream.external_path,
+            ],
+        )
+        .expect("insertar media_stream inventado");
+    }
+
+    media_id
 }
 
 #[test]
@@ -1310,110 +1441,49 @@ fn migracion_archiva_duplicados_de_historial_sin_borrarlos() {
     assert_eq!(index_exists, 1);
 }
 
-/// Test de integración con un archivo real de la biblioteca del usuario.
+/// Test de integración con archivos de prueba inventados (sin depender de un
+/// archivo real de la biblioteca ni de ffprobe).
 ///
 /// Verifica el flujo completo de selección de subtítulos:
-/// 1. Indexar un archivo real (Black Torch S01E01 con 11 subtítulos embebidos).
-/// 2. Guardar una preferencia de subtítulo (Spanish[ESP], stream_index=6).
-/// 3. Leer la preferencia guardada.
+/// 1. Crear un archivo de prueba inventado.
+/// 2. Insertar el medio, el archivo y unos streams inventados en la BD.
+/// 3. Guardar una preferencia de subtítulo y leerla.
 /// 4. Resolver la preferencia contra los streams actuales.
-/// 5. Generar los argumentos de mpv y verificar que --sid apunta al subtitle correcto.
+/// 5. Generar los argumentos de mpv y verificar que --aid y --sid apuntan
+///    a las pistas correctas.
 #[test]
-fn seleccion_de_subtitulos_con_archivo_real_de_biblioteca() {
-    let video_path =
-        "/home/coronel/Videos/downloads/Black Torch/[Judas] Black Torch - S01E01v2.mkv";
-    assert!(
-        std::path::Path::new(video_path).exists(),
-        "el archivo real de la biblioteca debe existir: {video_path}"
-    );
+fn seleccion_de_subtitulos_con_archivo_inventado() {
+    let dir = TempDir::new().expect("crear directorio temporal");
+    let video_path = invented_video_path(&dir);
 
     let (db_path, _dir) = temp_db();
     let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
 
     // 1. Insertar el medio (serie) y el archivo de vídeo.
-    let media_id = {
-        let mut repo = MediaRepository::new(&mut conn);
-        let media = repo
-            .upsert(&MediaInput {
-                r#type: "series".to_string(),
-                title: "Black Torch".to_string(),
-                sort_title: "black torch".to_string(),
-                year: Some(2023),
-                folder_path: "/home/coronel/Videos/downloads/Black Torch".to_string(),
-                parent_id: None,
-            })
-            .expect("upsert media Black Torch");
-        media.id
-    };
+    insertar_medio_archivo_y_streams(&mut conn, &dir, &video_path, &invented_streams(&video_path));
 
-    {
-        let mut repo = FileRepository::new(&mut conn);
-        repo.upsert_many(&[MediaFileInput {
-            media_id,
-            season: Some(1),
-            episode: Some(1),
-            title: Some("S01E01".to_string()),
-            file_path: video_path.to_string(),
-            size_bytes: None,
-            mtime_ms: None,
-        }])
-        .expect("insertar media_file");
-    }
-
-    // 2. Extraer streams reales con ffprobe (igual que el indexador) e
-    //    insertarlos en la BD (audio + subtítulo, índice relativo al tipo).
-    let streams_reales = acryl::core::library::extract_media_streams(video_path)
-        .expect("extraer streams reales con ffprobe");
-    for stream in &streams_reales {
-        conn.execute(
-            "INSERT INTO media_streams
-             (media_id, file_path, stream_type, stream_index, language, codec, title, external_path)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                media_id,
-                video_path,
-                stream.stream_type,
-                stream.stream_index,
-                stream.language,
-                stream.codec,
-                stream.title,
-                stream.external_path,
-            ],
-        )
-        .expect("insertar media_stream real");
-    }
-
-    // 3. Identificar audio japonés y subtítulo español por sus metadatos reales.
-    let audio_japones = streams_reales
+    // 2. Identificar audio japonés y subtítulo español por sus metadatos inventados.
+    let streams = invented_streams(&video_path);
+    let audio_japones = streams
         .iter()
         .find(|s| s.stream_type == "audio" && s.language.as_deref() == Some("jpn"))
-        .map(|s| s.clone().into_media_stream())
+        .cloned()
         .expect("debe haber audio japonés");
-    let subtitulo_espanol = streams_reales
+    let subtitulo_espanol = streams
         .iter()
         .find(|s| {
             s.stream_type == "subtitle"
                 && s.language.as_deref() == Some("spa")
                 && s.title.as_deref() == Some("Spanish[ESP]")
         })
-        .map(|s| s.clone().into_media_stream())
+        .cloned()
         .expect("debe haber subtítulo Spanish[ESP]");
 
-    println!(
-        "Audio japonés: stream_index={} key={}",
-        audio_japones.stream_index,
-        audio_japones.track_key()
-    );
-    println!(
-        "Subtítulo español: stream_index={} key={}",
-        subtitulo_espanol.stream_index,
-        subtitulo_espanol.track_key()
-    );
     // 3. Guardar la preferencia: audio japonés + subtítulo español.
     {
         let mut repo = FileRepository::new(&mut conn);
         repo.set_track_preference(
-            video_path,
+            &video_path,
             &TrackPreference {
                 selection: TrackSelection {
                     audio_stream_index: Some(audio_japones.stream_index),
@@ -1431,7 +1501,8 @@ fn seleccion_de_subtitulos_con_archivo_real_de_biblioteca() {
     // 4. Leer la preferencia guardada.
     let leída = {
         let mut repo = FileRepository::new(&mut conn);
-        repo.track_preference(video_path).expect("leer preferencia")
+        repo.track_preference(&video_path)
+            .expect("leer preferencia")
     };
     assert_eq!(
         leída.selection.audio_stream_index,
@@ -1452,21 +1523,21 @@ fn seleccion_de_subtitulos_con_archivo_real_de_biblioteca() {
     assert!(!leída.selection.subtitles_disabled);
 
     // 5. Obtener los streams de la BD y resolver la preferencia.
-    let streams = {
+    let streams_desde_bd = {
         let mut repo = MediaRepository::new(&mut conn);
-        repo.list_streams_by_file(video_path)
+        repo.list_streams_by_file(&video_path)
             .expect("listar streams")
     };
     assert_eq!(
-        streams
+        streams_desde_bd
             .iter()
             .filter(|s| s.stream_type == "subtitle")
             .count(),
-        11,
-        "deben haber 11 subtítulos embebidos"
+        3,
+        "deben haber 3 subtítulos inventados"
     );
 
-    let resuelto = resolve_track_preference(&leída, &streams);
+    let resuelto = resolve_track_preference(&leída, &streams_desde_bd);
     assert_eq!(
         resuelto.selection.audio_stream_index,
         Some(audio_japones.stream_index),
@@ -1481,7 +1552,7 @@ fn seleccion_de_subtitulos_con_archivo_real_de_biblioteca() {
 
     // 6. Generar los argumentos de mpv y verificar --aid y --sid correctos.
     //    mpv numera desde 1 por tipo de pista.
-    let args = build_mpv_launch_args_for_playback(video_path, &resuelto, PlayerWindowMode::Normal);
+    let args = build_mpv_launch_args_for_playback(&video_path, &resuelto, PlayerWindowMode::Normal);
     assert!(
         args.contains(&format!("--aid={}", audio_japones.stream_index + 1)),
         "mpv debe recibir --aid={} para audio japonés, args: {args:?}",
@@ -1501,22 +1572,31 @@ fn seleccion_de_subtitulos_con_archivo_real_de_biblioteca() {
         "no debe haber --sub-auto=no porque no hay sidecars externos, args: {args:?}"
     );
 
-    // 7. Verificar que seleccionar Spanish[LAT] (stream_index=7) genera --sid=8.
+    // 7. Verificar que Spanish[LAT] (stream_index=3) genera --sid=4.
+    let subtitulo_lat = streams
+        .iter()
+        .find(|s| s.stream_type == "subtitle" && s.title.as_deref() == Some("Spanish[LAT]"))
+        .cloned()
+        .expect("debe haber subtítulo Spanish[LAT]");
     let preferencia_lat = TrackPreference {
         selection: TrackSelection {
             audio_stream_index: None,
-            subtitle_stream_index: Some(7),
+            subtitle_stream_index: Some(subtitulo_lat.stream_index),
             subtitles_disabled: false,
         },
         ..TrackPreference::default()
     };
-    let resuelto_lat = resolve_track_preference(&preferencia_lat, &streams);
-    assert_eq!(resuelto_lat.selection.subtitle_stream_index, Some(7));
+    let resuelto_lat = resolve_track_preference(&preferencia_lat, &streams_desde_bd);
+    assert_eq!(
+        resuelto_lat.selection.subtitle_stream_index,
+        Some(subtitulo_lat.stream_index)
+    );
     let args_lat =
-        build_mpv_launch_args_for_playback(video_path, &resuelto_lat, PlayerWindowMode::Normal);
+        build_mpv_launch_args_for_playback(&video_path, &resuelto_lat, PlayerWindowMode::Normal);
     assert!(
-        args_lat.contains(&"--sid=8".to_string()),
-        "mpv debe recibir --sid=8 para Spanish[LAT], args: {args_lat:?}"
+        args_lat.contains(&format!("--sid={}", subtitulo_lat.stream_index + 1)),
+        "mpv debe recibir --sid={} para Spanish[LAT], args: {args_lat:?}",
+        subtitulo_lat.stream_index + 1
     );
 
     // 8. Verificar que "Ninguno" genera --sid=no.
@@ -1528,10 +1608,13 @@ fn seleccion_de_subtitulos_con_archivo_real_de_biblioteca() {
         },
         ..TrackPreference::default()
     };
-    let resuelto_ninguno = resolve_track_preference(&preferencia_ninguno, &streams);
+    let resuelto_ninguno = resolve_track_preference(&preferencia_ninguno, &streams_desde_bd);
     assert!(resuelto_ninguno.selection.subtitles_disabled);
-    let args_ninguno =
-        build_mpv_launch_args_for_playback(video_path, &resuelto_ninguno, PlayerWindowMode::Normal);
+    let args_ninguno = build_mpv_launch_args_for_playback(
+        &video_path,
+        &resuelto_ninguno,
+        PlayerWindowMode::Normal,
+    );
     assert!(
         args_ninguno.contains(&"--sid=no".to_string()),
         "mpv debe recibir --sid=no para desactivar subtítulos, args: {args_ninguno:?}"
@@ -1546,133 +1629,74 @@ fn seleccion_de_subtitulos_con_archivo_real_de_biblioteca() {
         },
         ..TrackPreference::default()
     };
-    let resuelto_auto = resolve_track_preference(&preferencia_auto, &streams);
+    let resuelto_auto = resolve_track_preference(&preferencia_auto, &streams_desde_bd);
     assert!(!resuelto_auto.selection.subtitles_disabled);
     assert_eq!(resuelto_auto.selection.subtitle_stream_index, None);
     let args_auto =
-        build_mpv_launch_args_for_playback(video_path, &resuelto_auto, PlayerWindowMode::Normal);
+        build_mpv_launch_args_for_playback(&video_path, &resuelto_auto, PlayerWindowMode::Normal);
     assert!(
         !args_auto.iter().any(|a| a.starts_with("--sid=")),
         "Automático no debe pasar --sid, args: {args_auto:?}"
     );
 }
 
-/// Test de integración end-to-end con un archivo real de la biblioteca del usuario.
+/// Test de integración end-to-end con archivos de prueba inventados.
 ///
 /// Simula el flujo completo del usuario:
-/// 1. Extraer streams reales con ffprobe (como hace el indexador).
-/// 2. Guardar preferencia: audio japonés (stream_index=0) + subtítulo español (stream_index=6).
+/// 1. Crear un archivo de prueba inventado y streams inventados.
+/// 2. Guardar preferencia: audio japonés + subtítulo español.
 /// 3. Leer la preferencia guardada.
 /// 4. Resolver la preferencia contra los streams actuales.
-/// 5. Generar los argumentos de mpv y verificar que --aid y --sid apuntan a las pistas correctas.
+/// 5. Generar los argumentos de mpv y verificar que --aid y --sid apuntan
+///    a las pistas correctas.
 #[test]
-fn seleccion_de_audio_y_subtitulos_con_archivo_real_de_biblioteca() {
-    let video_path =
-        "/home/coronel/Videos/downloads/Black Torch/[Judas] Black Torch - S01E01v2.mkv";
-    assert!(
-        std::path::Path::new(video_path).exists(),
-        "el archivo real de la biblioteca debe existir: {video_path}"
-    );
+fn seleccion_de_audio_y_subtitulos_con_archivo_inventado() {
+    let dir = TempDir::new().expect("crear directorio temporal");
+    let video_path = invented_video_path(&dir);
 
     let (db_path, _dir) = temp_db();
     let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
 
     // 1. Insertar el medio y el archivo.
-    let media_id = {
+    insertar_medio_archivo_y_streams(&mut conn, &dir, &video_path, &invented_streams(&video_path));
+
+    let streams_desde_bd = {
         let mut repo = MediaRepository::new(&mut conn);
-        repo.upsert(&MediaInput {
-            r#type: "series".to_string(),
-            title: "Black Torch".to_string(),
-            sort_title: "black torch".to_string(),
-            year: Some(2023),
-            folder_path: "/home/coronel/Videos/downloads/Black Torch".to_string(),
-            parent_id: None,
-        })
-        .expect("upsert media")
-        .id
+        repo.list_streams_by_file(&video_path)
+            .expect("listar streams")
     };
-    {
-        let mut repo = FileRepository::new(&mut conn);
-        repo.upsert_many(&[MediaFileInput {
-            media_id,
-            season: Some(1),
-            episode: Some(1),
-            title: Some("S01E01".to_string()),
-            file_path: video_path.to_string(),
-            size_bytes: None,
-            mtime_ms: None,
-        }])
-        .expect("insertar media_file");
-    }
-
-    // Insertar los streams reales en la BD (como haría el indexador).
-    let streams_reales = acryl::core::library::extract_media_streams(video_path)
-        .expect("extraer streams reales con ffprobe");
-    for stream in &streams_reales {
-        conn.execute(
-            "INSERT INTO media_streams
-             (media_id, file_path, stream_type, stream_index, language, codec, title, external_path)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                media_id,
-                video_path,
-                stream.stream_type,
-                stream.stream_index,
-                stream.language,
-                stream.codec,
-                stream.title,
-                stream.external_path,
-            ],
-        )
-        .expect("insertar media_stream real");
-    }
-
-    // 2. Extraer streams reales con ffprobe (igual que el indexador).
-    let streams = acryl::core::library::extract_media_streams(video_path)
-        .expect("extraer streams con ffprobe");
-    let audios: Vec<_> = streams
+    let audios: Vec<_> = streams_desde_bd
         .iter()
         .filter(|s| s.stream_type == "audio")
         .collect();
-    let subtitles: Vec<_> = streams
+    let subtitles: Vec<_> = streams_desde_bd
         .iter()
         .filter(|s| s.stream_type == "subtitle")
         .collect();
     assert!(!audios.is_empty(), "debe haber al menos un audio");
     assert!(!subtitles.is_empty(), "debe haber al menos un subtítulo");
 
-    // Identificar audio japonés y subtítulo español por sus metadatos reales.
-    let audio_japones = streams
+    // Identificar audio japonés y subtítulo español por sus metadatos inventados.
+    let audio_japones = streams_desde_bd
         .iter()
         .find(|s| s.stream_type == "audio" && s.language.as_deref() == Some("jpn"))
-        .map(|s| s.clone().into_media_stream())
+        .cloned()
         .expect("debe haber audio japonés");
-    let subtitulo_espanol = streams
+    let subtitulo_espanol = streams_desde_bd
         .iter()
         .find(|s| {
             s.stream_type == "subtitle"
                 && s.language.as_deref() == Some("spa")
                 && s.title.as_deref() == Some("Spanish[ESP]")
         })
-        .map(|s| s.clone().into_media_stream())
+        .cloned()
         .expect("debe haber subtítulo Spanish[ESP]");
 
-    println!(
-        "Audio japonés: stream_index={} key={}",
-        audio_japones.stream_index,
-        audio_japones.track_key()
-    );
-    println!(
-        "Subtítulo español: stream_index={} key={}",
-        subtitulo_espanol.stream_index,
-        subtitulo_espanol.track_key()
-    );
-
-    // 3. Guardar preferencia: audio japonés + subtítulo español.
+    // 2. Guardar preferencia: audio japonés + subtítulo español.
     {
         let mut repo = FileRepository::new(&mut conn);
         repo.set_track_preference(
-            video_path,
+            &video_path,
             &TrackPreference {
                 selection: TrackSelection {
                     audio_stream_index: Some(audio_japones.stream_index),
@@ -1687,10 +1711,11 @@ fn seleccion_de_audio_y_subtitulos_con_archivo_real_de_biblioteca() {
         .expect("guardar preferencia");
     }
 
-    // 4. Leer la preferencia guardada.
+    // 3. Leer la preferencia guardada.
     let leída = {
         let mut repo = FileRepository::new(&mut conn);
-        repo.track_preference(video_path).expect("leer preferencia")
+        repo.track_preference(&video_path)
+            .expect("leer preferencia")
     };
     assert_eq!(
         leída.selection.audio_stream_index,
@@ -1710,27 +1735,7 @@ fn seleccion_de_audio_y_subtitulos_con_archivo_real_de_biblioteca() {
     );
     assert!(!leída.selection.subtitles_disabled);
 
-    // 5. Resolver contra los streams actuales (como hace saved_tracks al reproducir).
-    let streams_desde_bd = {
-        let mut repo = MediaRepository::new(&mut conn);
-        repo.list_streams_by_file(video_path)
-            .expect("listar streams")
-    };
-    assert_eq!(
-        streams_desde_bd
-            .iter()
-            .filter(|s| s.stream_type == "audio")
-            .count(),
-        audios.len()
-    );
-    assert_eq!(
-        streams_desde_bd
-            .iter()
-            .filter(|s| s.stream_type == "subtitle")
-            .count(),
-        subtitles.len()
-    );
-
+    // 4. Resolver contra los streams actuales (como hace saved_tracks al reproducir).
     let resuelto = resolve_track_preference(&leída, &streams_desde_bd);
     assert_eq!(
         resuelto.selection.audio_stream_index,
@@ -1744,9 +1749,9 @@ fn seleccion_de_audio_y_subtitulos_con_archivo_real_de_biblioteca() {
     );
     assert!(!resuelto.selection.subtitles_disabled);
 
-    // 6. Generar args de mpv y verificar --aid y --sid correctos.
-    //    mpv numera desde 1: audio stream_index=0 -> --aid=1, subtitle stream_index=6 -> --sid=7.
-    let args = build_mpv_launch_args_for_playback(video_path, &resuelto, PlayerWindowMode::Normal);
+    // 5. Generar args de mpv y verificar --aid y --sid correctos.
+    //    mpv numera desde 1: audio stream_index=0 -> --aid=1.
+    let args = build_mpv_launch_args_for_playback(&video_path, &resuelto, PlayerWindowMode::Normal);
     assert!(
         args.contains(&format!("--aid={}", audio_japones.stream_index + 1)),
         "mpv debe recibir --aid={} para audio japonés, args: {args:?}",
