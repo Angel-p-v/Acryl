@@ -7,8 +7,8 @@ use crate::db::{close_db, open_db};
 use crate::ui::i18n::TranslationsRef;
 use gtk4::prelude::*;
 use gtk4::{
-    Box, Button, DropDown, Entry, Label, ListBox, ListBoxRow, Orientation, Popover, ScrolledWindow,
-    Spinner, gio, glib,
+    Box, Button, DropDown, Entry, GestureClick, Label, ListBox, ListBoxRow, Orientation, Popover,
+    ScrolledWindow, Spinner, gio, glib,
 };
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -597,10 +597,12 @@ impl TrackSelector {
         let _entry_for_click = entry.clone();
         let popover_for_click = popover.clone();
         let populate_for_click = populate.clone();
-        entry.connect_activate(move |_| {
+        let click = GestureClick::new();
+        click.connect_pressed(move |_, _, _, _| {
             populate_for_click();
             popover_for_click.popup();
         });
+        entry.add_controller(click);
 
         (
             container.clone(),
