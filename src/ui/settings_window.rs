@@ -593,8 +593,7 @@ impl TrackSelector {
             }
         });
 
-        // Al hacer clic en el entry, (re)poblar y mostrar el popover
-        let _entry_for_click = entry.clone();
+        // Al hacer clic en el contenedor (label o entry), (re)poblar y mostrar el popover
         let popover_for_click = popover.clone();
         let populate_for_click = populate.clone();
         let click = GestureClick::new();
@@ -602,7 +601,7 @@ impl TrackSelector {
             populate_for_click();
             popover_for_click.popup();
         });
-        entry.add_controller(click);
+        container.add_controller(click);
 
         (
             container.clone(),
