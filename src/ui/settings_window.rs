@@ -1169,9 +1169,3 @@ impl SettingsView {
         &self.cancel_button
     }
 }
-
-impl Default for SettingsView {
-    fn default() -> Self {
-        unimplemented!("SettingsView requires config, db_path, config_path and parent")
-    }
-}
