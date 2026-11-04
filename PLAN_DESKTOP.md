@@ -428,8 +428,14 @@ Orden de trabajo vigente:
 4. ✅ Completar **Hito G.4** (selección de audio/subtítulos y `--aid`/`--sid` en `mpv`).
 5. ✅ Completar **Hito G.5** (pruebas de estrés y rendimiento con `tests/media_stress.rs`).
 6. ✅ Virtualización de galería con `GtkGridView` (solo renderiza ítems visibles).
+7. 🔄 Ajustes: selectores de pista con búsqueda, correcciones de guardado y diálogo «Acerca de» (sección 21). Implementado en la rama `feat/settings-improvements-and-tests` (PR #129), pendiente de CI y fusión.
 
-No hay trabajo pendiente en el plan.
+El trabajo de código del plan está completo. Para cerrar la PR #129 queda
+resolver un bloqueo ajeno a esta funcionalidad: dos pruebas preexistentes de
+`tests/media_persistence.rs` dependen de un archivo local que no existe en el
+runner de CI, por lo que `main` también acumula ejecuciones en rojo. Deben
+omitirse cuando el archivo no esté disponible (tarea independiente) antes de
+poder fusionar.
 
 ---
 
@@ -614,5 +620,66 @@ Ninguna.
 - Integración: persistencia de claves/rutas, migración de duplicados,
   entrada activa única y conservación del historial completado.
 - Integración mpv: selección de pistas embebidas y desactivación de subtítulos.
+
+## 21. Ajustes: selectores de pista, robustez y diálogo «Acerca de»
+
+> Estado: implementado en rama `feat/settings-improvements-and-tests`
+> (PR [#129](https://github.com/Angel-p-v/Acryl/pull/129)), pendiente de CI y fusión.
+
+### 21.1. Selectores de pista predeterminada
+- Audio y subtítulos se eligen con un desplegable (`GtkDropDown`) que incluye un
+  campo de búsqueda y un listado filtrable.
+- El filtro no distingue mayúsculas y minúsculas y compara el **inicio** de la
+  etiqueta visible, por lo que escribir «esp» muestra «Español» y «Español 5.1»
+  sin recorrer listas largas de pistas.
+- La lista se reconstruye al cambiar de idioma o al refrescar las pistas, y el
+  valor seleccionado se conserva por clave.
+- Las opciones duplicadas se eliminan y el emparejamiento por idioma tolera
+  variantes habituales (`es`, `spa`, `spanish`, `esp`, etc.).
+
+### 21.2. Robustez del guardado y del desplegable
+- Al pulsar **Guardar** se lee la selección vigente en ese momento, no la que
+  existía al registrar el callback. Antes, cambiar la pista y guardar en la
+  misma sesión podía persistir el valor anterior.
+- Con el filtro activo, activar una fila usa la lista visible (`displayed`) y no
+  el índice del listado completo, evitando guardar una pista distinta a la
+  elegida.
+- Las actualizaciones programáticas del campo de búsqueda no abren el popover
+  (`suppress_popup`); solo lo abre la interacción del usuario.
+
+### 21.3. Diálogo «Acerca de»
+- Ajustes incluye una sección propia con encabezado, descripción traducida y
+  botón con icono `help-about-symbolic` (`AdwButtonContent`).
+- El botón abre un `AdwAboutDialog` con:
+  - nombre, icono, versión (`CARGO_PKG_VERSION`) y descripción traducida;
+  - autor en créditos y copyright (`© 2026 Angel-p-v`);
+  - licencia MIT;
+  - enlaces al repositorio, a las incidencias y a soporte (Discussions);
+  - información de depuración copiable con las versiones de Acryl, GTK y
+    Libadwaita, además del sistema operativo y la arquitectura.
+- Todos los textos se actualizan al cambiar de idioma en caliente.
+
+### 21.4. Pruebas
+- 12 pruebas unitarias en `src/ui/settings_window.rs` para `filtrar_opciones`,
+  `obtener_label_para_clave` y la normalización de rutas de carpeta.
+- `tests/settings_integration.rs` cubre cinco escenarios en un binario propio
+  (GTK4 exige ejecutarse en el hilo que llamó a `init`): carpetas configuradas,
+  pistas predeterminadas al guardar, selección después de registrar el callback,
+  pulsación del botón «Acerca de» y contenido del diálogo.
+- La CI ejecuta `xvfb-run -a cargo test --test e2e_app --test
+  settings_integration -- --test-threads=1` para los flujos con interfaz.
+
+### 21.5. Requisitos y decisiones
+- `AdwAboutDialog` requiere **Libadwaita ≥ 1.5**; se activa la feature `v1_5`
+  de `libadwaita` y se documenta en `README.md`.
+- Se extrajo la lógica pura del selector (`filtrar_opciones`,
+  `obtener_label_para_clave`) para poder probarla sin display.
+- Se eliminó el `Default` con `unimplemented!()` y los campos muertos de
+  `TrackSelector`, y se sustituyeron por construcción explícita.
+
+### 21.6. Limitaciones conocidas
+- La CI de la PR #129 permanece en rojo por dos pruebas preexistentes de
+  `tests/media_persistence.rs` que exigen un archivo real de la biblioteca del
+  usuario. No están relacionadas con este cambio y afectan también a `main`.
 
 *Nota: Este plan es un borrador inicial. A medida que se avanza en la implementación, se deben actualizar los hitos y criterios de aceptación.*

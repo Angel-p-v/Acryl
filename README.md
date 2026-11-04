@@ -45,6 +45,8 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 | 🖼️ **Pósteres, banners y metadatos** | Descarga pósteres, sinopsis y puntuación (vote_average) desde TVmaze; el selector combina TVmaze, AniList, Kitsu, Jikan, Shikimori, iTunes y Cinemeta (todos gratuitos y sin clave) y elimina imágenes repetidas. Imágenes individuales por episodio. |
 | ▶️ **Reproducción con mpv** | Abre el episodio seleccionado en `mpv` en una ventana independiente y respeta el estado de Acryl: normal, maximizado o pantalla completa |
 | ⚙️ **Configuración YAML** | Ajustes persistentes en archivo YAML (idioma, ruta de base de datos, reproductor predeterminado) |
+| 🎚️ **Pistas predeterminadas** | Audio y subtítulos globales con buscador y filtrado; tienen prioridad sobre la selección guardada por archivo |
+| ℹ️ **Acerca de** | Versión, licencia, autor, enlaces e información de depuración para reportar fallos |
 | 🌐 **Idiomas** | Interfaz disponible en español e inglés |
 | 📦 **Instalación** | Clona el repositorio y ejecuta `./scripts/install.sh` |
 
@@ -243,6 +245,13 @@ Una vez iniciada la aplicación:
    a escanear las rutas configuradas. Al eliminar una carpeta se pide confirmación y
    solo se borran sus entradas de la biblioteca: **los archivos de vídeo del disco no
    se tocan**.
+11. **Pistas predeterminadas**: En Ajustes elige la pista de audio y de subtítulos
+   que se aplicarán por defecto. El desplegable incluye un buscador para filtrar
+   listas largas. Estas pistas tienen prioridad sobre la selección guardada por
+   archivo.
+12. **Acerca de**: Al final de Ajustes, el botón «Acerca de» muestra la versión, la
+   licencia MIT, el autor, enlaces al repositorio, incidencias y soporte, además de
+   información de depuración con las versiones de Acryl, GTK, Libadwaita y el sistema.
 
 ### Pistas de audio y subtítulos
 
@@ -316,7 +325,8 @@ app-media-manager/
 │       ├── poster.rs         Renderizado de pósters y banners con gdk-pixbuf
 │       ├── poster_selector.rs Selector de póster/banner con deduplicación visual
 │       ├── search_bar.rs     Barra de búsqueda por título
-│       ├── settings_window.rs Vista de ajustes (carpetas, idioma, metadatos)
+│       ├── settings_window.rs Vista de ajustes (carpetas, idioma, metadatos, pistas, Acerca de)
+│       ├── about.rs          Diálogo «Acerca de» (AdwAboutDialog)
 │       ├── theme.rs          Tema visual Crunchyroll (CSS y paleta de colores)
 │       ├── track_dialog.rs   Selector de pistas de audio y subtítulos
 │       └── locales/          Diccionarios de traducción (es.json, en.json)
@@ -329,7 +339,9 @@ app-media-manager/
 ├── tests/                    Pruebas de integración con SQLite temporal y mpv real
 │   ├── media_persistence.rs  Pruebas de repositorios, migraciones y FTS5
 │   ├── media_stress.rs       Pruebas de rendimiento con miles de registros
-│   └── mpv_player.rs         Pruebas de integración con reproductor mpv
+│   ├── mpv_player.rs         Pruebas de integración con reproductor mpv
+│   ├── e2e_app.rs            Flujos críticos de la aplicación GTK4
+│   └── settings_integration.rs Pruebas de la vista de Ajustes y el diálogo «Acerca de»
 ├── docs/                     Documentación técnica y de arquitectura
 │   ├── README.md             Índice de documentación
 │   ├── adr/                  Decisiones de arquitectura (ADR-0017: migración a GTK4)
