@@ -7,8 +7,8 @@ use crate::db::{close_db, open_db};
 use crate::ui::i18n::TranslationsRef;
 use gtk4::prelude::*;
 use gtk4::{
-    Box, Button, DropDown, Entry, Label, ListBox, ListBoxRow, Orientation, Popover, ScrolledWindow,
-    Spinner, gio, glib,
+    Box, Button, DropDown, Entry, GestureClick, Label, ListBox, ListBoxRow, Orientation, Popover,
+    ScrolledWindow, Spinner, gio, glib,
 };
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -407,189 +407,6 @@ impl FolderManager {
     }
 }
 
-/// Selector de pista con búsqueda por texto y filtrado.
-///
-/// Permite escribir en el campo para filtrar las opciones disponibles por
-/// prefijo (sin distinguir mayúsculas) y seleccionar una de una lista
-/// scrollable dentro de un popover. El valor guardado es la clave de la
-/// pista, no la etiqueta mostrada.
-#[derive(Clone)]
-struct TrackSelector {
-    entry: Entry,
-    /// Todas las opciones disponibles: (clave, etiqueta mostrada).
-    options: Rc<RefCell<Vec<(String, String)>>>,
-    /// Clave actualmente seleccionada (`None` = "Ninguno").
-    selected_key: Rc<RefCell<Option<String>>>,
-}
-
-impl TrackSelector {
-    /// Crea un nuevo selector con su etiqueta y campo de entrada.
-    ///
-    /// Devuelve el contenedor vertical (label + entry) listo para añadir al
-    /// layout, junto con el selector para poder consultar la selección.
-    fn new(
-        title: &str,
-        options: &[(String, String)],
-        current: Option<&str>,
-        translations: &TranslationsRef,
-    ) -> (Box, Self) {
-        let container = Box::new(Orientation::Vertical, 6);
-        container.set_hexpand(true);
-        container.set_valign(gtk4::Align::Start);
-
-        let label = Label::new(Some(title));
-        label.set_halign(gtk4::Align::Start);
-        container.append(&label);
-
-        let entry = Entry::new();
-        entry.set_hexpand(true);
-        entry.set_placeholder_text(Some(
-            &translations
-                .borrow()
-                .t("settings.default_tracks.search_placeholder"),
-        ));
-        container.append(&entry);
-
-        // Popover con lista scrollable de opciones
-        let popover = Popover::new();
-        popover.set_parent(&entry);
-
-        let scrolled = ScrolledWindow::new();
-        scrolled.set_hexpand(true);
-        scrolled.set_vexpand(true);
-        scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
-        scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
-
-        let list_box = ListBox::new();
-        list_box.set_selection_mode(gtk4::SelectionMode::None);
-        // Un solo clic basta para activar una fila (seleccionar la pista).
-        list_box.set_activate_on_single_click(true);
-
-        scrolled.set_child(Some(&list_box));
-        popover.set_child(Some(&scrolled));
-
-        let options_rc = Rc::new(RefCell::new(options.to_vec()));
-        let selected_key = Rc::new(RefCell::new(current.map(String::from)));
-
-        // Si hay un valor actual, mostrar su etiqueta en el entry
-        if let Some(current_key) = current
-            && let Some((_, label)) = options.iter().find(|(k, _)| k == current_key)
-        {
-            entry.set_text(label);
-        }
-
-        // Clonos necesarios antes de crear populate (que mueve sus capturas).
-        let entry_for_populate = entry.clone();
-        let list_box_for_populate = list_box.clone();
-        let options_rc_for_populate = options_rc.clone();
-
-        // Poblar el listbox según el filtro actual del entry.
-        // Se duplica intencionalmente en los dos conectores abajo para evitar
-        // lidiar con Box<dyn FnMut()> compartido entre closures.
-        let populate = move || {
-            let text = entry_for_populate.text().to_string();
-            let filter_lower = text.to_lowercase();
-            let opts = options_rc_for_populate.borrow();
-
-            while let Some(child) = list_box_for_populate.first_child() {
-                list_box_for_populate.remove(&child);
-            }
-
-            for (_key, label) in opts.iter().filter(|(_, label)| {
-                text.is_empty() || label.to_lowercase().starts_with(&filter_lower)
-            }) {
-                let row = ListBoxRow::new();
-                let lbl = Label::new(Some(label));
-                lbl.set_halign(gtk4::Align::Start);
-                lbl.set_xalign(0.0);
-                row.set_child(Some(&lbl));
-                list_box_for_populate.append(&row);
-            }
-        };
-
-        // Al activar una fila (clic simple o Enter), seleccionar la pista y cerrar el popover
-        let list_box_for_activate = list_box.clone();
-        let popover_for_activate = popover.clone();
-        let entry_for_activate = entry.clone();
-        let selected_key_for_activate = selected_key.clone();
-        let options_for_activate = options_rc.clone();
-        let populate_for_activate = populate.clone();
-        list_box.connect_row_activated(move |_list_box, row| {
-            populate_for_activate();
-            let index = {
-                let mut idx = 0usize;
-                let mut found = None;
-                let mut child = list_box_for_activate.first_child();
-                while let Some(row_widget) = child {
-                    if let Some(r) = row_widget.downcast_ref::<ListBoxRow>() {
-                        if r == row {
-                            found = Some(idx);
-                            break;
-                        }
-                        idx += 1;
-                    }
-                    child = row_widget.next_sibling();
-                }
-                found
-            };
-            if let Some(index) = index {
-                let opts = options_for_activate.borrow();
-                if let Some((key, label)) = opts.get(index) {
-                    *selected_key_for_activate.borrow_mut() = Some(key.clone());
-                    entry_for_activate.set_text(label);
-                }
-            }
-            popover_for_activate.popdown();
-        });
-
-        // Al escribir, filtrar y mostrar el popover
-        let entry_for_filter = entry.clone();
-        let popover_for_filter = popover.clone();
-        let populate_for_filter = populate.clone();
-        entry.connect_changed(move |_| {
-            populate_for_filter();
-            if !entry_for_filter.text().is_empty() {
-                popover_for_filter.popup();
-            }
-        });
-
-        // Al hacer clic en el entry, (re)poblar y mostrar el popover
-        let popover_for_click = popover.clone();
-        let populate_for_click = populate.clone();
-        entry.connect_activate(move |_| {
-            populate_for_click();
-            popover_for_click.popup();
-        });
-
-        (
-            container,
-            Self {
-                entry,
-                options: options_rc,
-                selected_key,
-            },
-        )
-    }
-
-    /// Devuelve la clave actualmente seleccionada (`None` si no hay ninguna).
-    fn selected_key(&self) -> Option<String> {
-        self.selected_key.borrow().clone()
-    }
-
-    /// Actualiza las opciones disponibles y el valor actual. Se usa cuando
-    /// cambia el idioma (la etiqueta de "Ninguno" varía).
-    fn set_options(&self, options: &[(String, String)], current: Option<&str>) {
-        *self.options.borrow_mut() = options.to_vec();
-        *self.selected_key.borrow_mut() = current.map(String::from);
-        self.entry.set_text("");
-        if let Some(current_key) = current
-            && let Some((_, label)) = options.iter().find(|(k, _)| k == current_key)
-        {
-            self.entry.set_text(label);
-        }
-    }
-}
-
 /// Vista de ajustes integrada (se muestra dentro del Stack de MainWindow).
 ///
 /// El contenido desplegable (secciones de carpetas, idioma, metadatos y
@@ -623,12 +440,242 @@ pub struct SettingsView {
     on_refresh_metadata: Option<Rc<dyn Fn()>>,
     translations: TranslationsRef,
     /// Opciones de pista de la BD (sin "Ninguno"), para reconstruir los
-    /// selectores al cambiar de idioma.
+    /// desplegables al cambiar de idioma.
     audio_options: Vec<(String, String)>,
     subtitle_options: Vec<(String, String)>,
-    /// Selectores de pista predeterminada con búsqueda y filtrado.
+    /// Selectores de pista predeterminada con búsqueda y filtrado real.
+    /// Se usan Entry + Popover + ListBox para que escribir en el buscador
+    /// oculte las opciones que no coincidan (filtrado visual).
     default_audio_selector: TrackSelector,
     default_subtitle_selector: TrackSelector,
+}
+
+/// Selector de pista con búsqueda y filtrado visual.
+///
+/// Combina un Entry (para escribir/filtrar), un Popover y un ListBox
+/// dentro de un ScrolledWindow. Escribir en el Entry filtra las opciones
+/// del ListBox (oculta las que no coinciden con el texto escrito).
+#[allow(dead_code)]
+struct TrackSelector {
+    entry_widget: Box,
+    entry: Entry,
+    popover: Popover,
+    list_box: ListBox,
+    /// Todas las opciones disponibles: (clave, etiqueta mostrada).
+    options: Rc<RefCell<Vec<(String, String)>>>,
+    /// Clave actualmente seleccionada (None = "Ninguno").
+    selected_key: Rc<RefCell<Option<String>>>,
+}
+
+impl TrackSelector {
+    /// Crea un nuevo selector con su etiqueta, opciones y valor actual.
+    ///
+    /// Devuelve el contenedor Entry que se puede añadir a un layout, junto
+    /// con el selector para poder consultar la selección.
+    fn new(
+        title: &str,
+        options: &[(String, String)],
+        current: Option<&str>,
+        translations: &TranslationsRef,
+    ) -> (Box, Self) {
+        let container = Box::new(Orientation::Vertical, 6);
+        container.set_hexpand(true);
+        container.set_valign(gtk4::Align::Start);
+
+        let label = Label::new(Some(title));
+        label.set_halign(gtk4::Align::Start);
+        container.append(&label);
+
+        let entry = Entry::new();
+        entry.set_hexpand(true);
+        entry.set_placeholder_text(Some(
+            &translations
+                .borrow()
+                .t("settings.default_tracks.search_placeholder"),
+        ));
+        container.append(&entry);
+
+        // Popover con ListBox scrollable
+        let popover = Popover::new();
+        popover.set_parent(&entry);
+        popover.set_autohide(true);
+
+        let scrolled = ScrolledWindow::new();
+        scrolled.set_hexpand(true);
+        scrolled.set_vexpand(true);
+        scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
+        scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
+
+        let list_box = ListBox::new();
+        list_box.set_selection_mode(gtk4::SelectionMode::None);
+        list_box.set_activate_on_single_click(true);
+
+        scrolled.set_child(Some(&list_box));
+        popover.set_child(Some(&scrolled));
+
+        let options_rc = Rc::new(RefCell::new(options.to_vec()));
+        let selected_key = Rc::new(RefCell::new(current.map(String::from)));
+
+        // Mostrar el valor actual en el entry
+        if let Some(current_key) = current
+            && let Some((_, label)) = options.iter().find(|(k, _)| k == current_key)
+        {
+            entry.set_text(label);
+        }
+
+        // Constantes para el alto dinámico del popover según cantidad de filas
+        const ALTO_FILA: i32 = 34;
+        const ALTO_MIN: i32 = 100;
+        const ALTO_MAX: i32 = 400;
+
+        fn ajustar_alto_scrolled(scrolled: &ScrolledWindow, num_filas: usize) {
+            let alto = (num_filas as i32 * ALTO_FILA).clamp(ALTO_MIN, ALTO_MAX);
+            scrolled.set_size_request(250, alto);
+        }
+
+        // Poblar el listbox con TODAS las opciones (al abrir el popover)
+        let populate_all = {
+            let list_box_c = list_box.clone();
+            let options_c = options_rc.clone();
+            let scrolled_c = scrolled.clone();
+            move || {
+                let opts = options_c.borrow();
+
+                while let Some(child) = list_box_c.first_child() {
+                    list_box_c.remove(&child);
+                }
+
+                let mut num = 0;
+                for (_key, label) in opts.iter() {
+                    let row = ListBoxRow::new();
+                    let lbl = Label::new(Some(label));
+                    lbl.set_halign(gtk4::Align::Start);
+                    lbl.set_xalign(0.0);
+                    row.set_child(Some(&lbl));
+                    list_box_c.append(&row);
+                    num += 1;
+                }
+                ajustar_alto_scrolled(&scrolled_c, num);
+            }
+        };
+
+        // Poblar el listbox filtrado según el texto del entry (al escribir)
+        let populate_filtered = {
+            let entry_c = entry.clone();
+            let list_box_c = list_box.clone();
+            let options_c = options_rc.clone();
+            let scrolled_c = scrolled.clone();
+            move || {
+                let text = entry_c.text().to_string();
+                let filter_lower = text.to_lowercase();
+                let opts = options_c.borrow();
+
+                while let Some(child) = list_box_c.first_child() {
+                    list_box_c.remove(&child);
+                }
+
+                let mut num = 0;
+                for (_key, label) in opts.iter().filter(|(_, label)| {
+                    text.is_empty() || label.to_lowercase().starts_with(&filter_lower)
+                }) {
+                    let row = ListBoxRow::new();
+                    let lbl = Label::new(Some(label));
+                    lbl.set_halign(gtk4::Align::Start);
+                    lbl.set_xalign(0.0);
+                    row.set_child(Some(&lbl));
+                    list_box_c.append(&row);
+                    num += 1;
+                }
+                ajustar_alto_scrolled(&scrolled_c, num);
+            }
+        };
+
+        // Al activar una fila, seleccionar y cerrar el popover
+        let list_box_for_activate = list_box.clone();
+        let popover_for_activate = popover.clone();
+        let entry_for_activate = entry.clone();
+        let selected_key_for_activate = selected_key.clone();
+        let options_for_activate = options_rc.clone();
+        list_box.connect_row_activated(move |_list_box, row| {
+            let index = {
+                let mut idx = 0usize;
+                let mut found = None;
+                let mut child = list_box_for_activate.first_child();
+                while let Some(row_widget) = child {
+                    if let Some(r) = row_widget.downcast_ref::<ListBoxRow>() {
+                        if r == row {
+                            found = Some(idx);
+                            break;
+                        }
+                        idx += 1;
+                    }
+                    child = row_widget.next_sibling();
+                }
+                found
+            };
+            if let Some(index) = index {
+                let opts = options_for_activate.borrow();
+                if let Some((key, label)) = opts.get(index) {
+                    *selected_key_for_activate.borrow_mut() = Some(key.clone());
+                    entry_for_activate.set_text(label);
+                }
+            }
+            popover_for_activate.popdown();
+        });
+
+        // Al escribir, filtrar y mostrar el popover
+        let entry_for_filter = entry.clone();
+        let popover_for_filter = popover.clone();
+        let populate_filtered_clone = populate_filtered.clone();
+        entry.connect_changed(move |_| {
+            populate_filtered_clone();
+            if !entry_for_filter.text().is_empty() {
+                popover_for_filter.popup();
+            }
+        });
+
+        // Al hacer clic en el entry, (re)poblar con TODAS las opciones y mostrar el popover.
+        // Usamos PropagationPhase::Capture para que el clic se dispare antes
+        // de que el Entry lo consuma internamente.
+        let popover_for_click = popover.clone();
+        let populate_all_clone = populate_all.clone();
+        let click = GestureClick::new();
+        click.set_propagation_phase(gtk4::PropagationPhase::Capture);
+        click.connect_pressed(move |_, _, _, _| {
+            populate_all_clone();
+            popover_for_click.popup();
+        });
+        entry.add_controller(click);
+
+        (
+            container.clone(),
+            Self {
+                entry_widget: container,
+                entry,
+                popover,
+                list_box,
+                options: options_rc,
+                selected_key,
+            },
+        )
+    }
+
+    /// Devuelve la clave actualmente seleccionada (None si "Ninguno").
+    fn selected_key(&self) -> Option<String> {
+        self.selected_key.borrow().clone()
+    }
+
+    /// Actualiza las opciones y el valor actual (usado al cambiar de idioma).
+    fn set_options(&self, options: &[(String, String)], current: Option<&str>) {
+        *self.options.borrow_mut() = options.to_vec();
+        *self.selected_key.borrow_mut() = current.map(String::from);
+        self.entry.set_text("");
+        if let Some(current_key) = current
+            && let Some((_, label)) = options.iter().find(|(k, _)| k == current_key)
+        {
+            self.entry.set_text(label);
+        }
+    }
 }
 
 impl SettingsView {
@@ -640,22 +687,15 @@ impl SettingsView {
         parent: &P,
         translations: TranslationsRef,
     ) -> Self {
-        // Área scrollable con todas las secciones de configuración. Se
-        // coloca dentro de un ScrolledWindow para que, cuando el contenido no
-        // quepa en la altura de la ventana, el usuario pueda desplazarse
-        // verticalmente sin que quede nada fuera de área visible.
+        let t = |key: &str| -> String { translations.borrow().t(key) };
+
         let content = Box::new(Orientation::Vertical, 10);
         content.set_margin_top(20);
         content.set_margin_bottom(20);
         content.set_margin_start(20);
         content.set_margin_end(20);
         content.set_hexpand(true);
-        // El contenido interno no se expande verticalmente: su altura natural
-        // es la suma de las secciones y el ScrolledWindow proporciona el
-        // desplazamiento cuando supera el espacio disponible.
         content.set_vexpand(false);
-
-        let t = |key: &str| -> String { translations.borrow().t(key) };
 
         let scrolled = ScrolledWindow::new();
         scrolled.set_hexpand(true);
@@ -852,23 +892,25 @@ impl SettingsView {
         let mut all_subtitle: Vec<(String, String)> = vec![("none".to_string(), none_label)];
         all_subtitle.extend(subtitle_options.iter().cloned());
 
-        // Audio predeterminado (con búsqueda y filtrado).
-        let (audio_box, default_audio_selector) = TrackSelector::new(
+        // Audio predeterminado: selector con búsqueda y filtrado visual.
+        // Escribir en el Entry filtra las opciones del ListBox dentro del
+        // Popover (oculta las que no coinciden con el texto escrito).
+        let (audio_entry_widget, default_audio_selector) = TrackSelector::new(
             &t("settings.default_tracks.audio"),
             &all_audio,
             config.default_tracks.audio.as_deref(),
             &translations,
         );
-        default_tracks_row.append(&audio_box);
+        default_tracks_row.append(&audio_entry_widget);
 
-        // Subtítulos predeterminados (con búsqueda y filtrado).
-        let (subtitle_box, default_subtitle_selector) = TrackSelector::new(
+        // Subtítulos predeterminados: selector con búsqueda y filtrado visual.
+        let (subtitle_entry_widget, default_subtitle_selector) = TrackSelector::new(
             &t("settings.default_tracks.subtitle"),
             &all_subtitle,
             config.default_tracks.subtitle.as_deref(),
             &translations,
         );
-        default_tracks_row.append(&subtitle_box);
+        default_tracks_row.append(&subtitle_entry_widget);
 
         default_tracks_section.append(&default_tracks_row);
 
@@ -1052,8 +1094,8 @@ impl SettingsView {
         let config = self.config.clone();
         let language_combo = self.language_combo.clone();
         let on_save = self.on_save.clone();
-        let default_audio_selector_clone = self.default_audio_selector.clone();
-        let default_subtitle_selector_clone = self.default_subtitle_selector.clone();
+        let default_audio_key = self.default_audio_selector.selected_key();
+        let default_subtitle_key = self.default_subtitle_selector.selected_key();
 
         self.save_button.connect_clicked(move |_| {
             {
@@ -1065,8 +1107,8 @@ impl SettingsView {
                 };
 
                 // Guardar pistas predeterminadas seleccionadas en los selectores.
-                config.default_tracks.audio = default_audio_selector_clone.selected_key();
-                config.default_tracks.subtitle = default_subtitle_selector_clone.selected_key();
+                config.default_tracks.audio = default_audio_key.clone();
+                config.default_tracks.subtitle = default_subtitle_key.clone();
             }
 
             if let Some(callback) = &on_save {
