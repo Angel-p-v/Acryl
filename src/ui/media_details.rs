@@ -67,6 +67,11 @@ type SharedToggleFileWatchedCallback = Rc<RefCell<Option<ToggleFileWatchedCallba
 type ToggleSeasonWatchedCallback = Rc<dyn Fn(SeasonSelection, bool)>;
 type SharedToggleSeasonWatchedCallback = Rc<RefCell<Option<ToggleSeasonWatchedCallback>>>;
 
+/// Callback para marcar el medio completo (serie, anime o película) como
+/// visto/no visto. Recibe el nuevo estado deseado.
+type ToggleMediaWatchedCallback = Rc<dyn Fn(bool)>;
+type SharedToggleMediaWatchedCallback = Rc<RefCell<Option<ToggleMediaWatchedCallback>>>;
+
 /// Componente de vista de detalles.
 pub struct MediaDetails {
     box_: Box,
@@ -81,6 +86,8 @@ pub struct MediaDetails {
     main_button_label: String,
     synopsis_label: Label,
     tracks_button: Button,
+    watched_button: Button,
+    media_watched: Rc<Cell<bool>>,
     play_button: Button,
     back_button: Button,
     vote_label: Label,
@@ -96,6 +103,7 @@ pub struct MediaDetails {
     on_edit_tracks: SharedEditTracksCallback,
     on_toggle_file_watched: SharedToggleFileWatchedCallback,
     on_toggle_season_watched: SharedToggleSeasonWatchedCallback,
+    on_toggle_media_watched: SharedToggleMediaWatchedCallback,
     on_choose_images: Option<ChooseImagesCallback>,
     translations: TranslationsRef,
 }
@@ -142,6 +150,12 @@ impl MediaDetails {
         tracks_button.add_css_class("flat-button");
         tracks_button.set_tooltip_text(Some(&t("tooltip.tracks")));
         buttons_box.append(&tracks_button);
+
+        let watched_button = Button::with_label(&t("button.mark_watched"));
+        watched_button.add_css_class("flat-button");
+        watched_button.set_valign(gtk4::Align::Center);
+        watched_button.set_tooltip_text(Some(&t("tooltip.mark_watched")));
+        buttons_box.append(&watched_button);
 
         let play_button = Button::with_label(&t("button.play"));
         play_button.add_css_class("hero-action-btn");
@@ -197,6 +211,30 @@ impl MediaDetails {
         let on_toggle_file_watched: SharedToggleFileWatchedCallback = Rc::new(RefCell::new(None));
         let on_toggle_season_watched: SharedToggleSeasonWatchedCallback =
             Rc::new(RefCell::new(None));
+        let on_toggle_media_watched: SharedToggleMediaWatchedCallback = Rc::new(RefCell::new(None));
+        let media_watched = Rc::new(Cell::new(false));
+
+        // Botón de marcar medio completo como visto/no visto.
+        let watched_button_cb = watched_button.clone();
+        let media_watched_cb = media_watched.clone();
+        let on_toggle_media_watched_cb = on_toggle_media_watched.clone();
+        // Obtener los textos estáticos antes del closure para cumplir con 'static.
+        let mark_watched_label = t("button.mark_watched");
+        let mark_unwatched_label = t("button.mark_unwatched");
+        watched_button.connect_clicked(move |_| {
+            let new_state = !media_watched_cb.get();
+            media_watched_cb.set(new_state);
+            let label = if new_state {
+                mark_unwatched_label.clone()
+            } else {
+                mark_watched_label.clone()
+            };
+            watched_button_cb.set_label(&label);
+            if let Some(cb) = on_toggle_media_watched_cb.borrow().clone() {
+                cb(new_state);
+            }
+        });
+
         let db_path = Rc::new(RefCell::new(db_path.to_string()));
         let root_media_id = Rc::new(Cell::new(media_id));
 
@@ -255,6 +293,8 @@ impl MediaDetails {
             back_button,
             vote_label,
             choose_images_button,
+            watched_button,
+            media_watched,
             season_dropdown,
             season_dropdown_model,
             content_container,
@@ -266,6 +306,7 @@ impl MediaDetails {
             on_edit_tracks,
             on_toggle_file_watched,
             on_toggle_season_watched,
+            on_toggle_media_watched,
             on_choose_images: None,
             translations,
         }
@@ -311,6 +352,13 @@ impl MediaDetails {
         self.season_dropdown.set_visible(false);
         self.seasons.borrow_mut().clear();
         self.selected_season.replace(None);
+        self.media_watched.set(media.is_watched);
+        let watched_label = if media.is_watched {
+            self.t("button.mark_unwatched")
+        } else {
+            self.t("button.mark_watched")
+        };
+        self.watched_button.set_label(&watched_label);
 
         let back_label = match media.parent_id {
             Some(_) if media.r#type == "anime" => self.t("back.anime"),
@@ -560,6 +608,14 @@ impl MediaDetails {
     {
         let cb: Rc<dyn Fn(SeasonSelection, bool)> = Rc::new(f);
         *self.on_toggle_season_watched.borrow_mut() = Some(cb);
+    }
+
+    pub fn on_toggle_media_watched<F>(&mut self, f: F)
+    where
+        F: Fn(bool) + 'static,
+    {
+        let cb: Rc<dyn Fn(bool)> = Rc::new(f);
+        *self.on_toggle_media_watched.borrow_mut() = Some(cb);
     }
 
     pub fn on_choose_images<F>(&mut self, f: F)

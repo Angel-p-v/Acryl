@@ -13,6 +13,12 @@ type StreamRow = (
     Option<String>,
 );
 
+/// Fila del historial de un medio concreto: (fecha, posición, duración, archivo).
+type PlaybackHistoryRow = (String, f64, f64, Option<String>);
+
+/// Fila del historial reciente: (título, fecha, posición, duración, archivo).
+type RecentHistoryRow = (String, String, f64, f64, Option<String>);
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Media {
     pub id: i64,
@@ -509,6 +515,58 @@ impl<'a> MediaRepository<'a> {
             |row| row.get(0),
         )?;
         Ok(value)
+    }
+
+    /// Obtiene el historial de reproducción de un medio, ordenado del más
+    /// reciente al más antiguo. Cada entrada es (fecha, posición, duración, archivo).
+    pub fn get_playback_history(
+        &mut self,
+        media_id: i64,
+    ) -> RusqliteResult<Vec<PlaybackHistoryRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT played_at, position, duration, file_path
+             FROM playback_history
+             WHERE media_id = ?1
+             ORDER BY played_at DESC, id DESC",
+        )?;
+        let rows: Vec<(String, f64, f64, Option<String>)> = stmt
+            .query_map(params![media_id], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
+    }
+
+    /// Obtiene el historial de reproducción reciente, limitado a `limit`
+    /// entradas, ordenado del más reciente al más antiguo. Cada entrada es
+    /// (título del medio, fecha, posición, duración, archivo).
+    pub fn get_recent_history(&mut self, limit: i64) -> RusqliteResult<Vec<RecentHistoryRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT m.title, ph.played_at, ph.position, ph.duration, ph.file_path
+             FROM playback_history ph
+             JOIN media m ON m.id = ph.media_id
+             ORDER BY ph.played_at DESC, ph.id DESC
+             LIMIT ?1",
+        )?;
+        let rows: Vec<(String, String, f64, f64, Option<String>)> = stmt
+            .query_map(params![limit], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            })?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
     }
 
     /// Obtiene las temporadas (hijos) de una serie padre.
@@ -1718,5 +1776,155 @@ mod tests {
             next.1, paths[2],
             "debe saltar al primer no visto de la temporada 2 (estilo Netflix)"
         );
+    }
+
+    #[test]
+    fn get_playback_history_devuelve_entradas_ordenadas() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS playback_history (
+                id          INTEGER PRIMARY KEY,
+                media_id    INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+                played_at   TEXT NOT NULL DEFAULT (datetime('now')),
+                position    REAL NOT NULL DEFAULT 0,
+                duration    REAL NOT NULL DEFAULT 0,
+                file_path   TEXT
+             )",
+            [],
+        )
+        .expect("crear tabla playback_history");
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path)
+             VALUES ('movie', 'Test', 'test', '/tmp/test')",
+            [],
+        )
+        .expect("insertar medio");
+        let media_id = conn.last_insert_rowid();
+
+        // Insertar tres entradas de historial con fechas distintas (todo con conn
+        // antes de crear el repositorio, para no tener borrows cruzados).
+        conn.execute(
+            "INSERT INTO playback_history (media_id, played_at, position, duration, file_path)
+             VALUES (?1, '2024-01-01', 10.0, 100.0, '/tmp/file1.mkv')",
+            rusqlite::params![media_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO playback_history (media_id, played_at, position, duration, file_path)
+             VALUES (?1, '2024-01-03', 50.0, 100.0, '/tmp/file3.mkv')",
+            rusqlite::params![media_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO playback_history (media_id, played_at, position, duration, file_path)
+             VALUES (?1, '2024-01-02', 30.0, 100.0, '/tmp/file2.mkv')",
+            rusqlite::params![media_id],
+        )
+        .unwrap();
+
+        let mut repo = MediaRepository::new(&mut conn);
+        let history = repo
+            .get_playback_history(media_id)
+            .expect("obtener historial");
+        assert_eq!(history.len(), 3);
+
+        // Deben ordenarse del más reciente al más antiguo.
+        assert_eq!(history[0].0.as_str(), "2024-01-03");
+        assert_eq!(history[0].1, 50.0);
+        assert_eq!(history[0].3.as_deref(), Some("/tmp/file3.mkv"));
+
+        assert_eq!(history[1].0.as_str(), "2024-01-02");
+        assert_eq!(history[1].1, 30.0);
+        assert_eq!(history[1].3.as_deref(), Some("/tmp/file2.mkv"));
+
+        assert_eq!(history[2].0.as_str(), "2024-01-01");
+        assert_eq!(history[2].1, 10.0);
+        assert_eq!(history[2].3.as_deref(), Some("/tmp/file1.mkv"));
+    }
+
+    #[test]
+    fn get_recent_history_devuelve_entradas_recientes_con_limite() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS playback_history (
+                id          INTEGER PRIMARY KEY,
+                media_id    INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+                played_at   TEXT NOT NULL DEFAULT (datetime('now')),
+                position    REAL NOT NULL DEFAULT 0,
+                duration    REAL NOT NULL DEFAULT 0,
+                file_path   TEXT
+             )",
+            [],
+        )
+        .expect("crear tabla playback_history");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS media (
+                id          INTEGER PRIMARY KEY,
+                type        TEXT    NOT NULL,
+                title       TEXT    NOT NULL,
+                sort_title  TEXT    NOT NULL,
+                year        INTEGER,
+                folder_path TEXT    NOT NULL UNIQUE,
+                created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+                updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+                vote_average REAL
+            );
+             INSERT INTO media (type, title, sort_title, folder_path)
+             VALUES ('movie', 'Película A', 'pelicula a', '/tmp/a'),
+                    ('movie', 'Película B', 'pelicula b', '/tmp/b'),
+                    ('movie', 'Película C', 'pelicula c', '/tmp/c')",
+        )
+        .expect("insertar medios");
+
+        // Obtener IDs antes de crear el repositorio (evita borrows cruzados con conn).
+        let media_a: i64 = conn
+            .query_row(
+                "SELECT id FROM media WHERE title = 'Película A'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let media_b: i64 = conn
+            .query_row(
+                "SELECT id FROM media WHERE title = 'Película B'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let media_c: i64 = conn
+            .query_row(
+                "SELECT id FROM media WHERE title = 'Película C'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+
+        // Insertar una entrada por medio (todo con conn antes de crear repo).
+        for (mid, path) in [
+            (media_a, "/tmp/a.mkv"),
+            (media_b, "/tmp/b.mkv"),
+            (media_c, "/tmp/c.mkv"),
+        ] {
+            conn.execute(
+                "INSERT INTO playback_history (media_id, played_at, position, duration, file_path)
+                 VALUES (?1, '2024-06-01', 0.0, 100.0, ?2)",
+                rusqlite::params![mid, path],
+            )
+            .unwrap();
+        }
+
+        let mut repo = MediaRepository::new(&mut conn);
+        let recent = repo
+            .get_recent_history(2)
+            .expect("obtener historial reciente");
+        assert_eq!(recent.len(), 2);
+
+        // Los dos más recientes (por id DESC) deben ser Película C y Película B.
+        assert_eq!(recent[0].0, "Película C");
+        assert_eq!(recent[0].4.as_deref(), Some("/tmp/c.mkv"));
+        assert_eq!(recent[1].0, "Película B");
+        assert_eq!(recent[1].4.as_deref(), Some("/tmp/b.mkv"));
     }
 }
