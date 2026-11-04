@@ -239,15 +239,28 @@ fn validate_media_path(file_path: &str) -> Result<(), Box<dyn std::error::Error>
 
 /// Indica si una reproducción terminada debe marcarse como completada.
 ///
-/// Se conserva el umbral existente (5 minutos para episodios, 10 para
-/// películas), pero también se completa cuando la posición alcanza o supera la
-/// duración: antes esos casos dejaban una entrada activa al final del vídeo y
-/// la siguiente reproducción empezaba en el último segundo.
-fn should_complete_playback(media_type: &str, position: f64, duration: f64) -> bool {
+/// `threshold_seconds` es el umbral configurable en segundos (por defecto
+/// 300). Para películas se usa el doble (`threshold_seconds * 2`), de modo que
+/// el valor por defecto 300 conserva el comportamiento histórico (300s para
+/// episodios/anime, 600s para películas).
+///
+/// También se completa cuando la posición alcanza o supera la duración: antes
+/// esos casos dejaban una entrada activa al final del vídeo y la siguiente
+/// reproducción empezaba en el último segundo.
+fn should_complete_playback(
+    media_type: &str,
+    position: f64,
+    duration: f64,
+    threshold_seconds: u64,
+) -> bool {
     if duration <= 0.0 {
         return false;
     }
-    let threshold = if media_type == "movie" { 600.0 } else { 300.0 };
+    let threshold = if media_type == "movie" {
+        (threshold_seconds * 2) as f64
+    } else {
+        threshold_seconds as f64
+    };
     duration - position < threshold
 }
 
@@ -681,6 +694,7 @@ pub fn play_with_resume(
         file_path,
         PlayerWindowMode::Fullscreen,
         None,
+        None,
     )
 }
 
@@ -696,8 +710,13 @@ pub fn play_with_resume_with_mode(
     file_path: &str,
     window_mode: PlayerWindowMode,
     default_tracks: Option<&DefaultTracks>,
+    completion_threshold_seconds: Option<u64>,
 ) -> Result<PlaybackStart, Box<dyn std::error::Error>> {
     validate_media_path(file_path)?;
+
+    // Umbral de completado configurable (300s por defecto; el doble para
+    // películas, preservando el comportamiento histórico).
+    let threshold_seconds = completion_threshold_seconds.unwrap_or(300);
 
     // 1. Consultar tipo de medio y última posición guardada (rápido, en hilo principal).
     let (media_type, start_position) = {
@@ -755,6 +774,7 @@ pub fn play_with_resume_with_mode(
     let file_path_owned = file_path.to_string();
     let media_type_owned = media_type;
     let socket_owned = socket_path.clone();
+    let threshold_owned = threshold_seconds;
     let (finished_sender, finished_receiver) = mpsc::channel();
 
     std::thread::spawn(move || {
@@ -848,8 +868,12 @@ pub fn play_with_resume_with_mode(
         }
 
         // Marcar como visto si faltan menos del umbral o si el vídeo terminó.
-        if should_complete_playback(&media_type_owned, last_position, last_duration)
-            && let Ok(mut conn) = open_db(&db_path_owned)
+        if should_complete_playback(
+            &media_type_owned,
+            last_position,
+            last_duration,
+            threshold_owned,
+        ) && let Ok(mut conn) = open_db(&db_path_owned)
         {
             let mut repo = MediaRepository::new(&mut conn);
             let _ = repo.set_file_watched(&file_path_owned, true);
@@ -1388,18 +1412,32 @@ mod tests {
 
     #[test]
     fn completa_la_reproduccion_al_llegar_al_final() {
-        assert!(should_complete_playback("series", 299.0, 300.0));
-        assert!(should_complete_playback("series", 300.0, 300.0));
-        assert!(should_complete_playback("series", 301.0, 300.0));
-        assert!(!should_complete_playback("series", 0.0, 300.0));
-        assert!(!should_complete_playback("series", 100.0, 1000.0));
-        assert!(!should_complete_playback("series", 0.0, 0.0));
+        let umbral = 300;
+        assert!(should_complete_playback("series", 299.0, 300.0, umbral));
+        assert!(should_complete_playback("series", 300.0, 300.0, umbral));
+        assert!(should_complete_playback("series", 301.0, 300.0, umbral));
+        assert!(!should_complete_playback("series", 0.0, 300.0, umbral));
+        assert!(!should_complete_playback("series", 100.0, 1000.0, umbral));
+        assert!(!should_complete_playback("series", 0.0, 0.0, umbral));
     }
 
     #[test]
     fn las_peliculas_usan_un_umbral_mayor() {
-        assert!(!should_complete_playback("movie", 0.0, 600.0));
-        assert!(should_complete_playback("movie", 0.0, 599.0));
+        let umbral = 300; // el doble (600s) para películas
+        assert!(!should_complete_playback("movie", 0.0, 600.0, umbral));
+        assert!(should_complete_playback("movie", 0.0, 599.0, umbral));
+    }
+
+    #[test]
+    fn umbral_de_completado_es_configurable() {
+        // Umbral corto: 10s. Episodio de 100s visto en 95s → quedan 5s < 10s → completado.
+        assert!(should_complete_playback("series", 95.0, 100.0, 10));
+        // Episodio de 100s visto en 89s → quedan 11s >= 10s → no completado.
+        assert!(!should_complete_playback("series", 89.0, 100.0, 10));
+        // Película: umbral 10s → doble (20s). 100s vista en 85s → quedan 15s < 20s → completado.
+        assert!(should_complete_playback("movie", 85.0, 100.0, 10));
+        // Película: 100s vista en 75s → quedan 25s >= 20s → no completado.
+        assert!(!should_complete_playback("movie", 75.0, 100.0, 10));
     }
 
     #[test]

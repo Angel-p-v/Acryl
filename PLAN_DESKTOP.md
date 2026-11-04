@@ -430,13 +430,48 @@ Orden de trabajo vigente:
 6. ✅ Virtualización de galería con `GtkGridView` (solo renderiza ítems visibles).
 7. ✅ Ajustes: selectores de pista con búsqueda, correcciones de guardado y diálogo «Acerca de» (sección 21). Implementado y fusionado en `main` mediante la PR [#129](https://github.com/Angel-p-v/Acryl/pull/129) (squash merge del commit `579e059`).
 
-El trabajo de código del plan está completo. Las pruebas preexistentes de
+8. ✅ PR #131 (commit `7d61e0f`): mejoras en reproducción, renderizado, biblioteca y pruebas (áreas 1, 2, 4, 7). Fusionada en `main`.
+
+El trabajo de código del plan base está completo. Las pruebas preexistentes de
 `tests/media_persistence.rs` que dependían de un archivo real de la biblioteca
 del usuario se reescribieron para usar archivos y streams de prueba inventados
 en un directorio temporal, por lo que ahora pasan en cualquier entorno sin
 requerir `ffprobe` ni un archivo local.
 
----
+A continuación se detalla la iteración actual (post-PR #131), en curso:
+
+## 18. Iteración actual: cobertura de pruebas, áreas 3, 5, 6, reproducción, UI y documentación
+
+Estado: en ejecución (rama `feat/cobertura-area-3-5-6-reproduccion-ui-docs`).
+
+### 18.1. Cobertura de pruebas y CI
+- `cargo audit` ya es un check obligatorio en `.github/workflows/ci.yml` (se instala y ejecuta en el job `verify-rust`). Verificado en el entorno local.
+- Línea base tras merge de PR #131: `cargo test --all-targets --all-features` pasa (153 tests de lib). Los únicos fallos son ambientales y preexistentes en `main` (tests GTK4 que requieren servidor de display real y tests de `mpv` que requieren reproducir un vídeo real); no son regresiones de esta iteración.
+- Tests E2E para flujos críticos ya cubren: inicio GTK4, búsqueda, detalles de medio, persistencia de config YAML, cambio de idioma en caliente y registro de historial. Los que requieren display se omiten automáticamente sin sesión gráfica y se ejecutan en CI bajo `xvfb-run`.
+
+### 18.2. Área 3 — Metadatos y fuentes externas
+- Pendiente: rate limits y reintentos exponenciales en TVmaze/AniList, caché de respuestas, búsqueda de pósters/banners con fallback, detección automática de idioma y preferencia de audio/subtítulos.
+
+### 18.3. Área 5 — Servicio de pósters y caché (implementado)
+- `PosterService` ahora limita las descargas concurrentes mediante un semáforo (`DEFAULT_MAX_CONCURRENT_DOWNLOADS = 4`, configurable con `with_concurrency_limit`).
+- Reporte de progreso por descarga (`ProgressEvent` / `ProgressKind`, opcional vía `with_progress_reporter`) para mostrar estado en la UI (spinner por tarjeta o global).
+- `clean_orphaned(dir, referenced_urls)` elimina del caché las imágenes ya no referenciadas por ningún medio (póster/banner de `media` e imagen de episodio de `media_files`). El llamador recopila las URLs desde el repositorio, manteniendo al servicio independiente de la capa de BD.
+- Se conserva `clean_cache(max_age_days)` por antigüedad.
+
+### 18.4. Área 6 — Configuración y ajustes (parcial)
+- Implementado: `playback_completion_threshold_seconds` en `AppConfig` (por defecto 300 s). Para películas se aplica el doble, preservando el comportamiento histórico (300 s episodios/anime, 600 s películas).
+- Pendiente: validación explícita de rutas de carpetas en la UI de configuración, exportar/importar configuración YAML y base de datos SQLite (backup/restore).
+
+### 18.5. Reproducción y mpv (parcial)
+- Implementado: umbral de completado configurable (`should_complete_playback` acepta `threshold_seconds`; `play_with_resume_with_mode` lo recibe desde la configuración).
+- Pendiente: selección de pistas desde el track dialog con persistencia por archivo (ya existe el diálogo), control de sesión mpv (pausar/reanudar desde la app vía IPC socket ya implementado en `MpvPlayer`).
+
+### 18.6. UI y experiencia
+- Pendiente: filtro por favoritos y visto/no visto, paginado/carga incremental, atajos de teclado y navegación accesible, tema claro/oscuro.
+
+### 18.7. Documentación y operaciones (parcial)
+- Implementado: `diagnostic/acryl-check.sh` verifica explícitamente GTK4, Libadwaita, gdk-pixbuf2, mpv y ffprobe como dependencias del sistema.
+- Pendiente: actualizar `README.md` y añadir ADR si procede.
 
 ---
 

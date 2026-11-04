@@ -111,6 +111,40 @@ echo "  WEBKIT_DISABLE_COMPOSITING_MODE=${WEBKIT_DISABLE_COMPOSITING_MODE:-no de
 echo
 
 ###############################################################################
+# 1.5. Dependencias del sistema requeridas por Acryl
+###############################################################################
+info "1.5. Dependencias del sistema (GTK4, Libadwaita, mpv, ffprobe)"
+SYS_DEPS_OK=true
+check_pkg() {
+    if pkg-config --exists "$1" 2>/dev/null; then
+        ok "Biblioteca de sistema vía pkg-config: $1"
+    else
+        warn "Biblioteca de sistema no encontrada vía pkg-config: $1"
+        SYS_DEPS_OK=false
+    fi
+}
+check_bin() {
+    if command -v "$1" >/dev/null 2>&1; then
+        ok "Ejecutable disponible: $1 ($(command -v "$1"))"
+    else
+        warn "Ejecutable no encontrado: $1"
+        SYS_DEPS_OK=false
+    fi
+}
+check_pkg gtk4
+check_pkg libadwaita-1
+check_pkg gdk-pixbuf-2.0
+check_bin mpv
+check_bin ffprobe
+if [[ "$SYS_DEPS_OK" == "true" ]]; then
+    ok "Todas las dependencias del sistema están presentes."
+else
+    warn "Faltan dependencias del sistema. Instálalas antes de compilar/ejecutar Acryl."
+    echo "  Ejemplo (Debian/Ubuntu): sudo apt-get install libgtk-4-dev libadwaita-1-dev libgdk-pixbuf2.0-dev mpv ffmpeg"
+fi
+echo
+
+###############################################################################
 # 2. Ejecutable de Acryl
 ###############################################################################
 info "2. Ejecutable de Acryl"
