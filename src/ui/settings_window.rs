@@ -6,7 +6,10 @@ use crate::db::media_repo::MediaRepository;
 use crate::db::{close_db, open_db};
 use crate::ui::i18n::TranslationsRef;
 use gtk4::prelude::*;
-use gtk4::{Box, Button, DropDown, Entry, Label, Orientation, ScrolledWindow, Spinner, gio, glib};
+use gtk4::{
+    Box, Button, DropDown, Entry, Label, ListBox, ListBoxRow, Orientation, Popover, ScrolledWindow,
+    Spinner, gio, glib,
+};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -440,11 +443,194 @@ pub struct SettingsView {
     /// desplegables al cambiar de idioma.
     audio_options: Vec<(String, String)>,
     subtitle_options: Vec<(String, String)>,
-    /// Desplegables de pista predeterminada con búsqueda y filtrado.
-    /// `FilterListModel` permite que escribir en el buscador filtre
-    /// visualmente las opciones (no solo saltar a una por tipo-ahead).
-    default_audio_dropdown: DropDown,
-    default_subtitle_dropdown: DropDown,
+    /// Selectores de pista predeterminada con búsqueda y filtrado real.
+    /// Se usan Entry + Popover + ListBox para que escribir en el buscador
+    /// oculte las opciones que no coincidan (filtrado visual).
+    default_audio_selector: TrackSelector,
+    default_subtitle_selector: TrackSelector,
+}
+
+/// Selector de pista con búsqueda y filtrado visual.
+///
+/// Combina un Entry (para escribir/filtrar), un Popover y un ListBox
+/// dentro de un ScrolledWindow. Escribir en el Entry filtra las opciones
+/// del ListBox (oculta las que no coinciden con el texto escrito).
+#[allow(dead_code)]
+struct TrackSelector {
+    entry_widget: Box,
+    entry: Entry,
+    popover: Popover,
+    list_box: ListBox,
+    /// Todas las opciones disponibles: (clave, etiqueta mostrada).
+    options: Rc<RefCell<Vec<(String, String)>>>,
+    /// Clave actualmente seleccionada (None = "Ninguno").
+    selected_key: Rc<RefCell<Option<String>>>,
+}
+
+impl TrackSelector {
+    /// Crea un nuevo selector con su etiqueta, opciones y valor actual.
+    ///
+    /// Devuelve el contenedor Entry que se puede añadir a un layout, junto
+    /// con el selector para poder consultar la selección.
+    fn new(
+        title: &str,
+        options: &[(String, String)],
+        current: Option<&str>,
+        translations: &TranslationsRef,
+    ) -> (Box, Self) {
+        let container = Box::new(Orientation::Vertical, 6);
+        container.set_hexpand(true);
+        container.set_valign(gtk4::Align::Start);
+
+        let label = Label::new(Some(title));
+        label.set_halign(gtk4::Align::Start);
+        container.append(&label);
+
+        let entry = Entry::new();
+        entry.set_hexpand(true);
+        entry.set_placeholder_text(Some(
+            &translations
+                .borrow()
+                .t("settings.default_tracks.search_placeholder"),
+        ));
+        container.append(&entry);
+
+        // Popover con ListBox scrollable
+        let popover = Popover::new();
+        popover.set_parent(&entry);
+
+        let scrolled = ScrolledWindow::new();
+        scrolled.set_hexpand(true);
+        scrolled.set_vexpand(true);
+        scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
+        scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
+
+        let list_box = ListBox::new();
+        list_box.set_selection_mode(gtk4::SelectionMode::None);
+        list_box.set_activate_on_single_click(true);
+
+        scrolled.set_child(Some(&list_box));
+        popover.set_child(Some(&scrolled));
+
+        let options_rc = Rc::new(RefCell::new(options.to_vec()));
+        let selected_key = Rc::new(RefCell::new(current.map(String::from)));
+
+        // Mostrar el valor actual en el entry
+        if let Some(current_key) = current
+            && let Some((_, label)) = options.iter().find(|(k, _)| k == current_key)
+        {
+            entry.set_text(label);
+        }
+
+        // Poblar el listbox según el filtro del entry
+        let populate = {
+            let entry_c = entry.clone();
+            let list_box_c = list_box.clone();
+            let options_c = options_rc.clone();
+            move || {
+                let text = entry_c.text().to_string();
+                let filter_lower = text.to_lowercase();
+                let opts = options_c.borrow();
+
+                while let Some(child) = list_box_c.first_child() {
+                    list_box_c.remove(&child);
+                }
+
+                for (_key, label) in opts.iter().filter(|(_, label)| {
+                    text.is_empty() || label.to_lowercase().starts_with(&filter_lower)
+                }) {
+                    let row = ListBoxRow::new();
+                    let lbl = Label::new(Some(label));
+                    lbl.set_halign(gtk4::Align::Start);
+                    lbl.set_xalign(0.0);
+                    row.set_child(Some(&lbl));
+                    list_box_c.append(&row);
+                }
+            }
+        };
+
+        // Al activar una fila, seleccionar y cerrar el popover
+        let list_box_for_activate = list_box.clone();
+        let popover_for_activate = popover.clone();
+        let entry_for_activate = entry.clone();
+        let selected_key_for_activate = selected_key.clone();
+        let options_for_activate = options_rc.clone();
+        list_box.connect_row_activated(move |_list_box, row| {
+            let index = {
+                let mut idx = 0usize;
+                let mut found = None;
+                let mut child = list_box_for_activate.first_child();
+                while let Some(row_widget) = child {
+                    if let Some(r) = row_widget.downcast_ref::<ListBoxRow>() {
+                        if r == row {
+                            found = Some(idx);
+                            break;
+                        }
+                        idx += 1;
+                    }
+                    child = row_widget.next_sibling();
+                }
+                found
+            };
+            if let Some(index) = index {
+                let opts = options_for_activate.borrow();
+                if let Some((key, label)) = opts.get(index) {
+                    *selected_key_for_activate.borrow_mut() = Some(key.clone());
+                    entry_for_activate.set_text(label);
+                }
+            }
+            popover_for_activate.popdown();
+        });
+
+        // Al escribir, filtrar y mostrar el popover
+        let entry_for_filter = entry.clone();
+        let popover_for_filter = popover.clone();
+        let populate_for_filter = populate.clone();
+        entry.connect_changed(move |_| {
+            populate_for_filter();
+            if !entry_for_filter.text().is_empty() {
+                popover_for_filter.popup();
+            }
+        });
+
+        // Al hacer clic en el entry, (re)poblar y mostrar el popover
+        let _entry_for_click = entry.clone();
+        let popover_for_click = popover.clone();
+        let populate_for_click = populate.clone();
+        entry.connect_activate(move |_| {
+            populate_for_click();
+            popover_for_click.popup();
+        });
+
+        (
+            container.clone(),
+            Self {
+                entry_widget: container,
+                entry,
+                popover,
+                list_box,
+                options: options_rc,
+                selected_key,
+            },
+        )
+    }
+
+    /// Devuelve la clave actualmente seleccionada (None si "Ninguno").
+    fn selected_key(&self) -> Option<String> {
+        self.selected_key.borrow().clone()
+    }
+
+    /// Actualiza las opciones y el valor actual (usado al cambiar de idioma).
+    fn set_options(&self, options: &[(String, String)], current: Option<&str>) {
+        *self.options.borrow_mut() = options.to_vec();
+        *self.selected_key.borrow_mut() = current.map(String::from);
+        self.entry.set_text("");
+        if let Some(current_key) = current
+            && let Some((_, label)) = options.iter().find(|(k, _)| k == current_key)
+        {
+            self.entry.set_text(label);
+        }
+    }
 }
 
 impl SettingsView {
@@ -456,22 +642,15 @@ impl SettingsView {
         parent: &P,
         translations: TranslationsRef,
     ) -> Self {
-        // Área scrollable con todas las secciones de configuración. Se
-        // coloca dentro de un ScrolledWindow para que, cuando el contenido no
-        // quepa en la altura de la ventana, el usuario pueda desplazarse
-        // verticalmente sin que quede nada fuera de área visible.
+        let t = |key: &str| -> String { translations.borrow().t(key) };
+
         let content = Box::new(Orientation::Vertical, 10);
         content.set_margin_top(20);
         content.set_margin_bottom(20);
         content.set_margin_start(20);
         content.set_margin_end(20);
         content.set_hexpand(true);
-        // El contenido interno no se expande verticalmente: su altura natural
-        // es la suma de las secciones y el ScrolledWindow proporciona el
-        // desplazamiento cuando supera el espacio disponible.
         content.set_vexpand(false);
-
-        let t = |key: &str| -> String { translations.borrow().t(key) };
 
         let scrolled = ScrolledWindow::new();
         scrolled.set_hexpand(true);
@@ -668,50 +847,25 @@ impl SettingsView {
         let mut all_subtitle: Vec<(String, String)> = vec![("none".to_string(), none_label)];
         all_subtitle.extend(subtitle_options.iter().cloned());
 
-        // Audio predeterminado: desplegable con búsqueda y filtrado.
-        // `enable-search(true)` permite escribir en el buscador del popup
-        // para filtrar las opciones visualmente.
-        let all_audio_labels: Vec<String> =
-            all_audio.iter().map(|(_, label)| label.clone()).collect();
-        let default_audio_dropdown = DropDown::from_strings(
-            &all_audio_labels
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
+        // Audio predeterminado: selector con búsqueda y filtrado visual.
+        // Escribir en el Entry filtra las opciones del ListBox dentro del
+        // Popover (oculta las que no coinciden con el texto escrito).
+        let (audio_entry_widget, default_audio_selector) = TrackSelector::new(
+            &t("settings.default_tracks.audio"),
+            &all_audio,
+            config.default_tracks.audio.as_deref(),
+            &translations,
         );
-        default_audio_dropdown.set_enable_search(true);
-        // Seleccionar la que coincida con la configuración actual, si existe.
-        if let Some(default_audio) = &config.default_tracks.audio
-            && let Some((idx, _)) = all_audio
-                .iter()
-                .enumerate()
-                .find(|(_, (k, _))| k == default_audio)
-        {
-            default_audio_dropdown.set_selected(idx as u32);
-        }
-        default_tracks_row.append(&default_audio_dropdown);
+        default_tracks_row.append(&audio_entry_widget);
 
-        // Subtítulos predeterminados: desplegable con búsqueda habilitada.
-        let all_subtitle_labels: Vec<String> = all_subtitle
-            .iter()
-            .map(|(_, label)| label.clone())
-            .collect();
-        let default_subtitle_dropdown = DropDown::from_strings(
-            &all_subtitle_labels
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
+        // Subtítulos predeterminados: selector con búsqueda y filtrado visual.
+        let (subtitle_entry_widget, default_subtitle_selector) = TrackSelector::new(
+            &t("settings.default_tracks.subtitle"),
+            &all_subtitle,
+            config.default_tracks.subtitle.as_deref(),
+            &translations,
         );
-        default_subtitle_dropdown.set_enable_search(true);
-        if let Some(default_subtitle) = &config.default_tracks.subtitle
-            && let Some((idx, _)) = all_subtitle
-                .iter()
-                .enumerate()
-                .find(|(_, (k, _))| k == default_subtitle)
-        {
-            default_subtitle_dropdown.set_selected(idx as u32);
-        }
-        default_tracks_row.append(&default_subtitle_dropdown);
+        default_tracks_row.append(&subtitle_entry_widget);
 
         default_tracks_section.append(&default_tracks_row);
 
@@ -821,8 +975,8 @@ impl SettingsView {
             translations,
             audio_options,
             subtitle_options,
-            default_audio_dropdown,
-            default_subtitle_dropdown,
+            default_audio_selector,
+            default_subtitle_selector,
         }
     }
 
@@ -866,59 +1020,21 @@ impl SettingsView {
         self.cancel_button.set_label(&t("button.cancel"));
         self.save_button.set_label(&t("button.save"));
 
-        // Actualizar los desplegables de pista con la nueva etiqueta de "Ninguno",
+        // Actualizar los selectores de pista con la nueva etiqueta de "Ninguno",
         // conservando la selección actual.
         let none_label = t("settings.default_tracks.none");
         let mut all_audio: Vec<(String, String)> = vec![("none".to_string(), none_label.clone())];
         all_audio.extend(self.audio_options.iter().cloned());
         let mut all_subtitle: Vec<(String, String)> = vec![("none".to_string(), none_label)];
         all_subtitle.extend(self.subtitle_options.iter().cloned());
-
-        // Reconstruir los modelos de los desplegables con las nuevas etiquetas,
-        // conservando la selección actual del usuario.
-        let none_label = t("settings.default_tracks.none");
-        let mut all_audio: Vec<(String, String)> = vec![("none".to_string(), none_label.clone())];
-        all_audio.extend(self.audio_options.iter().cloned());
-        let mut all_subtitle: Vec<(String, String)> = vec![("none".to_string(), none_label)];
-        all_subtitle.extend(self.subtitle_options.iter().cloned());
-
-        // Audio: recrear el StringList con las nuevas etiquetas.
-        let all_audio_labels: Vec<String> = all_audio.iter().map(|(_, l)| l.clone()).collect();
-        let audio_model = gtk4::StringList::new(
-            &all_audio_labels
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
+        self.default_audio_selector.set_options(
+            &all_audio,
+            self.default_audio_selector.selected_key().as_deref(),
         );
-        self.default_audio_dropdown.set_model(Some(&audio_model));
-        if let Some(default_audio) = &self.config.borrow().default_tracks.audio
-            && let Some((idx, _)) = all_audio
-                .iter()
-                .enumerate()
-                .find(|(_, (k, _))| k == default_audio)
-        {
-            self.default_audio_dropdown.set_selected(idx as u32);
-        }
-
-        // Subtítulos: recrear el StringList con las nuevas etiquetas.
-        let all_subtitle_labels: Vec<String> =
-            all_subtitle.iter().map(|(_, l)| l.clone()).collect();
-        let subtitle_model = gtk4::StringList::new(
-            &all_subtitle_labels
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
+        self.default_subtitle_selector.set_options(
+            &all_subtitle,
+            self.default_subtitle_selector.selected_key().as_deref(),
         );
-        self.default_subtitle_dropdown
-            .set_model(Some(&subtitle_model));
-        if let Some(default_subtitle) = &self.config.borrow().default_tracks.subtitle
-            && let Some((idx, _)) = all_subtitle
-                .iter()
-                .enumerate()
-                .find(|(_, (k, _))| k == default_subtitle)
-        {
-            self.default_subtitle_dropdown.set_selected(idx as u32);
-        }
 
         self.folder_manager.refresh_row_labels();
     }
@@ -933,10 +1049,8 @@ impl SettingsView {
         let config = self.config.clone();
         let language_combo = self.language_combo.clone();
         let on_save = self.on_save.clone();
-        let default_audio_dropdown_clone = self.default_audio_dropdown.clone();
-        let default_subtitle_dropdown_clone = self.default_subtitle_dropdown.clone();
-        let audio_options = self.audio_options.clone();
-        let subtitle_options = self.subtitle_options.clone();
+        let default_audio_key = self.default_audio_selector.selected_key();
+        let default_subtitle_key = self.default_subtitle_selector.selected_key();
 
         self.save_button.connect_clicked(move |_| {
             {
@@ -947,24 +1061,9 @@ impl SettingsView {
                     "en".to_string()
                 };
 
-                // Guardar pistas predeterminadas seleccionadas en los desplegables.
-                // Índice 0 = "Ninguno" → None; índice 1+ = pista de la BD.
-                let audio_selected = default_audio_dropdown_clone.selected() as usize;
-                config.default_tracks.audio = if audio_selected == 0 {
-                    None
-                } else {
-                    audio_options
-                        .get(audio_selected - 1)
-                        .map(|(k, _)| k.clone())
-                };
-                let subtitle_selected = default_subtitle_dropdown_clone.selected() as usize;
-                config.default_tracks.subtitle = if subtitle_selected == 0 {
-                    None
-                } else {
-                    subtitle_options
-                        .get(subtitle_selected - 1)
-                        .map(|(k, _)| k.clone())
-                };
+                // Guardar pistas predeterminadas seleccionadas en los selectores.
+                config.default_tracks.audio = default_audio_key.clone();
+                config.default_tracks.subtitle = default_subtitle_key.clone();
             }
 
             if let Some(callback) = &on_save {
