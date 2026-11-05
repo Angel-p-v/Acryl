@@ -23,6 +23,8 @@ pub struct SyncMetadataResult {
     pub banner_path: Option<String>,
     pub release_date: Option<String>,
     pub vote_average: Option<f64>,
+    /// Idioma original detectado de los metadatos (código ISO, ej. "en", "es").
+    pub language: Option<String>,
     /// Géneros/categorías devueltos por la fuente de metadatos.
     pub genres: Vec<String>,
     /// Identificador del show en TVmaze, usado para pedir sus imágenes anchas.
@@ -210,6 +212,7 @@ impl MetadataService {
                         poster_path: poster_path.as_deref(),
                         banner_path: banner_path.as_deref(),
                         synopsis: fetched.synopsis.as_deref(),
+                        language: fetched.language.as_deref(),
                     },
                 )?;
             } else {
@@ -219,6 +222,7 @@ impl MetadataService {
                     poster_path.as_deref(),
                     banner_path.as_deref(),
                     fetched.synopsis.as_deref(),
+                    fetched.language.as_deref(),
                 )?;
             }
 
@@ -601,7 +605,11 @@ async fn fetch_anilist_banner(title: &str, client: &TvmazeClient) -> Option<Stri
     });
 
     let body_text = serde_json::to_string(&body).ok()?;
-    let text = client.http.post_text("https://graphql.anilist.co", &body_text).await.ok()?;
+    let text = client
+        .http
+        .post_text("https://graphql.anilist.co", &body_text)
+        .await
+        .ok()?;
     let response: Value = serde_json::from_str(&text).ok()?;
 
     parse_anilist_banner(&response)
@@ -614,11 +622,7 @@ async fn fetch_kitsu_banner(title: &str, client: &TvmazeClient) -> Option<String
         urlencoding::encode(title)
     );
 
-    let text = client
-        .http
-        .get_text(&url)
-        .await
-        .ok()?;
+    let text = client.http.get_text(&url).await.ok()?;
     let response: Value = serde_json::from_str(&text).ok()?;
 
     parse_kitsu_banner(&response)
@@ -721,7 +725,11 @@ async fn fetch_anilist_images(title: &str, client: &TvmazeClient) -> Vec<ImageOp
         Ok(t) => t,
         Err(_) => return Vec::new(),
     };
-    let text = match client.http.post_text("https://graphql.anilist.co", &body_text).await {
+    let text = match client
+        .http
+        .post_text("https://graphql.anilist.co", &body_text)
+        .await
+    {
         Ok(t) => t,
         Err(_) => return Vec::new(),
     };
@@ -1381,6 +1389,10 @@ fn parse_search_response(response: &Value) -> SyncMetadataResult {
     SyncMetadataResult {
         title: show.get("name").and_then(Value::as_str).map(str::to_string),
         synopsis: show.get("summary").and_then(Value::as_str).map(clean_html),
+        language: show
+            .get("language")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         poster_path: show
             .get("image")
             .and_then(|image| image.get("medium"))
@@ -1496,6 +1508,7 @@ mod tests {
             "show": {
                 "id": 64632,
                 "name": "Solo Leveling",
+                "language": "ko",
                 "summary": "<p>Hola &amp; adiós</p>",
                 "image": {"medium": "https://example.com/poster.jpg"},
                 "premiered": "2024-01-06",
@@ -1506,6 +1519,7 @@ mod tests {
         let parsed = parse_search_response(&response);
         assert_eq!(parsed.title.as_deref(), Some("Solo Leveling"));
         assert_eq!(parsed.synopsis.as_deref(), Some("Hola & adiós"));
+        assert_eq!(parsed.language.as_deref(), Some("ko"));
         assert_eq!(
             parsed.poster_path.as_deref(),
             Some("https://example.com/poster.jpg")

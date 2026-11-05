@@ -43,6 +43,8 @@ pub struct Media {
     pub metadata_source_id: Option<i64>,
     /// Momento en que se intentó extraer categorías de los metadatos.
     pub categories_fetched_at: Option<String>,
+    /// Idioma original detectado de los metadatos (código ISO, ej. "en", "es").
+    pub language: Option<String>,
     /// Categorías asociadas al medio (cargadas por separado con `load_categories`).
     #[serde(skip)]
     pub categories: Vec<String>,
@@ -67,6 +69,7 @@ pub struct MediaMetadataInput<'a> {
     pub poster_path: Option<&'a str>,
     pub banner_path: Option<&'a str>,
     pub synopsis: Option<&'a str>,
+    pub language: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -147,7 +150,7 @@ impl<'a> MediaRepository<'a> {
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
                     metadata_fetched_at, parent_id, rating, vote_average,
-                    metadata_source_id, categories_fetched_at
+                    metadata_source_id, categories_fetched_at, language
              FROM media WHERE id = ?1",
         )?;
         let row = stmt.query_row(params![id], map_media_row);
@@ -373,7 +376,7 @@ impl<'a> MediaRepository<'a> {
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
                     metadata_fetched_at, parent_id, rating, vote_average,
-                    metadata_source_id, categories_fetched_at
+                    metadata_source_id, categories_fetched_at, language
              FROM media",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -432,7 +435,7 @@ impl<'a> MediaRepository<'a> {
                         m.created_at, m.updated_at,
                         m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
                         m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average,
-                        m.metadata_source_id, m.categories_fetched_at
+                        m.metadata_source_id, m.categories_fetched_at, m.language
                  FROM media m
                  JOIN media_fts f ON f.rowid = m.id
                  WHERE media_fts MATCH ?1 AND m.parent_id IS NULL",
@@ -464,7 +467,7 @@ impl<'a> MediaRepository<'a> {
                         m.created_at, m.updated_at,
                         m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
                         m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average,
-                        m.metadata_source_id, m.categories_fetched_at
+                        m.metadata_source_id, m.categories_fetched_at, m.language
                  FROM media m
                  WHERE m.sort_title LIKE ?1 ESCAPE '\\' AND m.parent_id IS NULL",
             );
@@ -575,7 +578,7 @@ impl<'a> MediaRepository<'a> {
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
                     metadata_fetched_at, parent_id, rating, vote_average,
-                    metadata_source_id, categories_fetched_at
+                    metadata_source_id, categories_fetched_at, language
              FROM media WHERE parent_id = ?1 ORDER BY sort_title ASC",
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -708,7 +711,7 @@ impl<'a> MediaRepository<'a> {
                         m.created_at, m.updated_at,
                         m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
                         m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average,
-                        m.metadata_source_id, m.categories_fetched_at
+                        m.metadata_source_id, m.categories_fetched_at, m.language
              FROM media m
              JOIN media_categories mc ON mc.media_id = m.id
              WHERE mc.category_id = ?1 AND m.parent_id IS NULL",
@@ -785,13 +788,15 @@ impl<'a> MediaRepository<'a> {
         poster_path: Option<&str>,
         banner_path: Option<&str>,
         synopsis: Option<&str>,
+        language: Option<&str>,
     ) -> RusqliteResult<()> {
         self.conn.execute(
             "UPDATE media SET year = COALESCE(?1, year), poster_path = ?2,
              banner_path = COALESCE(?3, banner_path), synopsis = ?4,
+             language = COALESCE(?5, language),
              metadata_fetched_at = datetime('now'), updated_at = datetime('now')
-             WHERE id = ?5",
-            params![year, poster_path, banner_path, synopsis, media_id],
+             WHERE id = ?6",
+            params![year, poster_path, banner_path, synopsis, language, media_id],
         )?;
         Ok(())
     }
@@ -862,7 +867,7 @@ impl<'a> MediaRepository<'a> {
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
                     metadata_fetched_at, parent_id, rating, vote_average,
-                    metadata_source_id, categories_fetched_at
+                    metadata_source_id, categories_fetched_at, language
              FROM media
              WHERE parent_id IS NULL AND categories_fetched_at IS NULL
              ORDER BY sort_title ASC",
@@ -899,9 +904,10 @@ impl<'a> MediaRepository<'a> {
     ) -> RusqliteResult<()> {
         self.conn.execute(
             "UPDATE media SET title = ?1, sort_title = ?2, year = ?3, poster_path = ?4,
-             banner_path = ?5, synopsis = ?6, metadata_fetched_at = datetime('now'),
+             banner_path = ?5, synopsis = ?6, language = ?7,
+             metadata_fetched_at = datetime('now'),
              updated_at = datetime('now')
-             WHERE id = ?7",
+             WHERE id = ?8",
             params![
                 metadata.title,
                 metadata.sort_title,
@@ -909,6 +915,7 @@ impl<'a> MediaRepository<'a> {
                 metadata.poster_path,
                 metadata.banner_path,
                 metadata.synopsis,
+                metadata.language,
                 media_id
             ],
         )?;
@@ -1322,6 +1329,7 @@ fn map_media_row(row: &rusqlite::Row<'_>) -> RusqliteResult<Media> {
         vote_average: row.get::<_, f64>(16).ok(),
         metadata_source_id: row.get(17)?,
         categories_fetched_at: row.get(18)?,
+        language: row.get(19)?,
         categories: Vec::new(),
     })
 }
@@ -1546,6 +1554,7 @@ mod tests {
             Some("https://example.com/old.jpg"),
             Some("https://example.com/old-banner.jpg"),
             Some("Sinopsis antigua"),
+            None,
         )
         .expect("guardar metadatos antiguos");
 
@@ -1558,6 +1567,7 @@ mod tests {
                 poster_path: Some("https://example.com/new.jpg"),
                 banner_path: Some("https://example.com/new-banner.jpg"),
                 synopsis: Some("Sinopsis nueva"),
+                language: None,
             },
         )
         .expect("sobrescribir metadatos");

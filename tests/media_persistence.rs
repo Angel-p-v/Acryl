@@ -795,6 +795,7 @@ fn update_metadata_actualiza_anio_poster_y_sinopsis() {
             Some("https://example.com/poster.jpg"),
             Some("https://example.com/banner.jpg"),
             Some("Sinopsis de prueba"),
+            None,
         )
         .expect("actualizar metadatos");
     }
@@ -849,6 +850,7 @@ fn reindexar_conserva_metadatos_sincronizados() {
                 poster_path: Some("https://example.com/poster.jpg"),
                 banner_path: Some("https://example.com/banner.jpg"),
                 synopsis: Some("Sinopsis sincronizada"),
+                language: None,
             },
         )
         .expect("sincronizar metadatos");
@@ -912,6 +914,7 @@ fn update_metadata_conserva_el_banner_si_no_se_recibe_uno_nuevo() {
             Some("https://example.com/poster.jpg"),
             Some("https://example.com/banner.jpg"),
             Some("Sinopsis"),
+            None,
         )
         .expect("guardar metadatos con banner");
         // Una sincronización posterior sin banner no debe borrarlo.
@@ -919,6 +922,7 @@ fn update_metadata_conserva_el_banner_si_no_se_recibe_uno_nuevo() {
             media.id,
             Some(2024),
             Some("https://example.com/poster.jpg"),
+            None,
             None,
             None,
         )
@@ -960,6 +964,7 @@ fn overwrite_metadata_reemplaza_campos_y_actualiza_fts() {
             Some("https://example.com/old.jpg"),
             Some("https://example.com/old-banner.jpg"),
             Some("Sinopsis antigua"),
+            None,
         )
         .expect("guardar metadatos antiguos");
         media.id
@@ -976,6 +981,7 @@ fn overwrite_metadata_reemplaza_campos_y_actualiza_fts() {
                 poster_path: Some("https://example.com/new.jpg"),
                 banner_path: Some("https://example.com/new-banner.jpg"),
                 synopsis: Some("Sinopsis nueva"),
+                language: None,
             },
         )
         .expect("sobrescribir metadatos");

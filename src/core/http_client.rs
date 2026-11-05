@@ -10,7 +10,6 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
-
 /// Ventana de tiempo para el rate limiter (TVmaze: ~20 req / 10 s).
 const RATE_LIMIT_WINDOW_SECS: u64 = 10;
 /// Máximo de peticiones por ventana de tiempo.
@@ -152,10 +151,8 @@ impl HttpClient {
     /// activada y hay entrada válida.
     pub async fn get_text(&self, url: &str) -> Result<String, reqwest::Error> {
         // Caché: devolver sin hacer petición de red.
-        if let Some(cache) = &self.cache {
-            if let Some(cached) = cache.get(url) {
-                return Ok(cached);
-            }
+        if let Some(cached) = self.cache.as_ref().and_then(|cache| cache.get(url)) {
+            return Ok(cached);
         }
 
         self.limiter.wait().await;
@@ -200,11 +197,7 @@ impl HttpClient {
     /// Realiza una POST con cuerpo JSON respetando el rate limit y con
     /// reintentos exponenciales. No usa caché (las peticiones POST suelen ser
     /// no idempotentes o con cuerpos variables).
-    pub async fn post_text(
-        &self,
-        url: &str,
-        body: &str,
-    ) -> Result<String, reqwest::Error> {
+    pub async fn post_text(&self, url: &str, body: &str) -> Result<String, reqwest::Error> {
         self.limiter.wait().await;
 
         let mut last_error = None;
@@ -294,7 +287,10 @@ mod tests {
     fn response_cache_guarda_y_devuelve() {
         let cache = ResponseCache::new(Duration::from_secs(60));
         cache.set("https://example.com/a", "contenido-a".to_string());
-        assert_eq!(cache.get("https://example.com/a"), Some("contenido-a".to_string()));
+        assert_eq!(
+            cache.get("https://example.com/a"),
+            Some("contenido-a".to_string())
+        );
     }
 
     #[test]

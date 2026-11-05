@@ -219,7 +219,9 @@ mod tests {
     fn export_config_to_escribe_yaml_valido() {
         let (config, config_dir, _data_dir) = test_config_with_tmp();
         let export_path = config_dir.path().join("exported.yaml");
-        config.export_config_to(&export_path).expect("exportar config");
+        config
+            .export_config_to(&export_path)
+            .expect("exportar config");
         let contents = fs::read_to_string(&export_path).expect("leer exportado");
         assert!(contents.contains("db_path:"));
         assert!(contents.contains("language:"));
@@ -246,7 +248,9 @@ default_tracks: {}
 playback_completion_threshold_seconds: 600
 "#;
         fs::write(&import_path, yaml).expect("escribir import");
-        let imported = config.import_config_from(&import_path).expect("importar config");
+        let imported = config
+            .import_config_from(&import_path)
+            .expect("importar config");
         assert_eq!(imported.language, "en");
         assert_eq!(imported.default_player, "mpv");
         assert_eq!(imported.playback_completion_threshold_seconds, 600);

@@ -270,6 +270,11 @@ CREATE INDEX IF NOT EXISTS idx_playback_history_file
   ON playback_history(file_path, completed_at);
 "#;
 
+/// Idioma original detectado de los metadatos de un medio.
+const MEDIA_LANGUAGE_SQL: &str = r#"
+ALTER TABLE media ADD COLUMN language TEXT;
+"#;
+
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -345,5 +350,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 15,
         name: "playback-history-active-entry",
         sql: PLAYBACK_HISTORY_ACTIVE_ENTRY_SQL,
+    },
+    Migration {
+        version: 16,
+        name: "media-language",
+        sql: MEDIA_LANGUAGE_SQL,
     },
 ];
