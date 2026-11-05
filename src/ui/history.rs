@@ -24,8 +24,10 @@ pub struct HistoryView {
     pub list: FlowBox,
     /// Ruta de la base de datos (para recargar al cambiar idioma).
     db_path: Option<String>,
-    /// Referencia a la ventana principal (para callbacks y traducciones).
+    /// Referencia a la ventana principal (para callbacks).
     this: Option<crate::ui::main_window::MainWindowRef>,
+    /// Referencia a las traducciones (para recargar al cambiar idioma sin depender de this).
+    translations: TranslationsRef,
     /// Callback de clic en tarjeta (para recargar al cambiar idioma).
     on_card_click: Option<Rc<dyn Fn(i64)>>,
 }
@@ -33,7 +35,8 @@ pub struct HistoryView {
 impl HistoryView {
     /// Crea una nueva vista de historial vacía.
     pub fn new(translations: TranslationsRef) -> Self {
-        let t = move |key: &str| -> String { translations.borrow().t(key) };
+        let translations_clone = translations.clone();
+        let t = move |key: &str| -> String { translations_clone.borrow().t(key) };
 
         let page = Box::new(Orientation::Vertical, 0);
         page.set_hexpand(true);
@@ -116,14 +119,15 @@ impl HistoryView {
             list,
             db_path: None,
             this: None,
+            translations,
             on_card_click: None,
         }
     }
 
-    /// Configura el contexto necesario para recargar el historial.
+    /// Inicializa el contexto necesario para recargar el historial.
     /// Se llama después de crear MainWindow, ya que `this` no existe
     /// todavía en el momento de construir HistoryView.
-    pub fn set_context(
+    pub fn init(
         &mut self,
         db_path: &str,
         this: &crate::ui::main_window::MainWindowRef,
@@ -153,10 +157,6 @@ impl HistoryView {
             Some(p) => p.clone(),
             None => return,
         };
-        let this = match &self.this {
-            Some(t) => t.clone(),
-            None => return,
-        };
         let on_card_click = match &self.on_card_click {
             Some(c) => c.clone(),
             None => return,
@@ -176,10 +176,7 @@ impl HistoryView {
         };
         close_db(conn);
 
-        let translations: TranslationsRef = {
-            let w = this.borrow();
-            w.translations.clone()
-        };
+        let translations = self.translations.clone();
 
         // Vaciar filas existentes.
         while let Some(child) = self.list.first_child() {

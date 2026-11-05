@@ -525,7 +525,7 @@ impl MainWindow {
             let db_path = w.db_path.clone();
             let this_clone = this.clone();
             w.history_view
-                .set_context(&db_path, &this_clone.clone(), move |media_id| {
+                .init(&db_path, &this_clone.clone(), move |media_id| {
                     let w = this_clone.borrow();
                     w.push_current_view();
                     w.show_details(media_id, None);
