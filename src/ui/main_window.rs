@@ -519,19 +519,6 @@ impl MainWindow {
             history_view,
         }));
 
-        // Configurar el contexto del historial para poder recargar al cambiar idioma.
-        {
-            let mut w = this.borrow_mut();
-            let db_path = w.db_path.clone();
-            let this_clone = this.clone();
-            w.history_view
-                .init(&db_path, &this_clone.clone(), move |media_id| {
-                    let w = this_clone.borrow();
-                    w.push_current_view();
-                    w.show_details(media_id, None);
-                });
-        }
-
         // Cuando una descarga de póster termina, refrescar la galería para
         // mostrar la imagen descargada sin bloquear la UI.
         // Paginación infinita: cargar más medios cuando el scroll llega al final.
@@ -572,7 +559,20 @@ impl MainWindow {
                 w.stack.set_visible_child_name("history");
             }
             let this_hist2 = this_hist.clone();
-            this_hist2.borrow().history_view.load();
+            let db_path = {
+                let w = this_hist2.borrow();
+                w.db_path.clone()
+            };
+            let this_hist3 = this_hist2.clone();
+            let this_hist4 = this_hist3.clone();
+            this_hist2
+                .borrow()
+                .history_view
+                .load(&db_path, &this_hist3, move |media_id| {
+                    let w = this_hist4.borrow();
+                    w.push_current_view();
+                    w.show_details(media_id, None);
+                });
         });
 
         // Botón "Volver" de la página de historial: vuelve a la biblioteca.
@@ -624,7 +624,17 @@ impl MainWindow {
                         }
                         close_db(conn);
                         drop(w);
-                        this.borrow().history_view.load();
+                        let this_clone = this.clone();
+                        let this_clone2 = this_clone.clone();
+                        this.borrow().history_view.load(
+                            &this.borrow().db_path,
+                            &this_clone,
+                            move |media_id| {
+                                let w = this_clone2.borrow();
+                                w.push_current_view();
+                                w.show_details(media_id, None);
+                            },
+                        );
                         let w = this.borrow();
                         w.show_toast(&w.t("history.cleared"));
                     }
@@ -1524,9 +1534,6 @@ impl MainWindow {
 
         // Vista de ajustes (título, secciones, botones, filas de carpetas)
         self.settings_view.refresh_texts();
-
-        // Vista de historial: recargar tarjetas con el nuevo idioma.
-        self.history_view.refresh_texts();
     }
 
     /// Actualiza el indicador de medios indexados de la barra superior.
