@@ -135,7 +135,9 @@ pub fn show_track_dialog(
     buttons.append(&save_button);
     content.append(&buttons);
 
-    window.set_child(Some(&content));
+    // `content` ya está dentro de `scrolled`, que es el hijo de la ventana. No
+    // se vuelve a asignar como hijo directo: GTK lo rechaza porque ya tiene
+    // padre y emite un Gtk-CRITICAL en cada apertura del diálogo.
 
     // Estado compartido entre la carga inicial, la detección en segundo plano
     // y el guardado.
