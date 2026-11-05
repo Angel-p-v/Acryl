@@ -2493,12 +2493,14 @@ fn default_track_fallback_message(
     missing_audio: bool,
     missing_subtitle: bool,
 ) -> String {
+    // `GtkAlertDialog::message` se muestra como texto plano: no se deben
+    // incluir etiquetas de marcado como `<b>`, o el usuario las vería tal cual.
     let mut missing_labels = Vec::new();
     if missing_audio && let Some(key) = default_tracks.audio.as_deref() {
-        missing_labels.push(format!("<b>Audio: {key}</b>"));
+        missing_labels.push(format!("Audio: {key}"));
     }
     if missing_subtitle && let Some(key) = default_tracks.subtitle.as_deref() {
-        missing_labels.push(format!("<b>Subtítulos: {key}</b>"));
+        missing_labels.push(format!("Subtítulos: {key}"));
     }
     format!(
         "Este video no tiene estas pistas predeterminadas:\n{}\n\n¿Qué desea hacer?",
@@ -2557,10 +2559,12 @@ mod tests {
         let mensaje = default_track_fallback_message(&defaults(), true, false);
         assert!(mensaje.contains("Audio: language:ja"));
         assert!(!mensaje.contains("Subtítulos: language:es"));
+        assert!(!mensaje.contains("<b>"));
 
         let mensaje = default_track_fallback_message(&defaults(), false, true);
         assert!(!mensaje.contains("Audio: language:ja"));
         assert!(mensaje.contains("Subtítulos: language:es"));
+        assert!(!mensaje.contains("<b>"));
     }
 
     #[test]
