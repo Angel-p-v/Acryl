@@ -8,6 +8,7 @@ use crate::ui::i18n::TranslationsRef;
 use crate::ui::media_list::bind_history_card;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, FlowBox, GestureClick, Label, Orientation, ScrolledWindow};
+use std::rc::Rc;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
@@ -21,6 +22,12 @@ pub struct HistoryView {
     pub clear_button: Button,
     /// Rejilla de tarjetas.
     pub list: FlowBox,
+    /// Ruta de la base de datos (para recargar al cambiar idioma).
+    db_path: Option<String>,
+    /// Referencia a la ventana principal (para callbacks y traducciones).
+    this: Option<crate::ui::main_window::MainWindowRef>,
+    /// Callback de clic en tarjeta (para recargar al cambiar idioma).
+    on_card_click: Option<Rc<dyn Fn(i64)>>,
 }
 
 impl HistoryView {
@@ -87,7 +94,7 @@ impl HistoryView {
         list.set_selection_mode(gtk4::SelectionMode::None);
         list.set_row_spacing(0);
         list.set_column_spacing(0);
-        list.set_margin_top(0);
+        list.set_margin_top(16);
         list.set_margin_bottom(0);
         list.set_margin_start(0);
         list.set_margin_end(0);
@@ -107,23 +114,55 @@ impl HistoryView {
             back_button,
             clear_button,
             list,
+            db_path: None,
+            this: None,
+            on_card_click: None,
         }
     }
 
-    /// Carga el historial de reproducción desde la BD y lo muestra en la rejilla.
-    pub fn load(
-        &self,
+    /// Configura el contexto necesario para recargar el historial.
+    /// Se llama después de crear MainWindow, ya que `this` no existe
+    /// todavía en el momento de construir HistoryView.
+    pub fn set_context(
+        &mut self,
         db_path: &str,
         this: &crate::ui::main_window::MainWindowRef,
         on_card_click: impl Fn(i64) + 'static + Clone,
     ) {
-        let db_path_owned = db_path.to_string();
+        self.db_path = Some(db_path.to_string());
+        self.this = Some(this.clone());
+        self.on_card_click = Some(Rc::new(on_card_click));
+    }
 
-        while let Some(child) = self.list.first_child() {
-            self.list.remove(&child);
-        }
+    /// Carga el historial de reproducción desde la BD y lo muestra en la rejilla.
+    pub fn load(&mut self) {
+        self.load_history();
+    }
 
-        let mut conn = match open_db(&db_path_owned) {
+    /// Refresca los textos de la UI aplicando el idioma actual.
+    /// Se llama después de cambiar el idioma para que las tarjetas
+    /// muestren los textos traducidos sin reiniciar la aplicación.
+    pub fn refresh_texts(&self) {
+        self.load_history();
+    }
+
+    /// Carga el historial desde la BD y pinta las tarjetas con las
+    /// traducciones actuales.
+    fn load_history(&self) {
+        let db_path = match &self.db_path {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        let this = match &self.this {
+            Some(t) => t.clone(),
+            None => return,
+        };
+        let on_card_click = match &self.on_card_click {
+            Some(c) => c.clone(),
+            None => return,
+        };
+
+        let mut conn = match open_db(&db_path) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Error abriendo BD para historial: {}", e);
@@ -141,6 +180,11 @@ impl HistoryView {
             let w = this.borrow();
             w.translations.clone()
         };
+
+        // Vaciar filas existentes.
+        while let Some(child) = self.list.first_child() {
+            self.list.remove(&child);
+        }
 
         if history.is_empty() {
             let empty_box = Box::new(Orientation::Vertical, 8);
