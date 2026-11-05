@@ -6,7 +6,7 @@ use crate::db::media_repo::ListMediaOptions;
 use crate::db::{FileRepository, MediaRepository, close_db, open_db};
 use crate::ui::i18n::{Translations, TranslationsRef, language_label, load_translations};
 use crate::ui::media_details::{MediaDetails, SeasonSelection};
-use crate::ui::media_list::{MediaList, bind_history_card, build_card_widget};
+use crate::ui::media_list::{MediaList, bind_history_card};
 use crate::ui::poster_selector::{ImageChoice, PosterSelector};
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
@@ -1554,9 +1554,9 @@ impl MainWindow {
         let downloading_posters = Arc::new(Mutex::new(HashSet::new()));
 
         for entry in history.iter() {
-            // Usa exactamente el mismo código de construcción de tarjeta
-            // que la galería principal (media_list.rs).
-            let card = build_card_widget();
+            // Crea una tarjeta sin estilo visual (sin media-card): solo contenedor
+            // con texto y botones, sin fondo, bordes ni padding adicionales.
+            let card = build_history_card_widget();
             bind_history_card(
                 &card,
                 entry,
@@ -2429,6 +2429,45 @@ fn restore_window_mode(window: &AdwApplicationWindow, mode: crate::core::player:
             }
         }
     }
+}
+
+/// Crea una tarjeta de historial sin estilo visual (sin la clase `media-card`).
+/// Solo es un contenedor con texto y botones, sin fondo, bordes ni padding.
+fn build_history_card_widget() -> Box {
+    let card = Box::new(Orientation::Vertical, 6);
+    card.set_halign(gtk4::Align::Start);
+    card.set_valign(gtk4::Align::Start);
+    card.set_hexpand(true);
+    card.set_size_request(-1, 340);
+    card.set_margin_top(8);
+    card.set_margin_start(8);
+    card.set_margin_end(8);
+
+    let poster_stack = Box::new(Orientation::Vertical, 0);
+    poster_stack.set_halign(gtk4::Align::Start);
+    poster_stack.set_valign(gtk4::Align::Start);
+    poster_stack.set_size_request(160, 240);
+    card.append(&poster_stack);
+
+    let type_label = Label::new(None);
+    type_label.set_halign(gtk4::Align::Start);
+    card.append(&type_label);
+
+    let title_label = Label::new(None);
+    title_label.set_wrap(true);
+    title_label.set_max_width_chars(20);
+    title_label.set_justify(gtk4::Justification::Left);
+    title_label.set_halign(gtk4::Align::Start);
+    title_label.set_xalign(0.0);
+    title_label.set_lines(2);
+    title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    card.append(&title_label);
+
+    let year_label = Label::new(None);
+    year_label.set_halign(gtk4::Align::Start);
+    card.append(&year_label);
+
+    card
 }
 
 /// Construye el mensaje del diálogo de fallback mencionando solo las pistas

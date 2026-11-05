@@ -385,10 +385,6 @@ pub fn install_theme_css(mode: ThemeMode) {
                 c.card, c.border,
             ));
 
-            /* Tarjetas del historial: reducir el relleno interior para que el
-             * espacio entre tarjetas sea menor que el de la galería principal. */
-            css.push_str(".history-grid .media-card { padding: 2px; }\n");
-
             /* Póster de medio */
             css.push_str(&format!(
                 ".media-poster {{ border-radius: {}; }}\n",
