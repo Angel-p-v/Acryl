@@ -543,7 +543,7 @@ impl MainWindow {
         history_list.set_margin_start(0);
         history_list.set_margin_end(0);
         history_list.set_min_children_per_line(1);
-        history_list.set_max_children_per_line(1);
+        history_list.set_max_children_per_line(12);
 
         let history_scrolled = ScrolledWindow::new();
         history_scrolled.set_hexpand(true);
@@ -552,21 +552,6 @@ impl MainWindow {
         history_scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
         history_scrolled.set_child(Some(&history_list));
         history_page.append(&history_scrolled);
-
-        // Recalcular columnas cuando cambie el ancho del contenedor.
-        let history_list_for_timeout = history_list.clone();
-        let scrolled_for_history_timeout = history_scrolled.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
-            let width = scrolled_for_history_timeout.width() as f64;
-            const CARD_WIDTH: i32 = 176;
-            const SPACING: i32 = 8; // márgenes左右 de la tarjeta (4+4)
-            let card_total = CARD_WIDTH as f64 + SPACING as f64;
-            let columns = (width / card_total).floor() as i32;
-            let columns = columns.clamp(1, 12);
-            history_list_for_timeout.set_max_children_per_line(columns as u32);
-            history_list_for_timeout.set_min_children_per_line(columns as u32);
-            true.into()
-        });
 
         stack.add_titled(&history_page, Some("history"), &t("stack.history"));
 
@@ -2431,17 +2416,15 @@ fn restore_window_mode(window: &AdwApplicationWindow, mode: crate::core::player:
     }
 }
 
-/// Crea una tarjeta de historial sin estilo visual (sin la clase `media-card`).
-/// Solo es un contenedor con texto y botones, sin fondo, bordes ni padding.
+/// Crea una tarjeta de historial (solo contenedor, sin estilo visual).
 fn build_history_card_widget() -> Box {
     let card = Box::new(Orientation::Vertical, 6);
     card.set_halign(gtk4::Align::Start);
     card.set_valign(gtk4::Align::Start);
-    card.set_hexpand(true);
     card.set_size_request(-1, 340);
-    card.set_margin_top(4);
-    card.set_margin_start(4);
-    card.set_margin_end(4);
+    card.set_margin_top(2);
+    card.set_margin_start(2);
+    card.set_margin_end(2);
 
     let poster_stack = Box::new(Orientation::Vertical, 0);
     poster_stack.set_halign(gtk4::Align::Start);
