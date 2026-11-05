@@ -135,7 +135,7 @@ impl HistoryView {
     }
 
     /// Carga el historial de reproducción desde la BD y lo muestra en la rejilla.
-    pub fn load(&mut self) {
+    pub fn load(&self) {
         self.load_history();
     }
 

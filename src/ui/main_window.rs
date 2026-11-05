@@ -572,7 +572,7 @@ impl MainWindow {
                 w.stack.set_visible_child_name("history");
             }
             let this_hist2 = this_hist.clone();
-            this_hist2.borrow_mut().history_view.load();
+            this_hist2.borrow().history_view.load();
         });
 
         // Botón "Volver" de la página de historial: vuelve a la biblioteca.
@@ -624,7 +624,7 @@ impl MainWindow {
                         }
                         close_db(conn);
                         drop(w);
-                        this.borrow_mut().history_view.load();
+                        this.borrow().history_view.load();
                         let w = this.borrow();
                         w.show_toast(&w.t("history.cleared"));
                     }
