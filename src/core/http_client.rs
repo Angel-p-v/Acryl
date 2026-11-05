@@ -196,11 +196,60 @@ impl HttpClient {
         }
         Err(last_error.unwrap())
     }
+
+    /// Realiza una POST con cuerpo JSON respetando el rate limit y con
+    /// reintentos exponenciales. No usa caché (las peticiones POST suelen ser
+    /// no idempotentes o con cuerpos variables).
+    pub async fn post_text(
+        &self,
+        url: &str,
+        body: &str,
+    ) -> Result<String, reqwest::Error> {
+        self.limiter.wait().await;
+
+        let mut last_error = None;
+        for attempt in 0..=MAX_RETRIES {
+            let result = self
+                .client
+                .post(url)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(body.to_string())
+                .send()
+                .await;
+            match result {
+                Ok(response) => {
+                    let status = response.status();
+                    if status.is_success() {
+                        return response.text().await;
+                    }
+                    // Rate limit (429) o error de servidor (5xx): reintentar.
+                    if status.as_u16() == 429 || status.is_server_error() {
+                        last_error = Some(response.error_for_status().unwrap_err());
+                        let backoff = backoff(attempt);
+                        sleep(backoff).await;
+                        continue;
+                    }
+                    // Error del cliente (4xx salvo 429): no reintentar.
+                    return Err(response.error_for_status().unwrap_err());
+                }
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempt < MAX_RETRIES {
+                        let backoff = backoff(attempt);
+                        sleep(backoff).await;
+                        continue;
+                    }
+                    return Err(last_error.unwrap());
+                }
+            }
+        }
+        Err(last_error.unwrap())
+    }
 }
 
 /// Tiempo de espera exponencial: 2s, 4s, 8s, ... limitado a 30s.
 fn backoff(attempt: u32) -> Duration {
-    let secs = (2u64.checked_pow(attempt).unwrap_or(30)).min(30);
+    let secs = (2u64.checked_pow(attempt + 1).unwrap_or(30)).min(30);
     Duration::from_secs(secs)
 }
 
