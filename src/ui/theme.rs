@@ -270,6 +270,18 @@ pub fn install_theme_css(mode: ThemeMode) {
             css.push_str("overlay { background-color: transparent; }\n");
             css.push_str("stack { background-color: transparent; }\n");
 
+            /* Historial: eliminar cualquier fondo oscuro del contenedor y asegurar
+             * que las tarjetas se vean sobre el fondo de la aplicación. */
+            css.push_str(".history-grid { background-color: transparent; }\n");
+            css.push_str(&format!(
+                ".history-grid .media-card {{ background-color: {}; }}\n",
+                c.card,
+            ));
+            css.push_str(&format!(
+                ".history-grid .media-card:hover {{ background-color: {}; }}\n",
+                c.surface,
+            ));
+
             /* Cabecera de detalles. */
             css.push_str(&format!(
                 ".details-header {{ background-color: {}; border-radius: {}; padding: 0; margin-bottom: 24px; }}\n",

@@ -7,7 +7,7 @@
 //! `GtkGridView` organiza los ítems en múltiples columnas como una rejilla.
 
 use crate::core::poster_service::{PosterService, cached_path};
-use crate::db::media_repo::Media;
+use crate::db::media_repo::{Media, PlaybackHistoryEntry};
 use crate::ui::i18n::TranslationsRef;
 use crate::ui::poster::{placeholder_widget, poster_picture};
 use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
@@ -25,6 +25,10 @@ use std::sync::{Arc, Mutex, mpsc};
 /// Tamaño base optimizado para pantallas de portátil (1366px+).
 const CARD_POSTER_WIDTH: i32 = 160;
 const CARD_POSTER_HEIGHT: i32 = 240;
+
+/// Tamaño del póster en las tarjetas del historial (grande).
+const HISTORY_CARD_POSTER_WIDTH: i32 = 200;
+const HISTORY_CARD_POSTER_HEIGHT: i32 = 300;
 
 /// Ancho y alto de la tarjeta completa (póster + padding + textos).
 const CARD_WIDTH: i32 = CARD_POSTER_WIDTH + 16;
@@ -500,7 +504,7 @@ fn bind_card(
 }
 
 /// Crea una tarjeta vacía con la estructura base para ser rellenada en `bind_card`.
-fn build_card_widget() -> Box {
+pub fn build_card_widget() -> Box {
     let card = Box::new(Orientation::Vertical, 6);
     card.add_css_class("media-card");
     card.set_halign(gtk4::Align::Start);
@@ -544,6 +548,139 @@ fn build_card_widget() -> Box {
     card.append(&year_label);
 
     card
+}
+
+/// Rellena una tarjeta de historial con el contenido completo (póster, tipo, título, año,
+/// temporada/episodio, fecha y progreso). Sin estilo visual CSS adicional.
+pub fn bind_history_card(
+    card: &Box,
+    entry: &PlaybackHistoryEntry,
+    translations: &TranslationsRef,
+    download_tx: &mpsc::Sender<()>,
+    downloading_posters: &Arc<Mutex<HashSet<String>>>,
+) {
+    // Limpiar hijos existentes para reutilizar el widget sin fugas.
+    while let Some(child) = card.first_child() {
+        card.remove(&child);
+    }
+
+    // Póster.
+    let poster_stack = Box::new(Orientation::Vertical, 0);
+    poster_stack.set_halign(gtk4::Align::Start);
+    poster_stack.set_valign(gtk4::Align::Start);
+    poster_stack.set_size_request(HISTORY_CARD_POSTER_WIDTH, HISTORY_CARD_POSTER_HEIGHT);
+
+    let poster_url = entry.poster_path.as_deref();
+    let is_cached = poster_url.and_then(cached_path).is_some();
+    let is_downloading = poster_url
+        .map(|url| downloading_posters.lock().unwrap().contains(url))
+        .unwrap_or(false);
+
+    match (poster_url, is_cached, is_downloading) {
+        (Some(url), true, _) => {
+            // Póster en caché: decodificar y mostrar.
+            if let Some(cache_path) = cached_path(url) {
+                if let Ok(pixbuf) = GtkPixbuf::from_file_at_scale(
+                    &cache_path,
+                    HISTORY_CARD_POSTER_WIDTH,
+                    HISTORY_CARD_POSTER_HEIGHT,
+                    true,
+                ) {
+                    let picture = poster_picture(
+                        &pixbuf,
+                        HISTORY_CARD_POSTER_WIDTH,
+                        HISTORY_CARD_POSTER_HEIGHT,
+                    );
+                    picture.add_css_class("media-poster");
+                    poster_stack.append(&picture);
+                } else {
+                    let placeholder =
+                        placeholder_widget(HISTORY_CARD_POSTER_WIDTH, HISTORY_CARD_POSTER_HEIGHT);
+                    placeholder.add_css_class("media-poster");
+                    poster_stack.append(&placeholder);
+                }
+            } else {
+                let placeholder =
+                    placeholder_widget(HISTORY_CARD_POSTER_WIDTH, HISTORY_CARD_POSTER_HEIGHT);
+                placeholder.add_css_class("media-poster");
+                poster_stack.append(&placeholder);
+            }
+        }
+        (Some(_url), false, true) => {
+            // Se está descargando: mostrar spinner.
+            let spinner = gtk4::Spinner::new();
+            spinner.start();
+            spinner.set_size_request(HISTORY_CARD_POSTER_WIDTH, HISTORY_CARD_POSTER_HEIGHT);
+            spinner.add_css_class("media-poster");
+            poster_stack.append(&spinner);
+        }
+        _ => {
+            // No hay póster, no está en caché ni se está descargando:
+            // lanzar descarga individual y mostrar spinner mientras tanto.
+            if let Some(url) = poster_url {
+                let url_owned = url.to_string();
+                downloading_posters
+                    .lock()
+                    .unwrap()
+                    .insert(url_owned.clone());
+                let tx = download_tx.clone();
+                let downloading_posters_clone = Arc::clone(downloading_posters);
+
+                std::thread::spawn(move || {
+                    let service = PosterService::new();
+                    let runtime = match tokio::runtime::Runtime::new() {
+                        Ok(rt) => rt,
+                        Err(_) => {
+                            let _ = tx.send(());
+                            return;
+                        }
+                    };
+                    let _ = runtime.block_on(service.download_async(&url_owned));
+                    let _ = downloading_posters_clone.lock().unwrap().remove(&url_owned);
+                    let _ = tx.send(());
+                });
+            }
+
+            let spinner = gtk4::Spinner::new();
+            spinner.start();
+            spinner.set_size_request(HISTORY_CARD_POSTER_WIDTH, HISTORY_CARD_POSTER_HEIGHT);
+            spinner.add_css_class("media-poster");
+            poster_stack.append(&spinner);
+        }
+    }
+    card.append(&poster_stack);
+
+    // Etiqueta de tipo.
+    let type_label_text = match entry.r#type.as_str() {
+        "anime" => translations.borrow().t("media.type.anime"),
+        "series" => translations.borrow().t("media.type.series"),
+        "movie" => translations.borrow().t("media.type.movie"),
+        other => other.to_string(),
+    };
+    let type_label = Label::new(Some(&type_label_text));
+    type_label.set_halign(gtk4::Align::Start);
+    type_label.add_css_class("card-type-label");
+    card.append(&type_label);
+
+    // Título.
+    let title_label = Label::new(Some(&entry.title));
+    title_label.set_wrap(true);
+    title_label.set_max_width_chars(20);
+    title_label.set_justify(gtk4::Justification::Left);
+    title_label.set_halign(gtk4::Align::Start);
+    title_label.set_xalign(0.0);
+    title_label.set_lines(2);
+    title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    title_label.add_css_class("poster-title");
+    card.append(&title_label);
+
+    // Año.
+    if let Some(year) = entry.year {
+        let year_label = Label::new(Some(&format!("{year}")));
+        year_label.add_css_class("poster-year");
+        year_label.set_halign(gtk4::Align::Start);
+        card.append(&year_label);
+    }
 }
 
 #[cfg(test)]
