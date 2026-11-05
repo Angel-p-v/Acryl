@@ -163,4 +163,45 @@ mod tests {
             message: "error de prueba".to_string(),
         };
     }
+
+    #[test]
+    fn is_video_event_detecta_archivos_de_video() {
+        use notify::Event;
+        use notify::EventKind;
+
+        // Evento con ruta de vídeo.
+        let evento_video = Event {
+            kind: EventKind::Any,
+            paths: vec![std::path::PathBuf::from("/tmp/test/video.mkv")],
+            attrs: Default::default(),
+        };
+        assert!(is_video_event(&evento_video));
+
+        // Evento con ruta de vídeo en mayúsculas.
+        let evento_video_may = Event {
+            kind: EventKind::Any,
+            paths: vec![std::path::PathBuf::from("/tmp/test/video.MP4")],
+            attrs: Default::default(),
+        };
+        assert!(is_video_event(&evento_video_may));
+
+        // Evento con ruta de no-vídeo.
+        let evento_no_video = Event {
+            kind: EventKind::Any,
+            paths: vec![std::path::PathBuf::from("/tmp/test/documento.txt")],
+            attrs: Default::default(),
+        };
+        assert!(!is_video_event(&evento_no_video));
+
+        // Evento con múltiples rutas, una es vídeo.
+        let evento_mixto = Event {
+            kind: EventKind::Any,
+            paths: vec![
+                std::path::PathBuf::from("/tmp/test/documento.txt"),
+                std::path::PathBuf::from("/tmp/test/pelicula.mkv"),
+            ],
+            attrs: Default::default(),
+        };
+        assert!(is_video_event(&evento_mixto));
+    }
 }
