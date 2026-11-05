@@ -559,7 +559,7 @@ impl MainWindow {
         glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
             let width = scrolled_for_history_timeout.width() as f64;
             const CARD_WIDTH: i32 = 176;
-            const SPACING: i32 = 0; // espacio proporcionado por márgenes de la tarjeta
+            const SPACING: i32 = 8; // márgenes左右 de la tarjeta (4+4)
             let card_total = CARD_WIDTH as f64 + SPACING as f64;
             let columns = (width / card_total).floor() as i32;
             let columns = columns.clamp(1, 12);
@@ -2439,9 +2439,9 @@ fn build_history_card_widget() -> Box {
     card.set_valign(gtk4::Align::Start);
     card.set_hexpand(true);
     card.set_size_request(-1, 340);
-    card.set_margin_top(8);
-    card.set_margin_start(8);
-    card.set_margin_end(8);
+    card.set_margin_top(4);
+    card.set_margin_start(4);
+    card.set_margin_end(4);
 
     let poster_stack = Box::new(Orientation::Vertical, 0);
     poster_stack.set_halign(gtk4::Align::Start);
