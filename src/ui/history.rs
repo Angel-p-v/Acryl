@@ -222,7 +222,7 @@ fn build_history_card_widget() -> Box {
     card.set_halign(gtk4::Align::Start);
     card.set_valign(gtk4::Align::Start);
     card.set_hexpand(true);
-    card.set_size_request(-1, 260);
+    card.set_size_request(-1, 320);
     card.set_margin_top(2);
     card.set_margin_start(2);
     card.set_margin_end(2);
@@ -230,7 +230,7 @@ fn build_history_card_widget() -> Box {
     let poster_stack = Box::new(Orientation::Vertical, 0);
     poster_stack.set_halign(gtk4::Align::Start);
     poster_stack.set_valign(gtk4::Align::Start);
-    poster_stack.set_size_request(160, 240);
+    poster_stack.set_size_request(180, 270);
     card.append(&poster_stack);
 
     let type_label = Label::new(None);
