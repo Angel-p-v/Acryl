@@ -85,8 +85,8 @@ impl HistoryView {
         list.set_valign(gtk4::Align::Start);
         list.set_homogeneous(false);
         list.set_selection_mode(gtk4::SelectionMode::None);
-        list.set_row_spacing(4);
-        list.set_column_spacing(4);
+        list.set_row_spacing(2);
+        list.set_column_spacing(2);
         list.set_margin_top(0);
         list.set_margin_bottom(0);
         list.set_margin_start(0);
@@ -222,15 +222,15 @@ fn build_history_card_widget() -> Box {
     card.set_halign(gtk4::Align::Start);
     card.set_valign(gtk4::Align::Start);
     card.set_hexpand(true);
-    card.set_size_request(-1, 300);
-    card.set_margin_top(4);
-    card.set_margin_start(4);
-    card.set_margin_end(4);
+    card.set_size_request(-1, 260);
+    card.set_margin_top(2);
+    card.set_margin_start(2);
+    card.set_margin_end(2);
 
     let poster_stack = Box::new(Orientation::Vertical, 0);
     poster_stack.set_halign(gtk4::Align::Start);
     poster_stack.set_valign(gtk4::Align::Start);
-    poster_stack.set_size_request(120, 180);
+    poster_stack.set_size_request(160, 240);
     card.append(&poster_stack);
 
     let type_label = Label::new(None);
