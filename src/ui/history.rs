@@ -1,6 +1,7 @@
 //! Vista de historial de reproducción.
-//! Muestra las tarjetas de medios reproducidos sin ningún estilo visual:
-//! sin bordes, fondo, padding, clases CSS ni alineaciones adicionales.
+//! Muestra las tarjetas de medios reproducidos con estilo visual completo:
+//! tarjetas con fondo, borde y esquinas redondeadas, póster, título, tipo,
+//! año, temporada/episodio y fecha de progreso.
 
 use crate::db::{MediaRepository, close_db, open_db};
 use crate::ui::i18n::TranslationsRef;
@@ -28,6 +29,7 @@ impl HistoryView {
         let t = move |key: &str| -> String { translations.borrow().t(key) };
 
         let page = Box::new(Orientation::Vertical, 0);
+        page.set_hexpand(true);
         page.set_vexpand(true);
 
         // Cabecera.
@@ -78,7 +80,24 @@ impl HistoryView {
 
         // Rejilla de tarjetas.
         let list = FlowBox::new();
+        list.add_css_class("history-grid");
+        list.set_hexpand(true);
+        list.set_valign(gtk4::Align::Start);
+        list.set_homogeneous(false);
+        list.set_selection_mode(gtk4::SelectionMode::None);
+        list.set_row_spacing(4);
+        list.set_column_spacing(4);
+        list.set_margin_top(0);
+        list.set_margin_bottom(0);
+        list.set_margin_start(0);
+        list.set_margin_end(0);
+        list.set_min_children_per_line(1);
+        list.set_max_children_per_line(12);
+
         let scrolled = ScrolledWindow::new();
+        scrolled.set_hexpand(true);
+        scrolled.set_vexpand(true);
+        scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
         scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
         scrolled.set_child(Some(&list));
         page.append(&scrolled);
@@ -202,6 +221,7 @@ fn build_history_card_widget() -> Box {
     card.add_css_class("media-card");
     card.set_halign(gtk4::Align::Start);
     card.set_valign(gtk4::Align::Start);
+    card.set_hexpand(true);
     card.set_size_request(-1, 300);
     card.set_margin_top(4);
     card.set_margin_start(4);
