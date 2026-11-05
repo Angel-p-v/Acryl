@@ -31,18 +31,47 @@ impl HistoryView {
         page.set_vexpand(true);
 
         // Cabecera.
-        let header = Box::new(Orientation::Vertical, 0);
+        let header = Box::new(Orientation::Vertical, 8);
+        header.set_halign(gtk4::Align::Fill);
+        header.set_valign(gtk4::Align::Start);
+        header.set_margin_top(24);
+        header.set_margin_start(24);
+        header.set_margin_end(24);
+
         let title = Label::new(Some(&t("history.title")));
+        title.set_halign(gtk4::Align::Start);
+        title.set_hexpand(true);
+        title.set_xalign(0.0);
+        title.add_css_class("page-title");
         header.append(&title);
+
         let subtitle = Label::new(Some(&t("history.subtitle")));
+        subtitle.set_halign(gtk4::Align::Start);
+        subtitle.set_xalign(0.0);
+        subtitle.set_wrap(true);
+        subtitle.add_css_class("dim-label");
         header.append(&subtitle);
 
         // Fila de acciones.
         let actions = Box::new(Orientation::Horizontal, 0);
+        actions.set_hexpand(true);
+        actions.set_halign(gtk4::Align::Fill);
+        actions.set_valign(gtk4::Align::Start);
+        actions.set_margin_top(12);
+
         let back_button = Button::with_label(&t("history.back"));
+        back_button.add_css_class("flat-button");
+        back_button.set_valign(gtk4::Align::Center);
         actions.append(&back_button);
+
         let clear_button = Button::with_label(&t("history.clear"));
+        clear_button.add_css_class("flat-button");
+        clear_button.add_css_class("button.danger");
+        clear_button.set_valign(gtk4::Align::Center);
+        clear_button.set_hexpand(true);
+        clear_button.set_halign(gtk4::Align::End);
         actions.append(&clear_button);
+
         header.append(&actions);
 
         page.append(&header);
