@@ -184,18 +184,36 @@ impl HistoryView {
 
 /// Crea una tarjeta de historial sin estilo visual.
 fn build_history_card_widget() -> Box {
-    let card = Box::new(Orientation::Vertical, 0);
+    let card = Box::new(Orientation::Vertical, 6);
+    card.set_halign(gtk4::Align::Start);
+    card.set_valign(gtk4::Align::Start);
+    card.set_size_request(-1, 300);
+    card.set_margin_top(4);
+    card.set_margin_start(4);
+    card.set_margin_end(4);
 
     let poster_stack = Box::new(Orientation::Vertical, 0);
+    poster_stack.set_halign(gtk4::Align::Start);
+    poster_stack.set_valign(gtk4::Align::Start);
+    poster_stack.set_size_request(120, 180);
     card.append(&poster_stack);
 
     let type_label = Label::new(None);
+    type_label.set_halign(gtk4::Align::Start);
     card.append(&type_label);
 
     let title_label = Label::new(None);
+    title_label.set_wrap(true);
+    title_label.set_max_width_chars(20);
+    title_label.set_justify(gtk4::Justification::Left);
+    title_label.set_halign(gtk4::Align::Start);
+    title_label.set_xalign(0.0);
+    title_label.set_lines(2);
+    title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     card.append(&title_label);
 
     let year_label = Label::new(None);
+    year_label.set_halign(gtk4::Align::Start);
     card.append(&year_label);
 
     card
