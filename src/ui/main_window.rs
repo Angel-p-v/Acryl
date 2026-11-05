@@ -2,27 +2,24 @@
 
 use crate::core::language::{LanguageIdentity, identity_from_track_key};
 use crate::core::metadata::{ImageOption, RefreshMetadataResult};
-use crate::db::media_repo::ListMediaOptions;
-use crate::db::{FileRepository, MediaRepository, close_db, open_db};
+use crate::db::media_repo::{ListMediaOptions, MediaRepository};
+use crate::db::{FileRepository, close_db, open_db};
+use crate::ui::history::HistoryView;
 use crate::ui::i18n::{Translations, TranslationsRef, language_label, load_translations};
 use crate::ui::media_details::{MediaDetails, SeasonSelection};
-use crate::ui::media_list::{MediaList, bind_history_card};
+use crate::ui::media_list::MediaList;
 use crate::ui::poster_selector::{ImageChoice, PosterSelector};
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
 use gtk4::{
-    Box, Button, CenterBox, FlowBox, GestureClick, Label, Orientation, Revealer, ScrolledWindow,
-    SearchEntry, Spinner, Stack, gio, glib,
+    Box, Button, CenterBox, FlowBox, Label, Orientation, Revealer, ScrolledWindow, SearchEntry,
+    Spinner, Stack, gio, glib,
 };
 use libadwaita::prelude::*;
 use libadwaita::{ApplicationWindow as AdwApplicationWindow, StatusPage, Toast, ToastOverlay};
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
 use std::rc::Rc;
-use std::sync::{
-    Arc, Mutex,
-    mpsc::{self, TryRecvError},
-};
+use std::sync::mpsc::{self, TryRecvError};
 use std::time::Duration;
 
 /// Vista recordada en la pila de navegación. Permite que «Volver» y la salida
@@ -87,7 +84,7 @@ pub struct MainWindow {
     db_path: String,
     metadata_sync_running: Rc<Cell<bool>>,
     toast_overlay: ToastOverlay,
-    translations: TranslationsRef,
+    pub(crate) translations: TranslationsRef,
     /// Chips de categorías de la página de filtro.
     categories_flow: FlowBox,
     /// Mensaje mostrado cuando todavía no hay categorías extraídas.
@@ -140,15 +137,11 @@ pub struct MainWindow {
     current_favorite_filter: Rc<RefCell<Option<bool>>>,
     /// Filtro de visto/no visto activo (None = sin filtro).
     current_watched_filter: Rc<RefCell<Option<bool>>>,
-    /// Rejilla de tarjetas del historial de reproducción.
-    history_list: FlowBox,
-    /// Botón «Volver» de la página de historial.
-    history_back_button: Button,
-    /// Botón para borrar todo el historial de reproducción.
-    history_clear_button: Button,
+    /// Vista de historial de reproducción.
+    history_view: HistoryView,
 }
 
-type MainWindowRef = Rc<RefCell<MainWindow>>;
+pub type MainWindowRef = Rc<RefCell<MainWindow>>;
 
 impl MainWindow {
     pub fn new(app: &gtk4::Application, config: crate::Config) -> MainWindowRef {
@@ -476,84 +469,8 @@ impl MainWindow {
         );
 
         // --- Página de historial de reproducción ---
-        let history_page = Box::new(Orientation::Vertical, 0);
-        history_page.set_hexpand(true);
-        history_page.set_vexpand(true);
-
-        let history_header = Box::new(Orientation::Vertical, 8);
-        history_header.set_halign(gtk4::Align::Fill);
-        history_header.set_valign(gtk4::Align::Start);
-        history_header.set_margin_top(24);
-        history_header.set_margin_start(24);
-        history_header.set_margin_end(24);
-
-        let history_title = Label::new(Some(&t("history.title")));
-        history_title.set_halign(gtk4::Align::Start);
-        history_title.set_hexpand(true);
-        history_title.set_xalign(0.0);
-        history_title.add_css_class("page-title");
-        history_header.append(&history_title);
-
-        let history_subtitle = Label::new(Some(&t("history.subtitle")));
-        history_subtitle.set_halign(gtk4::Align::Start);
-        history_subtitle.set_xalign(0.0);
-        history_subtitle.set_wrap(true);
-        history_subtitle.add_css_class("dim-label");
-        history_header.append(&history_subtitle);
-
-        // Fila de acciones: "Volver" a la izquierda, "Borrar historial" a la derecha.
-        let history_actions = Box::new(Orientation::Horizontal, 0);
-        history_actions.set_hexpand(true);
-        history_actions.set_halign(gtk4::Align::Fill);
-        history_actions.set_valign(gtk4::Align::Start);
-        history_actions.set_margin_top(12);
-
-        let history_back_button = Button::with_label(&t("history.back"));
-        history_back_button.add_css_class("flat-button");
-        history_back_button.set_valign(gtk4::Align::Center);
-        history_actions.append(&history_back_button);
-
-        let history_clear_button = Button::with_label(&t("history.clear"));
-        history_clear_button.add_css_class("flat-button");
-        history_clear_button.add_css_class("button.danger");
-        history_clear_button.set_valign(gtk4::Align::Center);
-        history_clear_button.set_hexpand(true);
-        history_clear_button.set_halign(gtk4::Align::End);
-        history_actions.append(&history_clear_button);
-
-        history_header.append(&history_actions);
-
-        history_page.append(&history_header);
-
-        // --- Rejilla de tarjetas del historial (GtkFlowBox) ---
-        // Se usa GtkFlowBox para que las tarjetas se distribuyan en múltiples
-        // columnas, se envuelvan automáticamente y se alineen a la izquierda,
-        // igual que una rejilla de tarjetas compacta. El espaciado entre
-        // filas y columnas es pequeño para que las tarjetas aparezcan juntas.
-        let history_list = FlowBox::new();
-        history_list.add_css_class("history-grid");
-        history_list.set_hexpand(true);
-        history_list.set_valign(gtk4::Align::Start);
-        history_list.set_homogeneous(false);
-        history_list.set_selection_mode(gtk4::SelectionMode::None);
-        history_list.set_row_spacing(0);
-        history_list.set_column_spacing(0);
-        history_list.set_margin_top(0);
-        history_list.set_margin_bottom(0);
-        history_list.set_margin_start(0);
-        history_list.set_margin_end(0);
-        history_list.set_min_children_per_line(1);
-        history_list.set_max_children_per_line(12);
-
-        let history_scrolled = ScrolledWindow::new();
-        history_scrolled.set_hexpand(true);
-        history_scrolled.set_vexpand(true);
-        history_scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
-        history_scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
-        history_scrolled.set_child(Some(&history_list));
-        history_page.append(&history_scrolled);
-
-        stack.add_titled(&history_page, Some("history"), &t("stack.history"));
+        let history_view = HistoryView::new(translations.clone());
+        stack.add_titled(&history_view.page, Some("history"), &t("stack.history"));
 
         stack.set_visible_child_name("list");
 
@@ -599,9 +516,7 @@ impl MainWindow {
             current_category_name: Rc::new(RefCell::new(None)),
             current_favorite_filter: Rc::new(RefCell::new(None)),
             current_watched_filter: Rc::new(RefCell::new(None)),
-            history_list,
-            history_back_button,
-            history_clear_button,
+            history_view,
         }));
 
         // Cuando una descarga de póster termina, refrescar la galería para
@@ -643,20 +558,38 @@ impl MainWindow {
                 w.push_current_view();
                 w.stack.set_visible_child_name("history");
             }
-            Self::load_history(&this_hist);
+            let this_hist2 = this_hist.clone();
+            let db_path = {
+                let w = this_hist2.borrow();
+                w.db_path.clone()
+            };
+            let this_hist3 = this_hist.clone();
+            let this_hist4 = this_hist3.clone();
+            this_hist2
+                .borrow()
+                .history_view
+                .load(&db_path, &this_hist3, move |media_id| {
+                    let w = this_hist4.borrow();
+                    w.push_current_view();
+                    w.show_details(media_id, None);
+                });
         });
 
         // Botón "Volver" de la página de historial: vuelve a la biblioteca.
         let this_hist_back = this.clone();
-        this.borrow().history_back_button.connect_clicked(move |_| {
-            let w = this_hist_back.borrow();
-            w.show_list();
-        });
+        this.borrow()
+            .history_view
+            .back_button
+            .connect_clicked(move |_| {
+                let w = this_hist_back.borrow();
+                w.show_list();
+            });
 
         // Botón "Borrar historial": pide confirmación y vacía el historial.
         let this_hist_clear = this.clone();
         this.borrow()
-            .history_clear_button
+            .history_view
+            .clear_button
             .connect_clicked(move |_| {
                 let w = this_hist_clear.borrow();
                 let window = w.window.clone();
@@ -691,7 +624,15 @@ impl MainWindow {
                         }
                         close_db(conn);
                         drop(w);
-                        Self::load_history(&this);
+                        let w2 = this.borrow();
+                        let db_path = w2.db_path.clone();
+                        let this3 = this.clone();
+                        let this4 = this3.clone();
+                        w2.history_view.load(&db_path, &this3, move |media_id| {
+                            let w = this4.borrow();
+                            w.push_current_view();
+                            w.show_details(media_id, None);
+                        });
                         let w = this.borrow();
                         w.show_toast(&w.t("history.cleared"));
                     }
@@ -1484,122 +1425,6 @@ impl MainWindow {
         Self::load_media_page(this, offset);
     }
 
-    /// Carga el historial de reproducción desde la BD y lo muestra en la página
-    /// de historial. Cada tarjeta muestra el medio reproducido; al hacer clic se
-    /// navega a sus detalles (con la temporada seleccionada si es un episodio).
-    fn load_history(this: &MainWindowRef) {
-        let db_path = {
-            let w = this.borrow();
-            w.db_path.clone()
-        };
-
-        let mut conn = match open_db(&db_path) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Error abriendo BD para historial: {}", e);
-                return;
-            }
-        };
-        let history = {
-            let mut repo = MediaRepository::new(&mut conn);
-            repo.list_playback_history(Some(100), Some(0))
-                .unwrap_or_default()
-        };
-        close_db(conn);
-
-        let w = this.borrow_mut();
-
-        // Limpiar filas existentes del historial.
-        while let Some(child) = w.history_list.first_child() {
-            w.history_list.remove(&child);
-        }
-
-        if history.is_empty() {
-            let empty_box = Box::new(Orientation::Vertical, 8);
-            empty_box.set_halign(gtk4::Align::Center);
-            empty_box.set_valign(gtk4::Align::Center);
-            empty_box.set_vexpand(true);
-            empty_box.set_margin_top(48);
-
-            let empty_label = Label::new(Some(&w.t("history.empty")));
-            empty_label.set_halign(gtk4::Align::Center);
-            empty_label.set_xalign(0.5);
-            empty_label.add_css_class("dim-label");
-
-            empty_box.append(&empty_label);
-            w.history_list.append(&empty_box);
-            return;
-        }
-
-        let translations = w.translations.clone();
-        let this_clone = this.clone();
-
-        // Canales para descarga de pósters (igual que media_list.rs).
-        let (download_tx, _download_rx) = mpsc::channel();
-        let downloading_posters = Arc::new(Mutex::new(HashSet::new()));
-
-        for entry in history.iter() {
-            // Crea una tarjeta sin estilo visual (sin media-card): solo contenedor
-            // con texto y botones, sin fondo, bordes ni padding adicionales.
-            let card = build_history_card_widget();
-            bind_history_card(
-                &card,
-                entry,
-                &translations,
-                &download_tx,
-                &downloading_posters,
-            );
-
-            // Temporada y episodio si es una serie/anime.
-            if let (Some(season), Some(episode)) = (entry.season, entry.episode)
-                && (entry.r#type == "series" || entry.r#type == "anime")
-            {
-                let ep_label_text = format!(
-                    "S{:02}E{:02} – {}",
-                    season,
-                    episode,
-                    entry.episode_title.as_deref().unwrap_or(&entry.title)
-                );
-                let ep_label = Label::new(Some(&ep_label_text));
-                ep_label.set_wrap(true);
-                ep_label.set_max_width_chars(20);
-                ep_label.set_justify(gtk4::Justification::Left);
-                ep_label.set_halign(gtk4::Align::Start);
-                ep_label.set_xalign(0.0);
-                ep_label.set_lines(1);
-                ep_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-                ep_label.add_css_class("dim-label");
-                card.append(&ep_label);
-            }
-
-            // Fecha y progreso de reproducción.
-            let progress = if entry.duration > 0.0 {
-                let pct = (entry.position / entry.duration * 100.0) as u32;
-                format!("{}%", pct)
-            } else {
-                "—".to_string()
-            };
-            let date_label = Label::new(Some(&format!("{} · {}", entry.played_at, progress)));
-            date_label.set_halign(gtk4::Align::Start);
-            date_label.set_xalign(0.0);
-            date_label.add_css_class("dim-label");
-            card.append(&date_label);
-
-            // Clic en la tarjeta: navega a los detalles del medio reproducido.
-            let click = GestureClick::new();
-            let media_id = entry.media_id;
-            let this_for_click = this_clone.clone();
-            click.connect_pressed(move |_, _, _, _| {
-                let w = this_for_click.borrow();
-                w.push_current_view();
-                w.show_details(media_id, None);
-            });
-            card.add_controller(click);
-
-            w.history_list.append(&card);
-        }
-    }
-
     /// Refresca la barra que indica la categoría activa y el botón «Ver todo».
     fn update_filter_bar(&self) {
         let name = self.current_category_name.borrow().clone();
@@ -1650,7 +1475,8 @@ impl MainWindow {
         self.categories_button
             .set_label(&self.t("button.categories"));
         self.history_button.set_label(&self.t("button.history"));
-        self.history_clear_button
+        self.history_view
+            .clear_button
             .set_label(&self.t("history.clear"));
         self.clear_category_button
             .set_label(&self.t("button.clear_category"));
@@ -2414,43 +2240,6 @@ fn restore_window_mode(window: &AdwApplicationWindow, mode: crate::core::player:
             }
         }
     }
-}
-
-/// Crea una tarjeta de historial (solo contenedor, sin estilo visual).
-fn build_history_card_widget() -> Box {
-    let card = Box::new(Orientation::Vertical, 6);
-    card.set_halign(gtk4::Align::Start);
-    card.set_valign(gtk4::Align::Start);
-    card.set_size_request(-1, 340);
-    card.set_margin_top(2);
-    card.set_margin_start(2);
-    card.set_margin_end(2);
-
-    let poster_stack = Box::new(Orientation::Vertical, 0);
-    poster_stack.set_halign(gtk4::Align::Start);
-    poster_stack.set_valign(gtk4::Align::Start);
-    poster_stack.set_size_request(160, 240);
-    card.append(&poster_stack);
-
-    let type_label = Label::new(None);
-    type_label.set_halign(gtk4::Align::Start);
-    card.append(&type_label);
-
-    let title_label = Label::new(None);
-    title_label.set_wrap(true);
-    title_label.set_max_width_chars(20);
-    title_label.set_justify(gtk4::Justification::Left);
-    title_label.set_halign(gtk4::Align::Start);
-    title_label.set_xalign(0.0);
-    title_label.set_lines(2);
-    title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    card.append(&title_label);
-
-    let year_label = Label::new(None);
-    year_label.set_halign(gtk4::Align::Start);
-    card.append(&year_label);
-
-    card
 }
 
 /// Construye el mensaje del diálogo de fallback mencionando solo las pistas
