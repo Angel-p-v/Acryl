@@ -4,7 +4,7 @@ use crate::core::language::{LanguageIdentity, identity_from_track_key};
 use crate::core::metadata::{ImageOption, RefreshMetadataResult};
 use crate::core::poster_service::cached_path;
 use crate::db::media_repo::ListMediaOptions;
-use crate::db::{FileRepository, MediaRepository, PlaybackHistoryEntry, close_db, open_db};
+use crate::db::{FileRepository, MediaRepository, close_db, open_db};
 use crate::ui::i18n::{Translations, TranslationsRef, language_label, load_translations};
 use crate::ui::media_details::{MediaDetails, SeasonSelection};
 use crate::ui::media_list::MediaList;
@@ -14,9 +14,8 @@ use crate::ui::settings_window::SettingsView;
 use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
 use gtk4::{
-    Box, Button, CenterBox, FlowBox, GestureClick, GridView, Label, Orientation, Revealer,
-    ScrolledWindow, SearchEntry, SignalListItemFactory, SingleSelection, Spinner, Stack,
-    StringObject, gio, glib,
+    Box, Button, CenterBox, FlowBox, GestureClick, Label, Orientation, Revealer, ScrolledWindow,
+    SearchEntry, Spinner, Stack, gio, glib,
 };
 use libadwaita::prelude::*;
 use libadwaita::{ApplicationWindow as AdwApplicationWindow, StatusPage, Toast, ToastOverlay};
@@ -140,20 +139,8 @@ pub struct MainWindow {
     current_favorite_filter: Rc<RefCell<Option<bool>>>,
     /// Filtro de visto/no visto activo (None = sin filtro).
     current_watched_filter: Rc<RefCell<Option<bool>>>,
-    /// Rejilla de tarjetas del historial de reproducción (GtkGridView).
-    history_grid: GridView,
-    /// Modelo de datos del historial de reproducción.
-    history_store: gio::ListStore,
-    /// Entradas de historial completas, indexadas igual que el store.
-    history_entries: Rc<RefCell<Vec<PlaybackHistoryEntry>>>,
-    /// Contenedor interno del área de historial (rejilla o estado vacío).
-    #[allow(dead_code)]
-    history_content: Box,
-    /// Estado vacío del historial (oculto cuando hay entradas).
-    history_empty: Box,
-    /// Etiqueta del estado vacío.
-    #[allow(dead_code)]
-    history_empty_label: Label,
+    /// Rejilla de tarjetas del historial de reproducción.
+    history_list: FlowBox,
     /// Botón «Volver» de la página de historial.
     history_back_button: Button,
     /// Botón para borrar todo el historial de reproducción.
@@ -537,97 +524,46 @@ impl MainWindow {
 
         history_page.append(&history_header);
 
-        // --- Rejilla de tarjetas del historial (GtkGridView) ---
-        // Se usa GtkGridView en lugar de GtkBox vertical para que las tarjetas
-        // se distribuyan en múltiples columnas, se envuelvan automáticamente y
-        // mantengan un espaciado uniforme, igual que la biblioteca principal.
-        let history_store = gio::ListStore::new::<StringObject>();
-        let history_entries: Rc<RefCell<Vec<PlaybackHistoryEntry>>> =
-            Rc::new(RefCell::new(Vec::new()));
-
-        let factory = SignalListItemFactory::new();
-        let factory_clone = factory.clone();
-        let entries_for_bind = history_entries.clone();
-        let translations_for_bind = translations.clone();
-        // `this` no existe aún (se crea al final de `new`); se rellena después.
-        let this_for_bind: Rc<RefCell<Option<MainWindowRef>>> = Rc::new(RefCell::new(None));
-        let this_for_bind_clone = this_for_bind.clone();
-
-        factory.connect_setup(move |_, list_item| {
-            let card = build_history_card_widget();
-            glib::Object::set_property(list_item, "child", &card);
-        });
-
-        factory.connect_bind(move |_, list_item| {
-            let position: u32 = list_item.property("position");
-            let position = position as usize;
-            let entries = entries_for_bind.borrow();
-            let Some(entry) = entries.get(position) else {
-                return;
-            };
-            let child: Option<gtk4::Widget> = list_item.property("child");
-            let widget = child.expect("el ListItem debe tener un child");
-            let box_child = widget
-                .downcast_ref::<Box>()
-                .expect("el child debe ser un Box");
-            let this_opt = this_for_bind_clone.borrow();
-            let Some(this_ref) = this_opt.as_ref() else {
-                return;
-            };
-            bind_history_card(box_child, entry, &translations_for_bind, this_ref.clone());
-        });
-
-        // Selección deshabilitada: las tarjetas se activan con clic directo.
-        let selection = SingleSelection::new(Some(history_store.clone()));
-        selection.set_autoselect(false);
-        selection.set_selected(gtk4::INVALID_LIST_POSITION);
-
-        let history_grid = GridView::new(Some(selection.clone()), Some(factory_clone));
-        history_grid.set_hexpand(true);
-        history_grid.set_vexpand(true);
+        // --- Rejilla de tarjetas del historial (GtkFlowBox) ---
+        // Se usa GtkFlowBox para que las tarjetas se distribuyan en múltiples
+        // columnas, se envuelvan automáticamente y se alineen a la izquierda,
+        // igual que una rejilla de tarjetas compacta. El espaciado entre
+        // filas y columnas es pequeño para que las tarjetas aparezcan juntas.
+        let history_list = FlowBox::new();
+        history_list.add_css_class("history-grid");
+        history_list.set_hexpand(true);
+        history_list.set_valign(gtk4::Align::Start);
+        history_list.set_homogeneous(false);
+        history_list.set_selection_mode(gtk4::SelectionMode::None);
+        history_list.set_row_spacing(8);
+        history_list.set_column_spacing(8);
+        history_list.set_margin_top(0);
+        history_list.set_margin_bottom(0);
+        history_list.set_margin_start(0);
+        history_list.set_margin_end(0);
+        history_list.set_min_children_per_line(1);
+        history_list.set_max_children_per_line(1);
 
         let history_scrolled = ScrolledWindow::new();
         history_scrolled.set_hexpand(true);
         history_scrolled.set_vexpand(true);
         history_scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
         history_scrolled.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
-
-        // Contenedor interno que puede mostrar la rejilla o el estado vacío.
-        let history_content = Box::new(Orientation::Vertical, 0);
-        history_content.set_hexpand(true);
-        history_content.set_vexpand(true);
-
-        // Estado vacío (oculto por defecto).
-        let history_empty = Box::new(Orientation::Vertical, 8);
-        history_empty.set_halign(gtk4::Align::Center);
-        history_empty.set_valign(gtk4::Align::Center);
-        history_empty.set_vexpand(true);
-        history_empty.set_margin_top(48);
-        history_empty.add_css_class("history-empty");
-
-        let history_empty_label = Label::new(Some(&t("history.empty")));
-        history_empty_label.set_halign(gtk4::Align::Center);
-        history_empty_label.set_xalign(0.5);
-        history_empty_label.add_css_class("dim-label");
-        history_empty.append(&history_empty_label);
-
-        history_content.append(&history_grid);
-        history_content.append(&history_empty);
-
-        history_scrolled.set_child(Some(&history_content));
+        history_scrolled.set_child(Some(&history_list));
         history_page.append(&history_scrolled);
 
         // Recalcular columnas cuando cambie el ancho del contenedor.
-        let grid_for_timeout = history_grid.clone();
+        let history_list_for_timeout = history_list.clone();
         let scrolled_for_history_timeout = history_scrolled.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
             let width = scrolled_for_history_timeout.width() as f64;
             const CARD_WIDTH: i32 = 216;
-            const H_SPACING: f64 = 16.0 + 8.0; // márgenes izquierdo/derecho de la tarjeta
-            let card_total_width = CARD_WIDTH as f64 + H_SPACING;
-            let columns = columns_for_history_width(width, card_total_width);
-            grid_for_timeout.set_min_columns(columns);
-            grid_for_timeout.set_max_columns(columns);
+            const SPACING: i32 = 8; // column_spacing + márgenes
+            let card_total = CARD_WIDTH as f64 + SPACING as f64;
+            let columns = (width / card_total).floor() as i32;
+            let columns = columns.clamp(1, 12);
+            history_list_for_timeout.set_max_children_per_line(columns as u32);
+            history_list_for_timeout.set_min_children_per_line(columns as u32);
             true.into()
         });
 
@@ -677,18 +613,10 @@ impl MainWindow {
             current_category_name: Rc::new(RefCell::new(None)),
             current_favorite_filter: Rc::new(RefCell::new(None)),
             current_watched_filter: Rc::new(RefCell::new(None)),
-            history_grid,
-            history_store,
-            history_entries,
-            history_content,
-            history_empty,
-            history_empty_label,
+            history_list,
             history_back_button,
             history_clear_button,
         }));
-
-        // Disponer `this` para los cierres de la fábrica del historial.
-        *this_for_bind.borrow_mut() = Some(this.clone());
 
         // Cuando una descarga de póster termina, refrescar la galería para
         // mostrar la imagen descargada sin bloquear la UI.
@@ -1595,24 +1523,153 @@ impl MainWindow {
 
         let w = this.borrow_mut();
 
-        // Vaciar el modelo y el vector paralelo.
-        w.history_store.remove_all();
-        w.history_entries.borrow_mut().clear();
-
-        // Llenar modelo y vector paralelo.
-        for entry in &history {
-            let obj = StringObject::new(&entry.title);
-            w.history_store.append(&obj);
-            w.history_entries.borrow_mut().push(entry.clone());
+        // Limpiar filas existentes del historial.
+        while let Some(child) = w.history_list.first_child() {
+            w.history_list.remove(&child);
         }
 
-        // Mostrar u ocultar el estado vacío.
         if history.is_empty() {
-            w.history_grid.set_visible(false);
-            w.history_empty.set_visible(true);
-        } else {
-            w.history_grid.set_visible(true);
-            w.history_empty.set_visible(false);
+            let empty_box = Box::new(Orientation::Vertical, 8);
+            empty_box.set_halign(gtk4::Align::Center);
+            empty_box.set_valign(gtk4::Align::Center);
+            empty_box.set_vexpand(true);
+            empty_box.set_margin_top(48);
+
+            let empty_label = Label::new(Some(&w.t("history.empty")));
+            empty_label.set_halign(gtk4::Align::Center);
+            empty_label.set_xalign(0.5);
+            empty_label.add_css_class("dim-label");
+
+            empty_box.append(&empty_label);
+            w.history_list.append(&empty_box);
+            return;
+        }
+
+        let translations = w.translations.clone();
+        let this_clone = this.clone();
+        const CARD_POSTER_WIDTH: i32 = 200;
+        const CARD_POSTER_HEIGHT: i32 = 180;
+        const CARD_WIDTH: i32 = CARD_POSTER_WIDTH + 16;
+        const CARD_HEIGHT: i32 = 280;
+
+        for entry in history.iter() {
+            let card = Box::new(Orientation::Vertical, 3);
+            card.add_css_class("media-card");
+            card.set_halign(gtk4::Align::Start);
+            card.set_valign(gtk4::Align::Start);
+            card.set_size_request(CARD_WIDTH, CARD_HEIGHT);
+
+            // Póster con proporción fija 2:3.
+            let poster_stack = Box::new(Orientation::Vertical, 0);
+            poster_stack.set_halign(gtk4::Align::Start);
+            poster_stack.set_valign(gtk4::Align::Start);
+            poster_stack.set_size_request(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
+
+            let poster_url = entry.poster_path.as_deref();
+            let cache_path = poster_url.and_then(cached_path);
+            let pixbuf = cache_path.and_then(|cache_path| {
+                GtkPixbuf::from_file_at_scale(
+                    &cache_path,
+                    CARD_POSTER_WIDTH,
+                    CARD_POSTER_HEIGHT,
+                    true,
+                )
+                .ok()
+            });
+
+            match pixbuf {
+                Some(pixbuf) => {
+                    let picture = poster_picture(&pixbuf, CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
+                    picture.add_css_class("media-poster");
+                    poster_stack.append(&picture);
+                }
+                None => {
+                    let placeholder = placeholder_widget(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
+                    placeholder.add_css_class("media-poster");
+                    poster_stack.append(&placeholder);
+                }
+            }
+            card.append(&poster_stack);
+
+            // Etiqueta de tipo (Película / Serie / Anime).
+            let type_label_text = match entry.r#type.as_str() {
+                "anime" => translations.borrow().t("media.type.anime"),
+                "series" => translations.borrow().t("media.type.series"),
+                "movie" => translations.borrow().t("media.type.movie"),
+                other => other.to_string(),
+            };
+            let type_label = Label::new(Some(&type_label_text));
+            type_label.set_halign(gtk4::Align::Start);
+            type_label.add_css_class("card-type-label");
+            card.append(&type_label);
+
+            // Título del medio, limitado a dos líneas.
+            let title_label = Label::new(Some(&entry.title));
+            title_label.set_wrap(true);
+            title_label.set_max_width_chars(20);
+            title_label.set_justify(gtk4::Justification::Left);
+            title_label.set_halign(gtk4::Align::Start);
+            title_label.set_xalign(0.0);
+            title_label.set_lines(2);
+            title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+            title_label.add_css_class("poster-title");
+            card.append(&title_label);
+
+            // Año.
+            if let Some(year) = entry.year {
+                let year_label = Label::new(Some(&format!("{}", year)));
+                year_label.add_css_class("poster-year");
+                year_label.set_halign(gtk4::Align::Start);
+                card.append(&year_label);
+            }
+
+            // Temporada y episodio si es una serie/anime.
+            if let (Some(season), Some(episode)) = (entry.season, entry.episode)
+                && (entry.r#type == "series" || entry.r#type == "anime")
+            {
+                let ep_label_text = format!(
+                    "S{:02}E{:02} – {}",
+                    season,
+                    episode,
+                    entry.episode_title.as_deref().unwrap_or(&entry.title)
+                );
+                let ep_label = Label::new(Some(&ep_label_text));
+                ep_label.set_wrap(true);
+                ep_label.set_max_width_chars(20);
+                ep_label.set_justify(gtk4::Justification::Left);
+                ep_label.set_halign(gtk4::Align::Start);
+                ep_label.set_xalign(0.0);
+                ep_label.set_lines(1);
+                ep_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+                ep_label.add_css_class("dim-label");
+                card.append(&ep_label);
+            }
+
+            // Fecha y progreso de reproducción.
+            let progress = if entry.duration > 0.0 {
+                let pct = (entry.position / entry.duration * 100.0) as u32;
+                format!("{}%", pct)
+            } else {
+                "—".to_string()
+            };
+            let date_label = Label::new(Some(&format!("{} · {}", entry.played_at, progress)));
+            date_label.set_halign(gtk4::Align::Start);
+            date_label.set_xalign(0.0);
+            date_label.add_css_class("dim-label");
+            card.append(&date_label);
+
+            // Clic en la tarjeta: navega a los detalles del medio reproducido.
+            let click = GestureClick::new();
+            let media_id = entry.media_id;
+            let this_for_click = this_clone.clone();
+            click.connect_pressed(move |_, _, _, _| {
+                let w = this_for_click.borrow();
+                w.push_current_view();
+                w.show_details(media_id, None);
+            });
+            card.add_controller(click);
+
+            w.history_list.append(&card);
         }
     }
 
@@ -2430,195 +2487,6 @@ fn restore_window_mode(window: &AdwApplicationWindow, mode: crate::core::player:
             }
         }
     }
-}
-
-/// Construye una tarjeta vacía del historial con la estructura base.
-/// Se reutiliza por la fábrica de `GtkGridView` en `connect_setup`.
-fn build_history_card_widget() -> Box {
-    let card = Box::new(Orientation::Vertical, 6);
-    card.add_css_class("media-card");
-    card.set_halign(gtk4::Align::Start);
-    card.set_valign(gtk4::Align::Start);
-    card.set_hexpand(true);
-    card.set_size_request(-1, 280);
-    // Pequeña separación respecto a los bordes de la tarjeta vecina.
-    card.set_margin_top(8);
-    card.set_margin_start(8);
-    card.set_margin_end(8);
-
-    let poster_stack = Box::new(Orientation::Vertical, 0);
-    poster_stack.set_halign(gtk4::Align::Start);
-    poster_stack.set_valign(gtk4::Align::Start);
-    poster_stack.set_size_request(200, 180);
-    card.append(&poster_stack);
-
-    let type_label = Label::new(None);
-    type_label.set_halign(gtk4::Align::Start);
-    type_label.add_css_class("card-type-label");
-    card.append(&type_label);
-
-    let title_label = Label::new(None);
-    title_label.set_wrap(true);
-    title_label.set_max_width_chars(20);
-    title_label.set_justify(gtk4::Justification::Left);
-    title_label.set_halign(gtk4::Align::Start);
-    title_label.set_xalign(0.0);
-    title_label.set_lines(2);
-    title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    title_label.add_css_class("poster-title");
-    card.append(&title_label);
-
-    let year_label = Label::new(None);
-    year_label.add_css_class("poster-year");
-    year_label.set_halign(gtk4::Align::Start);
-    card.append(&year_label);
-
-    let ep_label = Label::new(None);
-    ep_label.set_wrap(true);
-    ep_label.set_max_width_chars(20);
-    ep_label.set_justify(gtk4::Justification::Left);
-    ep_label.set_halign(gtk4::Align::Start);
-    ep_label.set_xalign(0.0);
-    ep_label.set_lines(1);
-    ep_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    ep_label.add_css_class("dim-label");
-    card.append(&ep_label);
-
-    let date_label = Label::new(None);
-    date_label.set_halign(gtk4::Align::Start);
-    date_label.set_xalign(0.0);
-    date_label.add_css_class("dim-label");
-    card.append(&date_label);
-
-    card
-}
-
-/// Vincula los datos de una entrada de historial a una tarjeta ya creada.
-/// Se ejecuta para cada fila visible a través de `connect_bind`.
-fn bind_history_card(
-    card: &Box,
-    entry: &PlaybackHistoryEntry,
-    translations: &TranslationsRef,
-    this: MainWindowRef,
-) {
-    // Limpiar hijos existentes para reutilizar el widget.
-    while let Some(child) = card.first_child() {
-        card.remove(&child);
-    }
-
-    // Volver a construir la estructura interna (igual que build_history_card_widget).
-    let poster_stack = Box::new(Orientation::Vertical, 0);
-    poster_stack.set_halign(gtk4::Align::Start);
-    poster_stack.set_valign(gtk4::Align::Start);
-    poster_stack.set_size_request(200, 180);
-
-    let poster_url = entry.poster_path.as_deref();
-    let cache_path = poster_url.and_then(cached_path);
-    let pixbuf = cache_path
-        .and_then(|cache_path| GtkPixbuf::from_file_at_scale(&cache_path, 200, 180, true).ok());
-
-    match pixbuf {
-        Some(pixbuf) => {
-            let picture = poster_picture(&pixbuf, 200, 180);
-            picture.add_css_class("media-poster");
-            poster_stack.append(&picture);
-        }
-        None => {
-            let placeholder = placeholder_widget(200, 180);
-            placeholder.add_css_class("media-poster");
-            poster_stack.append(&placeholder);
-        }
-    }
-    card.append(&poster_stack);
-
-    // Etiqueta de tipo.
-    let type_label_text = match entry.r#type.as_str() {
-        "anime" => translations.borrow().t("media.type.anime"),
-        "series" => translations.borrow().t("media.type.series"),
-        "movie" => translations.borrow().t("media.type.movie"),
-        other => other.to_string(),
-    };
-    let type_label = Label::new(Some(&type_label_text));
-    type_label.set_halign(gtk4::Align::Start);
-    type_label.add_css_class("card-type-label");
-    card.append(&type_label);
-
-    // Título.
-    let title_label = Label::new(Some(&entry.title));
-    title_label.set_wrap(true);
-    title_label.set_max_width_chars(20);
-    title_label.set_justify(gtk4::Justification::Left);
-    title_label.set_halign(gtk4::Align::Start);
-    title_label.set_xalign(0.0);
-    title_label.set_lines(2);
-    title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    title_label.add_css_class("poster-title");
-    card.append(&title_label);
-
-    // Año.
-    if let Some(year) = entry.year {
-        let year_label = Label::new(Some(&format!("{}", year)));
-        year_label.add_css_class("poster-year");
-        year_label.set_halign(gtk4::Align::Start);
-        card.append(&year_label);
-    }
-
-    // Temporada y episodio.
-    if let (Some(season), Some(episode)) = (entry.season, entry.episode)
-        && (entry.r#type == "series" || entry.r#type == "anime")
-    {
-        let ep_label_text = format!(
-            "S{:02}E{:02} – {}",
-            season,
-            episode,
-            entry.episode_title.as_deref().unwrap_or(&entry.title)
-        );
-        let ep_label = Label::new(Some(&ep_label_text));
-        ep_label.set_wrap(true);
-        ep_label.set_max_width_chars(20);
-        ep_label.set_justify(gtk4::Justification::Left);
-        ep_label.set_halign(gtk4::Align::Start);
-        ep_label.set_xalign(0.0);
-        ep_label.set_lines(1);
-        ep_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-        ep_label.add_css_class("dim-label");
-        card.append(&ep_label);
-    }
-
-    // Fecha y progreso.
-    let progress = if entry.duration > 0.0 {
-        let pct = (entry.position / entry.duration * 100.0) as u32;
-        format!("{}%", pct)
-    } else {
-        "—".to_string()
-    };
-    let date_label = Label::new(Some(&format!("{} · {}", entry.played_at, progress)));
-    date_label.set_halign(gtk4::Align::Start);
-    date_label.set_xalign(0.0);
-    date_label.add_css_class("dim-label");
-    card.append(&date_label);
-
-    // Clic en la tarjeta.
-    let click = GestureClick::new();
-    let media_id = entry.media_id;
-    let this_for_click = this.clone();
-    click.connect_pressed(move |_, _, _, _| {
-        let w = this_for_click.borrow();
-        w.push_current_view();
-        w.show_details(media_id, None);
-    });
-    card.add_controller(click);
-}
-
-/// Calcula el número de columnas del historial dado el ancho disponible.
-fn columns_for_history_width(available_width: f64, card_total_width: f64) -> u32 {
-    const MIN_COLUMNS: u32 = 1;
-    const MAX_COLUMNS: u32 = 12;
-    if card_total_width <= 0.0 {
-        return MIN_COLUMNS;
-    }
-    let columns = (available_width / card_total_width).floor() as i32;
-    columns.clamp(MIN_COLUMNS as i32, MAX_COLUMNS as i32) as u32
 }
 
 /// Construye el mensaje del diálogo de fallback mencionando solo las pistas
