@@ -104,6 +104,10 @@ pub struct MainWindow {
     top_bar_level2: Box,
     /// Chip removible "Filtrando por: X".
     filter_chip: Button,
+    /// Botón para activar/desactivar filtro de favoritos.
+    filter_favorite_button: Button,
+    /// Botón para activar/desactivar filtro de visto/no visto.
+    filter_watched_button: Button,
     /// Píldora "▶ Continuar S01E04 - Black Torch".
     continue_button: Button,
     /// Botones de modo de vista (Grid/Lista).
@@ -130,6 +134,10 @@ pub struct MainWindow {
     current_category: Rc<RefCell<Option<i64>>>,
     /// Nombre de la categoría activa, para mostrarlo en la interfaz.
     current_category_name: Rc<RefCell<Option<String>>>,
+    /// Filtro de favoritos activo (None = sin filtro).
+    current_favorite_filter: Rc<RefCell<Option<bool>>>,
+    /// Filtro de visto/no visto activo (None = sin filtro).
+    current_watched_filter: Rc<RefCell<Option<bool>>>,
     /// Rejilla de tarjetas del historial de reproducción.
     history_list: FlowBox,
     /// Botón «Volver» de la página de historial.
@@ -142,7 +150,7 @@ type MainWindowRef = Rc<RefCell<MainWindow>>;
 
 impl MainWindow {
     pub fn new(app: &gtk4::Application, config: crate::Config) -> MainWindowRef {
-        crate::ui::theme::install_theme_css();
+        crate::ui::theme::install_theme_css(crate::ui::theme::ThemeMode::Dark);
 
         let db_path = config.inner().db_path.clone();
         let config_path = config.path().to_path_buf();
@@ -332,6 +340,16 @@ impl MainWindow {
         filter_label.set_xalign(0.0);
         filter_label.add_css_class("filter-label");
         filter_bar.append(&filter_label);
+
+        let filter_favorite_button = Button::with_label(&t("button.filter_favorite"));
+        filter_favorite_button.add_css_class("flat-button");
+        filter_favorite_button.set_valign(gtk4::Align::Center);
+        filter_bar.append(&filter_favorite_button);
+
+        let filter_watched_button = Button::with_label(&t("button.filter_watched"));
+        filter_watched_button.add_css_class("flat-button");
+        filter_watched_button.set_valign(gtk4::Align::Center);
+        filter_bar.append(&filter_watched_button);
 
         let filter_clear_button = Button::with_label(&t("button.clear_category"));
         filter_clear_button.add_css_class("flat-button");
@@ -581,6 +599,8 @@ impl MainWindow {
             filter_clear_button,
             top_bar_level2,
             filter_chip,
+            filter_favorite_button,
+            filter_watched_button,
             continue_button,
             view_grid_button,
             view_list_button,
@@ -592,6 +612,8 @@ impl MainWindow {
             history: RefCell::new(Vec::new()),
             current_category: Rc::new(RefCell::new(None)),
             current_category_name: Rc::new(RefCell::new(None)),
+            current_favorite_filter: Rc::new(RefCell::new(None)),
+            current_watched_filter: Rc::new(RefCell::new(None)),
             history_list,
             history_back_button,
             history_clear_button,
@@ -697,6 +719,46 @@ impl MainWindow {
             Self::clear_category_filter(&this_chip);
         });
 
+        // Filtro de favoritos: activa/desactiva el filtro de is_favorite.
+        let this_fav = this.clone();
+        this.borrow()
+            .filter_favorite_button
+            .connect_clicked(move |_| {
+                let new_value = {
+                    let window = this_fav.borrow_mut();
+                    let f = window.current_favorite_filter.borrow_mut();
+                    match *f {
+                        None => Some(true),
+                        _ => None,
+                    }
+                };
+                {
+                    let window = this_fav.borrow_mut();
+                    *window.current_favorite_filter.borrow_mut() = new_value;
+                }
+                Self::load_media(&this_fav);
+            });
+
+        // Filtro de visto/no visto: activa/desactiva el filtro de is_watched.
+        let this_wat = this.clone();
+        this.borrow()
+            .filter_watched_button
+            .connect_clicked(move |_| {
+                let new_value = {
+                    let window = this_wat.borrow_mut();
+                    let f = window.current_watched_filter.borrow_mut();
+                    match *f {
+                        None => Some(true),
+                        _ => None,
+                    }
+                };
+                {
+                    let window = this_wat.borrow_mut();
+                    *window.current_watched_filter.borrow_mut() = new_value;
+                }
+                Self::load_media(&this_wat);
+            });
+
         // Nivel 2: píldora "Continuar viendo".
         let this_cont = this.clone();
         this.borrow().continue_button.connect_clicked(move |_| {
@@ -705,6 +767,62 @@ impl MainWindow {
                 w.show_list();
             }
         });
+
+        // Atajos de teclado globales.
+        let this_key = this.clone();
+        let key_controller = gtk4::EventControllerKey::new();
+        key_controller.connect_key_pressed(move |_, keyval, _keycode, _modifier| {
+            let name = keyval.name().unwrap_or_default();
+            match name.as_str() {
+                "f" | "F" => {
+                    let new_value = {
+                        let window = this_key.borrow_mut();
+                        let f = window.current_favorite_filter.borrow();
+                        match *f {
+                            None => Some(true),
+                            _ => None,
+                        }
+                    };
+                    {
+                        let window = this_key.borrow_mut();
+                        *window.current_favorite_filter.borrow_mut() = new_value;
+                    }
+                    Self::load_media(&this_key);
+                    gtk4::glib::Propagation::Stop
+                }
+                "v" | "V" => {
+                    let new_value = {
+                        let window = this_key.borrow_mut();
+                        let f = window.current_watched_filter.borrow();
+                        match *f {
+                            None => Some(true),
+                            _ => None,
+                        }
+                    };
+                    {
+                        let window = this_key.borrow_mut();
+                        *window.current_watched_filter.borrow_mut() = new_value;
+                    }
+                    Self::load_media(&this_key);
+                    gtk4::glib::Propagation::Stop
+                }
+                "Escape" => {
+                    let window = this_key.borrow_mut();
+                    *window.current_favorite_filter.borrow_mut() = None;
+                    *window.current_watched_filter.borrow_mut() = None;
+                    *window.current_category.borrow_mut() = None;
+                    drop(window);
+                    Self::load_media(&this_key);
+                    gtk4::glib::Propagation::Stop
+                }
+                "slash" => {
+                    this_key.borrow().search_entry.grab_focus();
+                    gtk4::glib::Propagation::Stop
+                }
+                _ => gtk4::glib::Propagation::Proceed,
+            }
+        });
+        this.borrow().window.add_controller(key_controller);
 
         // Nivel 2: botones de modo de vista.
         let this_grid = this.clone();
@@ -1312,9 +1430,14 @@ impl MainWindow {
     /// reemplaza el contenido de la galería; si es mayor, lo añade al final
     /// (paginación infinita).
     fn load_media_page(this: &MainWindowRef, offset: i64) {
-        let (db_path, category_id) = {
+        let (db_path, category_id, favorite, watched) = {
             let w = this.borrow();
-            (w.db_path.clone(), *w.current_category.borrow())
+            (
+                w.db_path.clone(),
+                *w.current_category.borrow(),
+                *w.current_favorite_filter.borrow(),
+                *w.current_watched_filter.borrow(),
+            )
         };
 
         let mut conn = match open_db(&db_path) {
@@ -1331,6 +1454,8 @@ impl MainWindow {
                 limit: Some(100),
                 offset: Some(offset),
                 order_by: None,
+                favorite,
+                watched,
             };
             match category_id {
                 Some(id) => repo.list_by_category(id, options),
@@ -1854,6 +1979,8 @@ impl MainWindow {
                 crate::db::media_repo::SearchMediaOptions {
                     r#type: None,
                     limit: Some(500),
+                    favorite: None,
+                    watched: None,
                 },
             )
             .unwrap_or_default()

@@ -104,6 +104,8 @@ impl SearchBar {
                     SearchMediaOptions {
                         r#type: None,
                         limit: Some(20),
+                        favorite: None,
+                        watched: None,
                     },
                 )
                 .unwrap_or_else(|e| {

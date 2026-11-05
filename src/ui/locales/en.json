@@ -25,6 +25,8 @@
   "button.history": "History",
   "button.all_categories": "All categories",
   "button.clear_category": "Show all",
+  "button.filter_favorite": "Favorites",
+  "button.filter_watched": "Watched",
   "button.settings": "⚙ Settings",
   "button.about": "About",
   "button.save": "Save",

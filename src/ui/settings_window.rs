@@ -12,14 +12,15 @@ use gtk4::{
 };
 use libadwaita::ButtonContent;
 use std::cell::{Cell, RefCell};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::Duration;
 
 /// Normaliza una ruta de carpeta: la convierte en absoluta, resuelve enlaces
-/// simbólicos y elimina el separador final. Devuelve `None` si no es un
-/// directorio accesible.
+/// simbólicos y elimina el separador final. Devuelve `None` si el directorio
+/// no existe, no es accesible o no se puede leer (falta de permisos).
 fn normalize_folder_path(path: &str) -> Option<String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -35,6 +36,13 @@ fn normalize_folder_path(path: &str) -> Option<String> {
 
     let canonical = std::fs::canonicalize(absolute).ok()?;
     if !canonical.is_dir() {
+        return None;
+    }
+
+    // Comprobar explícitamente que se puede leer el contenido del directorio
+    // (permisos de lectura). canonicalize + is_dir solo verifican existencia y
+    // tipo; read_dir verifica que el usuario tenga permiso de lectura.
+    if fs::read_dir(&canonical).is_err() {
         return None;
     }
 

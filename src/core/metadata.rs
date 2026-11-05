@@ -4,21 +4,15 @@
 //! sinopsis, año y URL del póster de series y anime. La descarga del póster
 //! se delega en `PosterService`, que mantiene una caché local.
 
+use crate::core::http_client::HttpClient;
 use crate::core::poster_service::{PosterService, is_cached};
 use crate::db::file_repo::{FileRepository, MediaFile};
 use crate::db::media_repo::ListMediaOptions;
 use crate::db::{MediaRepository, close_db, open_db};
-use reqwest::Client;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
-
-const TVMAZE_TIMEOUT_SECS: u64 = 20;
-
-/// Límite propio de los proveedores auxiliares del selector. Evita que una
-/// API lenta retrase la apertura del diálogo más de lo razonable.
-const EXTRA_PROVIDER_TIMEOUT_SECS: u64 = 8;
 
 /// Resultado de sincronización de metadatos.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -29,6 +23,8 @@ pub struct SyncMetadataResult {
     pub banner_path: Option<String>,
     pub release_date: Option<String>,
     pub vote_average: Option<f64>,
+    /// Idioma original detectado de los metadatos (código ISO, ej. "en", "es").
+    pub language: Option<String>,
     /// Géneros/categorías devueltos por la fuente de metadatos.
     pub genres: Vec<String>,
     /// Identificador del show en TVmaze, usado para pedir sus imágenes anchas.
@@ -216,6 +212,7 @@ impl MetadataService {
                         poster_path: poster_path.as_deref(),
                         banner_path: banner_path.as_deref(),
                         synopsis: fetched.synopsis.as_deref(),
+                        language: fetched.language.as_deref(),
                     },
                 )?;
             } else {
@@ -225,6 +222,7 @@ impl MetadataService {
                     poster_path.as_deref(),
                     banner_path.as_deref(),
                     fetched.synopsis.as_deref(),
+                    fetched.language.as_deref(),
                 )?;
             }
 
@@ -491,20 +489,15 @@ fn load_all_parent_media(
     Ok(media)
 }
 
-/// Cliente TVmaze.
-#[derive(Clone)]
+/// Cliente TVmaze con rate limiting, reintentos y caché de respuestas.
 pub struct TvmazeClient {
-    client: reqwest::Client,
+    http: HttpClient,
 }
 
 impl TvmazeClient {
     pub fn new() -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(TVMAZE_TIMEOUT_SECS))
-            .user_agent(concat!("acryl/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .unwrap_or_default();
-        Self { client }
+        let http = HttpClient::new().with_cache(Duration::from_secs(300));
+        Self { http }
     }
 }
 
@@ -531,14 +524,8 @@ pub async fn sync_metadata(
             "https://api.tvmaze.com/search/shows?q={}",
             urlencoding::encode(&candidate)
         );
-        let response: Value = client
-            .client
-            .get(&url)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+        let text = client.http.get_text(&url).await?;
+        let response: Value = serde_json::from_str(&text)?;
 
         let parsed = parse_search_response(&response);
         if parsed.title.is_some() {
@@ -617,19 +604,13 @@ async fn fetch_anilist_banner(title: &str, client: &TvmazeClient) -> Option<Stri
         "variables": { "search": title }
     });
 
-    let response = client
-        .client
-        .post("https://graphql.anilist.co")
-        .json(&body)
-        .timeout(Duration::from_secs(EXTRA_PROVIDER_TIMEOUT_SECS))
-        .send()
-        .await
-        .ok()?
-        .error_for_status()
-        .ok()?
-        .json::<Value>()
+    let body_text = serde_json::to_string(&body).ok()?;
+    let text = client
+        .http
+        .post_text("https://graphql.anilist.co", &body_text)
         .await
         .ok()?;
+    let response: Value = serde_json::from_str(&text).ok()?;
 
     parse_anilist_banner(&response)
 }
@@ -641,18 +622,8 @@ async fn fetch_kitsu_banner(title: &str, client: &TvmazeClient) -> Option<String
         urlencoding::encode(title)
     );
 
-    let response = client
-        .client
-        .get(&url)
-        .header("Accept", "application/vnd.api+json")
-        .send()
-        .await
-        .ok()?
-        .error_for_status()
-        .ok()?
-        .json::<Value>()
-        .await
-        .ok()?;
+    let text = client.http.get_text(&url).await.ok()?;
+    let response: Value = serde_json::from_str(&text).ok()?;
 
     parse_kitsu_banner(&response)
 }
@@ -661,17 +632,8 @@ async fn fetch_kitsu_banner(title: &str, client: &TvmazeClient) -> Option<String
 async fn fetch_tvmaze_banner(show_id: u64, client: &TvmazeClient) -> Option<String> {
     let url = format!("https://api.tvmaze.com/shows/{}/images", show_id);
 
-    let response = client
-        .client
-        .get(&url)
-        .send()
-        .await
-        .ok()?
-        .error_for_status()
-        .ok()?
-        .json::<Value>()
-        .await
-        .ok()?;
+    let text = client.http.get_text(&url).await.ok()?;
+    let response: Value = serde_json::from_str(&text).ok()?;
 
     parse_tvmaze_banner(&response)
 }
@@ -759,21 +721,20 @@ async fn fetch_anilist_images(title: &str, client: &TvmazeClient) -> Vec<ImageOp
         "variables": { "search": title }
     });
 
-    let response = match client
-        .client
-        .post("https://graphql.anilist.co")
-        .json(&body)
-        .timeout(Duration::from_secs(EXTRA_PROVIDER_TIMEOUT_SECS))
-        .send()
+    let body_text = match serde_json::to_string(&body) {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let text = match client
+        .http
+        .post_text("https://graphql.anilist.co", &body_text)
         .await
     {
-        Ok(response) => match response.error_for_status() {
-            Ok(response) => match response.json::<Value>().await {
-                Ok(value) => value,
-                Err(_) => return Vec::new(),
-            },
-            Err(_) => return Vec::new(),
-        },
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let response: Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
         Err(_) => return Vec::new(),
     };
 
@@ -833,21 +794,12 @@ async fn fetch_kitsu_images(title: &str, client: &TvmazeClient) -> Vec<ImageOpti
         urlencoding::encode(title)
     );
 
-    let response = match client
-        .client
-        .get(&url)
-        .header("Accept", "application/vnd.api+json")
-        .timeout(Duration::from_secs(EXTRA_PROVIDER_TIMEOUT_SECS))
-        .send()
-        .await
-    {
-        Ok(response) => match response.error_for_status() {
-            Ok(response) => match response.json::<Value>().await {
-                Ok(value) => value,
-                Err(_) => return Vec::new(),
-            },
-            Err(_) => return Vec::new(),
-        },
+    let text = match client.http.get_text(&url).await {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let response: Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
         Err(_) => return Vec::new(),
     };
 
@@ -905,20 +857,12 @@ async fn fetch_jikan_images(title: &str, client: &TvmazeClient) -> Vec<ImageOpti
         urlencoding::encode(title)
     );
 
-    let response = match client
-        .client
-        .get(&url)
-        .timeout(Duration::from_secs(EXTRA_PROVIDER_TIMEOUT_SECS))
-        .send()
-        .await
-    {
-        Ok(response) => match response.error_for_status() {
-            Ok(response) => match response.json::<Value>().await {
-                Ok(value) => value,
-                Err(_) => return Vec::new(),
-            },
-            Err(_) => return Vec::new(),
-        },
+    let text = match client.http.get_text(&url).await {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let response: Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
         Err(_) => return Vec::new(),
     };
 
@@ -992,20 +936,12 @@ async fn fetch_shikimori_images(title: &str, client: &TvmazeClient) -> Vec<Image
         urlencoding::encode(title)
     );
 
-    let response = match client
-        .client
-        .get(&url)
-        .timeout(Duration::from_secs(EXTRA_PROVIDER_TIMEOUT_SECS))
-        .send()
-        .await
-    {
-        Ok(response) => match response.error_for_status() {
-            Ok(response) => match response.json::<Value>().await {
-                Ok(value) => value,
-                Err(_) => return Vec::new(),
-            },
-            Err(_) => return Vec::new(),
-        },
+    let text = match client.http.get_text(&url).await {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let response: Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
         Err(_) => return Vec::new(),
     };
 
@@ -1085,20 +1021,12 @@ async fn fetch_itunes_images(
         entity
     );
 
-    let response = match client
-        .client
-        .get(&url)
-        .timeout(Duration::from_secs(EXTRA_PROVIDER_TIMEOUT_SECS))
-        .send()
-        .await
-    {
-        Ok(response) => match response.error_for_status() {
-            Ok(response) => match response.json::<Value>().await {
-                Ok(value) => value,
-                Err(_) => return Vec::new(),
-            },
-            Err(_) => return Vec::new(),
-        },
+    let text = match client.http.get_text(&url).await {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let response: Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
         Err(_) => return Vec::new(),
     };
 
@@ -1174,20 +1102,12 @@ async fn fetch_cinemeta_images(
         urlencoding::encode(title)
     );
 
-    let response = match client
-        .client
-        .get(&url)
-        .timeout(Duration::from_secs(EXTRA_PROVIDER_TIMEOUT_SECS))
-        .send()
-        .await
-    {
-        Ok(response) => match response.error_for_status() {
-            Ok(response) => match response.json::<Value>().await {
-                Ok(value) => value,
-                Err(_) => return Vec::new(),
-            },
-            Err(_) => return Vec::new(),
-        },
+    let text = match client.http.get_text(&url).await {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let response: Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
         Err(_) => return Vec::new(),
     };
 
@@ -1298,14 +1218,12 @@ fn upscale_itunes_artwork(url: &str) -> String {
 pub async fn fetch_tvmaze_images(show_id: u64, client: &TvmazeClient) -> Vec<ImageOption> {
     let url = format!("https://api.tvmaze.com/shows/{}/images", show_id);
 
-    let response: Value = match client.client.get(&url).send().await {
-        Ok(r) => match r.error_for_status() {
-            Ok(r) => match r.json::<Value>().await {
-                Ok(v) => v,
-                Err(_) => return Vec::new(),
-            },
-            Err(_) => return Vec::new(),
-        },
+    let text = match client.http.get_text(&url).await {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let response: Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
         Err(_) => return Vec::new(),
     };
 
@@ -1366,17 +1284,8 @@ pub async fn fetch_tvmaze_images(show_id: u64, client: &TvmazeClient) -> Vec<Ima
 async fn fetch_tvmaze_episodes(show_id: u64, client: &TvmazeClient) -> Option<Vec<TvmazeEpisode>> {
     let url = format!("https://api.tvmaze.com/shows/{}/episodes", show_id);
 
-    let response = client
-        .client
-        .get(&url)
-        .send()
-        .await
-        .ok()?
-        .error_for_status()
-        .ok()?
-        .json::<Value>()
-        .await
-        .ok()?;
+    let text = client.http.get_text(&url).await.ok()?;
+    let response: Value = serde_json::from_str(&text).ok()?;
 
     Some(parse_tvmaze_episodes(&response))
 }
@@ -1480,6 +1389,10 @@ fn parse_search_response(response: &Value) -> SyncMetadataResult {
     SyncMetadataResult {
         title: show.get("name").and_then(Value::as_str).map(str::to_string),
         synopsis: show.get("summary").and_then(Value::as_str).map(clean_html),
+        language: show
+            .get("language")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         poster_path: show
             .get("image")
             .and_then(|image| image.get("medium"))
@@ -1595,6 +1508,7 @@ mod tests {
             "show": {
                 "id": 64632,
                 "name": "Solo Leveling",
+                "language": "ko",
                 "summary": "<p>Hola &amp; adiós</p>",
                 "image": {"medium": "https://example.com/poster.jpg"},
                 "premiered": "2024-01-06",
@@ -1605,6 +1519,7 @@ mod tests {
         let parsed = parse_search_response(&response);
         assert_eq!(parsed.title.as_deref(), Some("Solo Leveling"));
         assert_eq!(parsed.synopsis.as_deref(), Some("Hola & adiós"));
+        assert_eq!(parsed.language.as_deref(), Some("ko"));
         assert_eq!(
             parsed.poster_path.as_deref(),
             Some("https://example.com/poster.jpg")
