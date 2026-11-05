@@ -7,10 +7,11 @@
 //! segundo plano para no bloquear la interfaz.
 
 use crate::config::DefaultTracks;
+use crate::core::language::{canonical_code, canonical_code_from_hints};
 use crate::core::library::{discover_external_subtitles, ensure_media_streams};
 use crate::db::media_repo::MediaStream;
 use crate::db::{FileRepository, TrackPreference, TrackSelection, close_db, open_db};
-use crate::ui::i18n::TranslationsRef;
+use crate::ui::i18n::{TranslationsRef, language_label};
 use gtk4::prelude::*;
 use gtk4::{Box, Button, DropDown, Label, Orientation, ScrolledWindow, Window};
 use std::cell::RefCell;
@@ -134,7 +135,9 @@ pub fn show_track_dialog(
     buttons.append(&save_button);
     content.append(&buttons);
 
-    window.set_child(Some(&content));
+    // `content` ya está dentro de `scrolled`, que es el hijo de la ventana. No
+    // se vuelve a asignar como hijo directo: GTK lo rechaza porque ya tiene
+    // padre y emite un Gtk-CRITICAL en cada apertura del diálogo.
 
     // Estado compartido entre la carga inicial, la detección en segundo plano
     // y el guardado.
@@ -587,40 +590,37 @@ fn current_preference(
 }
 
 /// Texto legible de una pista: número, idioma, título y códec.
+///
+/// El idioma se muestra en el idioma activo de la interfaz. Si la pista no
+/// declara idioma pero el título sí lo identifica (por ejemplo, «Japanese»),
+/// se usa ese dato para mostrarlo igualmente. Cuando el título solo repite el
+/// idioma no se duplica en la etiqueta.
 fn stream_label(translations: &TranslationsRef, stream: &MediaStream) -> String {
     let track_word = translations.borrow().t("stream.track_word");
     let mut parts = vec![format!("{} {}", track_word, stream.stream_index + 1)];
-    if let Some(language) = stream.language.as_deref() {
-        parts.push(language_name(translations, language));
+
+    let language = canonical_code_from_hints(stream.language.as_deref(), stream.title.as_deref());
+    if let Some(code) = language {
+        parts.push(language_label(translations, Some(code)));
+    } else if let Some(raw) = stream
+        .language
+        .as_deref()
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty() && !raw.eq_ignore_ascii_case("und"))
+    {
+        parts.push(language_label(translations, canonical_code(raw)));
     }
+
     if let Some(title) = stream.title.as_deref().filter(|title| !title.is_empty()) {
-        parts.push(title.to_string());
+        let title_is_language = canonical_code(title) == language;
+        if !title_is_language {
+            parts.push(title.to_string());
+        }
     }
     if let Some(codec) = stream.codec.as_deref() {
         parts.push(codec.to_string());
     }
     parts.join(" · ")
-}
-
-/// Nombre traducido de los códigos de idioma más habituales.
-fn language_name(translations: &TranslationsRef, code: &str) -> String {
-    let key = match code.to_ascii_lowercase().as_str() {
-        "spa" | "es" | "es-es" | "es-mx" => "language.es",
-        "eng" | "en" | "en-us" | "en-gb" => "language.en",
-        "jpn" | "ja" => "language.ja",
-        "fra" | "fre" | "fr" => "language.fr",
-        "deu" | "ger" | "de" => "language.de",
-        "ita" | "it" => "language.it",
-        "por" | "pt" | "pt-br" => "language.pt",
-        "rus" | "ru" => "language.ru",
-        "zho" | "chi" | "zh" => "language.zh",
-        "kor" | "ko" => "language.ko",
-        "ara" | "ar" => "language.ar",
-        "hin" | "hi" => "language.hi",
-        "und" => "language.unknown",
-        _ => return code.to_uppercase(),
-    };
-    translations.borrow().t(key)
 }
 
 #[cfg(test)]
@@ -711,5 +711,23 @@ mod tests {
         let translations = crate::ui::i18n::load_translations("en").expect("cargar inglés");
         let label = stream_label(&translations, &stream("audio", 1, "eng"));
         assert_eq!(label, "Track 2 · English · aac");
+    }
+
+    #[test]
+    fn etiqueta_de_pista_no_duplica_un_titulo_que_repite_el_idioma() {
+        let translations = crate::ui::i18n::load_translations("es").expect("cargar español");
+        let mut stream = stream("audio", 0, "jpn");
+        stream.title = Some("Japanese".to_string());
+        let label = stream_label(&translations, &stream);
+        assert_eq!(label, "Pista 1 · Japonés · aac");
+    }
+
+    #[test]
+    fn etiqueta_de_pista_usa_el_titulo_si_falta_el_idioma() {
+        let translations = crate::ui::i18n::load_translations("es").expect("cargar español");
+        let mut stream = stream("audio", 0, "und");
+        stream.title = Some("Japonese (AAC)".to_string());
+        let label = stream_label(&translations, &stream);
+        assert_eq!(label, "Pista 1 · Japonés · aac");
     }
 }

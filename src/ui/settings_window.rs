@@ -1,10 +1,11 @@
 //! Vista de ajustes integrada en el Stack de la aplicación principal.
 
 use crate::config::AppConfig;
+use crate::core::language;
 use crate::core::library::{IndexResult, LibraryService};
-use crate::db::media_repo::MediaRepository;
+use crate::db::media_repo::{AvailableTrack, MediaRepository};
 use crate::db::{close_db, open_db};
-use crate::ui::i18n::TranslationsRef;
+use crate::ui::i18n::{TranslationsRef, language_label};
 use gtk4::prelude::*;
 use gtk4::{
     Box, Button, DropDown, Entry, GestureClick, Label, ListBox, ListBoxRow, Orientation, Popover,
@@ -452,10 +453,10 @@ pub struct SettingsView {
     on_save: Option<Rc<dyn Fn(AppConfig)>>,
     on_refresh_metadata: Option<Rc<dyn Fn()>>,
     translations: TranslationsRef,
-    /// Opciones de pista de la BD (sin "Ninguno"), para reconstruir los
-    /// desplegables al cambiar de idioma.
-    audio_options: Vec<(String, String)>,
-    subtitle_options: Vec<(String, String)>,
+    /// Idiomas disponibles en la BD (sin "Ninguno"), para reconstruir los
+    /// selectores con las etiquetas del idioma activo.
+    audio_tracks: Vec<AvailableTrack>,
+    subtitle_tracks: Vec<AvailableTrack>,
     /// Selectores de pista predeterminada con búsqueda y filtrado real.
     /// Se usan Entry + Popover + ListBox para que escribir en el buscador
     /// oculte las opciones que no coincidan (filtrado visual).
@@ -490,6 +491,47 @@ pub fn obtener_label_para_clave<'a>(
         .map(|(_, label)| label.as_str())
 }
 
+/// Ejecuta `apply` con una copia de la opción `index` sin mantener préstamos
+/// sobre `displayed`.
+///
+/// El callback puede volver a prestar el `RefCell` (por ejemplo, el handler
+/// `changed` del Entry al actualizar su texto). Mantener el préstamo de
+/// lectura durante esa reentrada provoca un panic por `RefCell already
+/// borrowed`.
+fn with_selected_option<F>(displayed: &RefCell<Vec<(String, String)>>, index: usize, apply: F)
+where
+    F: FnOnce(String, String),
+{
+    let selection = displayed.borrow().get(index).cloned();
+    if let Some((key, label)) = selection {
+        apply(key, label);
+    }
+}
+
+/// Construye las opciones del selector de pistas a partir de los idiomas
+/// disponibles, traduciendo sus nombres al idioma activo de la interfaz.
+fn build_track_options(
+    tracks: &[AvailableTrack],
+    translations: &TranslationsRef,
+    none_label: &str,
+) -> Vec<(String, String)> {
+    let mut options = vec![("none".to_string(), none_label.to_string())];
+    options.extend(tracks.iter().map(|track| {
+        (
+            track.key.clone(),
+            language_label(translations, track.language.as_deref()),
+        )
+    }));
+    options
+}
+
+/// Normaliza la clave guardada en la configuración a la forma canónica por
+/// idioma. Las claves antiguas (`embedded:audio:jpn:...`) se migran al
+/// cargar la vista; las claves que no representan un idioma se conservan.
+fn normalize_default_track_key(key: Option<&str>) -> Option<String> {
+    key.map(language::normalize_track_key)
+}
+
 /// Selector de pista con búsqueda y filtrado visual.
 ///
 /// Combina un Entry (para escribir/filtrar), un Popover y un ListBox
@@ -501,9 +543,11 @@ struct TrackSelector {
     options: Rc<RefCell<Vec<(String, String)>>>,
     /// Clave actualmente seleccionada (None = "Ninguno").
     selected_key: Rc<RefCell<Option<String>>>,
-    /// Evita abrir el popover cuando el texto del entry se actualiza por
-    /// código (cambio de idioma o selección programática).
-    suppress_popup: Rc<Cell<bool>>,
+    /// Evita filtrar y abrir el popover cuando el texto del entry se actualiza
+    /// por código (cambio de idioma o selección programática). Sin esto, el
+    /// `changed` de `set_text` puede reentrar mientras otra parte del selector
+    /// mantiene prestado su estado compartido.
+    suppress_changed: Rc<Cell<bool>>,
 }
 
 impl TrackSelector {
@@ -554,7 +598,7 @@ impl TrackSelector {
 
         let options_rc = Rc::new(RefCell::new(options.to_vec()));
         let selected_key = Rc::new(RefCell::new(current.map(String::from)));
-        let suppress_popup = Rc::new(Cell::new(false));
+        let suppress_changed = Rc::new(Cell::new(false));
         // Opciones visibles en el ListBox en este momento (el listado completo
         // o un subconjunto filtrado). Permite mapear la fila activada a su
         // clave real cuando el filtro está activo.
@@ -637,6 +681,7 @@ impl TrackSelector {
         let entry_for_activate = entry.clone();
         let selected_key_for_activate = selected_key.clone();
         let displayed_for_activate = displayed.clone();
+        let suppress_changed_for_activate = suppress_changed.clone();
         list_box.connect_row_activated(move |_list_box, row| {
             let index = {
                 let mut idx = 0usize;
@@ -655,11 +700,17 @@ impl TrackSelector {
                 found
             };
             if let Some(index) = index {
-                let displayed = displayed_for_activate.borrow();
-                if let Some((key, label)) = displayed.get(index) {
-                    *selected_key_for_activate.borrow_mut() = Some(key.clone());
-                    entry_for_activate.set_text(label);
-                }
+                // `with_selected_option` suelta el préstamo de `displayed`
+                // antes de actualizar el Entry. El `changed` de `set_text`
+                // reentra en el selector y necesita prestar ese mismo estado;
+                // mantenerlo prestado provocaba un panic por
+                // `RefCell already borrowed`.
+                with_selected_option(&displayed_for_activate, index, |key, label| {
+                    *selected_key_for_activate.borrow_mut() = Some(key);
+                    suppress_changed_for_activate.set(true);
+                    entry_for_activate.set_text(&label);
+                    suppress_changed_for_activate.set(false);
+                });
             }
             popover_for_activate.popdown();
         });
@@ -668,10 +719,13 @@ impl TrackSelector {
         let entry_for_filter = entry.clone();
         let popover_for_filter = popover.clone();
         let populate_filtered_clone = populate_filtered.clone();
-        let suppress_popup_for_filter = suppress_popup.clone();
+        let suppress_changed_for_filter = suppress_changed.clone();
         entry.connect_changed(move |_| {
+            if suppress_changed_for_filter.get() {
+                return;
+            }
             populate_filtered_clone();
-            if !suppress_popup_for_filter.get() && !entry_for_filter.text().is_empty() {
+            if !entry_for_filter.text().is_empty() {
                 popover_for_filter.popup();
             }
         });
@@ -695,7 +749,7 @@ impl TrackSelector {
                 entry,
                 options: options_rc,
                 selected_key,
-                suppress_popup,
+                suppress_changed,
             },
         )
     }
@@ -711,23 +765,23 @@ impl TrackSelector {
         let label = key.and_then(|clave| {
             obtener_label_para_clave(&self.options.borrow(), clave).map(String::from)
         });
-        self.suppress_popup.set(true);
+        self.suppress_changed.set(true);
         self.entry.set_text(label.as_deref().unwrap_or_default());
-        self.suppress_popup.set(false);
+        self.suppress_changed.set(false);
     }
 
     /// Actualiza las opciones y el valor actual (usado al cambiar de idioma).
     fn set_options(&self, options: &[(String, String)], current: Option<&str>) {
         *self.options.borrow_mut() = options.to_vec();
         *self.selected_key.borrow_mut() = current.map(String::from);
-        self.suppress_popup.set(true);
+        self.suppress_changed.set(true);
         self.entry.set_text("");
         if let Some(current_key) = current
             && let Some(label) = obtener_label_para_clave(options, current_key)
         {
             self.entry.set_text(label);
         }
-        self.suppress_popup.set(false);
+        self.suppress_changed.set(false);
     }
 }
 
@@ -927,7 +981,7 @@ impl SettingsView {
         default_tracks_row.set_valign(gtk4::Align::Start);
 
         // Leer opciones de pista de la biblioteca.
-        let (audio_options, subtitle_options) = match open_db(db_path) {
+        let (audio_tracks, subtitle_tracks) = match open_db(db_path) {
             Ok(mut conn) => {
                 let mut repo = MediaRepository::new(&mut conn);
                 let audio = repo.list_available_tracks("audio").unwrap_or_default();
@@ -938,12 +992,18 @@ impl SettingsView {
             Err(_) => (Vec::new(), Vec::new()),
         };
 
-        // Opciones completas: "Ninguno" + pistas de la biblioteca.
+        // Opciones completas: "Ninguno" + idiomas de la biblioteca. Cada
+        // idioma aparece una sola vez, ya normalizado, y su etiqueta usa el
+        // idioma activo de la interfaz.
         let none_label = t("settings.default_tracks.none");
-        let mut all_audio: Vec<(String, String)> = vec![("none".to_string(), none_label.clone())];
-        all_audio.extend(audio_options.iter().cloned());
-        let mut all_subtitle: Vec<(String, String)> = vec![("none".to_string(), none_label)];
-        all_subtitle.extend(subtitle_options.iter().cloned());
+        let all_audio = build_track_options(&audio_tracks, &translations, &none_label);
+        let all_subtitle = build_track_options(&subtitle_tracks, &translations, &none_label);
+
+        // Las claves antiguas por pista se migran a la clave canónica por
+        // idioma para que la selección siga siendo visible y reutilizable.
+        let current_audio_key = normalize_default_track_key(config.default_tracks.audio.as_deref());
+        let current_subtitle_key =
+            normalize_default_track_key(config.default_tracks.subtitle.as_deref());
 
         // Audio predeterminado: selector con búsqueda y filtrado visual.
         // Escribir en el Entry filtra las opciones del ListBox dentro del
@@ -951,7 +1011,7 @@ impl SettingsView {
         let (audio_entry_widget, default_audio_selector) = TrackSelector::new(
             &t("settings.default_tracks.audio"),
             &all_audio,
-            config.default_tracks.audio.as_deref(),
+            current_audio_key.as_deref(),
             &translations,
         );
         default_tracks_row.append(&audio_entry_widget);
@@ -960,7 +1020,7 @@ impl SettingsView {
         let (subtitle_entry_widget, default_subtitle_selector) = TrackSelector::new(
             &t("settings.default_tracks.subtitle"),
             &all_subtitle,
-            config.default_tracks.subtitle.as_deref(),
+            current_subtitle_key.as_deref(),
             &translations,
         );
         default_tracks_row.append(&subtitle_entry_widget);
@@ -1103,8 +1163,8 @@ impl SettingsView {
             on_save: None,
             on_refresh_metadata: None,
             translations,
-            audio_options,
-            subtitle_options,
+            audio_tracks,
+            subtitle_tracks,
             default_audio_selector,
             default_subtitle_selector,
         }
@@ -1153,13 +1213,12 @@ impl SettingsView {
         self.about_label.set_label(&t("settings.about.description"));
         self.about_button_content.set_label(&t("button.about"));
 
-        // Actualizar los selectores de pista con la nueva etiqueta de "Ninguno",
-        // conservando la selección actual.
+        // Actualizar los selectores de pista con las etiquetas del nuevo
+        // idioma, conservando la selección actual.
         let none_label = t("settings.default_tracks.none");
-        let mut all_audio: Vec<(String, String)> = vec![("none".to_string(), none_label.clone())];
-        all_audio.extend(self.audio_options.iter().cloned());
-        let mut all_subtitle: Vec<(String, String)> = vec![("none".to_string(), none_label)];
-        all_subtitle.extend(self.subtitle_options.iter().cloned());
+        let all_audio = build_track_options(&self.audio_tracks, &self.translations, &none_label);
+        let all_subtitle =
+            build_track_options(&self.subtitle_tracks, &self.translations, &none_label);
         self.default_audio_selector.set_options(
             &all_audio,
             self.default_audio_selector.selected_key().as_deref(),
@@ -1394,6 +1453,25 @@ mod tests {
             Some(expected.clone())
         );
         assert_eq!(normalize_folder_path(&expected), Some(expected));
+    }
+
+    #[test]
+    fn seleccionar_opcion_no_mantiene_el_prestamo_durante_el_callback() {
+        let displayed = RefCell::new(opciones());
+        let mut seleccionada = None;
+
+        with_selected_option(&displayed, 2, |key, label| {
+            // Si el préstamo de lectura siguiera activo, este `borrow_mut`
+            // entraría en panic, igual que ocurría al seleccionar una fila
+            // del selector de pistas en Ajustes.
+            *displayed.borrow_mut() = Vec::new();
+            seleccionada = Some((key, label));
+        });
+
+        assert_eq!(
+            seleccionada,
+            Some(("spa-5.1".to_string(), "Español 5.1".to_string()))
+        );
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! Repositorio de medios.
 
+use crate::core::language::{canonical_code_from_hints, language_key};
 use crate::db::file_repo::FileRepository;
 use rusqlite::{Connection, Result as RusqliteResult, params};
 
@@ -12,6 +13,18 @@ type StreamRow = (
     Option<String>,
     Option<String>,
 );
+
+/// Idioma disponible para configurar las pistas predeterminadas.
+///
+/// Cada entrada agrupa todas las pistas de la biblioteca que representan el
+/// mismo idioma, independientemente de su códec, título o variante regional.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvailableTrack {
+    /// Clave estable de configuración (`language:ja`, `language:und`).
+    pub key: String,
+    /// Código ISO 639-1 canónico, o `None` si el idioma no se reconoce.
+    pub language: Option<String>,
+}
 
 /// Fila del historial de un medio concreto: (fecha, posición, duración, archivo).
 type PlaybackHistoryRow = (String, f64, f64, Option<String>);
@@ -1073,19 +1086,17 @@ impl<'a> MediaRepository<'a> {
         Ok(rows)
     }
 
-    /// Lista las pistas únicas disponibles en la biblioteca, agrupadas por tipo.
+    /// Lista los idiomas únicos disponibles en la biblioteca para un tipo de
+    /// pista (`audio` o `subtitle`).
     ///
-    /// Para pistas externas (sidecars) se deduplica por ruta absoluta.
-    /// Para pistas embebidas se agrupa por idioma (y códec) para que no
-    /// aparezcan repetidas en Ajustes cuando el mismo idioma tenga varios
-    /// títulos distintos.
-    ///
-    /// Devuelve un vector de tuplas `(track_key, etiqueta_legible)` para cada
-    /// tipo de pista (`audio` o `subtitle`).
+    /// Todas las pistas que representan el mismo idioma se agrupan en una sola
+    /// entrada, aunque cambien el códec, el título, la variante regional o el
+    /// archivo. La etiqueta visible se construye en la capa de UI para que se
+    /// muestre en el idioma activo de la interfaz.
     pub fn list_available_tracks(
         &mut self,
         stream_type: &str,
-    ) -> RusqliteResult<Vec<(String, String)>> {
+    ) -> RusqliteResult<Vec<AvailableTrack>> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT stream_type, language, codec, title, external_path
              FROM media_streams WHERE stream_type = ?1
@@ -1105,70 +1116,27 @@ impl<'a> MediaRepository<'a> {
             .collect();
 
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut result: Vec<(String, String)> = Vec::new();
+        let mut result: Vec<AvailableTrack> = Vec::new();
 
-        for (stype, language, codec, title, external_path) in rows {
-            let stype_clone = stype.to_string();
-            let language_clone = language.clone();
-            let codec_clone = codec.clone();
-            let title_clone = title.clone();
-            let external_path_clone = external_path.clone();
-            let stream = MediaStream {
-                id: 0,
-                media_id: 0,
-                file_path: String::new(),
-                stream_type: stype,
-                stream_index: 0,
-                language,
-                codec,
-                title,
-                external_path,
-            };
-            let key = stream.track_key();
-
-            // Para pistas externas (sidecars) se deduplica por ruta absoluta.
-            // Para pistas embebidas se agrupa por idioma + códec, ignorando
-            // el título para evitar duplicados cuando el mismo idioma tiene
-            // varios títulos distintos.
-            let dedup_key = if external_path_clone
-                .as_ref()
-                .filter(|p| !p.is_empty())
-                .is_some()
-            {
-                key.clone()
-            } else {
-                let normalize =
-                    |value: Option<&str>| value.unwrap_or_default().trim().to_lowercase();
-                format!(
-                    "dedup:{}:{}:{}",
-                    stype_clone,
-                    normalize(language_clone.as_deref()),
-                    normalize(codec_clone.as_deref())
-                )
-            };
-            if seen.contains(&dedup_key) {
+        for (_stype, language, _codec, title, _external_path) in rows {
+            let canonical = canonical_code_from_hints(language.as_deref(), title.as_deref());
+            let key = language_key(canonical);
+            if !seen.insert(key.clone()) {
                 continue;
             }
-            seen.insert(dedup_key);
-
-            let label = if let Some(path) = external_path_clone.filter(|p| !p.is_empty()) {
-                format!("{} (externo)", path)
-            } else {
-                let lang = language_clone.as_deref().unwrap_or("?").to_uppercase();
-                let t = title_clone.as_deref().unwrap_or("");
-                if t.is_empty() {
-                    format!("{} ({})", lang, codec_clone.as_deref().unwrap_or("?"))
-                } else {
-                    format!(
-                        "{} · {} ({})",
-                        lang,
-                        t,
-                        codec_clone.as_deref().unwrap_or("?")
-                    )
-                }
-            };
-            result.push((key, label));
+            result.push(AvailableTrack {
+                key,
+                language: canonical.map(str::to_string),
+            });
         }
+
+        // Idiomas conocidos por orden alfabético; el idioma desconocido al final.
+        result.sort_by(|a, b| match (&a.language, &b.language) {
+            (Some(a), Some(b)) => a.cmp(b),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        });
 
         Ok(result)
     }
@@ -1587,6 +1555,63 @@ mod tests {
             .list_streams_by_file("/tmp/test/video.mkv")
             .expect("listar por archivo");
         assert_eq!(by_file.len(), 3);
+    }
+
+    #[test]
+    fn list_available_tracks_agrupa_variantes_del_mismo_idioma() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        let media_id = setup_media_and_file(&mut conn);
+        let mut repo = MediaRepository::new(&mut conn);
+
+        let streams = vec![
+            NewMediaStream {
+                file_path: "/tmp/test/video.mkv".to_string(),
+                stream_type: "audio".to_string(),
+                stream_index: 0,
+                language: Some("jpn".to_string()),
+                codec: Some("aac".to_string()),
+                title: Some("Japanese".to_string()),
+                external_path: None,
+            },
+            NewMediaStream {
+                file_path: "/tmp/test/video.mkv".to_string(),
+                stream_type: "audio".to_string(),
+                stream_index: 1,
+                language: Some("ja".to_string()),
+                codec: Some("opus".to_string()),
+                title: Some("Japonese".to_string()),
+                external_path: None,
+            },
+            NewMediaStream {
+                file_path: "/tmp/test/video.mkv".to_string(),
+                stream_type: "audio".to_string(),
+                stream_index: 2,
+                language: Some("eng".to_string()),
+                codec: Some("aac".to_string()),
+                title: Some("English".to_string()),
+                external_path: None,
+            },
+            NewMediaStream {
+                file_path: "/tmp/test/video.mkv".to_string(),
+                stream_type: "audio".to_string(),
+                stream_index: 3,
+                language: Some("und".to_string()),
+                codec: Some("aac".to_string()),
+                title: Some("Unknown".to_string()),
+                external_path: None,
+            },
+        ];
+        repo.replace_streams_for_file(media_id, "/tmp/test/video.mkv", &streams)
+            .expect("insertar streams");
+
+        let disponibles = repo
+            .list_available_tracks("audio")
+            .expect("listar idiomas disponibles");
+        let claves: Vec<&str> = disponibles.iter().map(|track| track.key.as_str()).collect();
+        assert_eq!(claves, vec!["language:en", "language:ja", "language:und"]);
+        assert_eq!(disponibles[1].language.as_deref(), Some("ja"));
+        assert_eq!(disponibles[2].language, None);
     }
 
     #[test]

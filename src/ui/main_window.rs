@@ -1,10 +1,11 @@
 //! Ventana principal de Acryl con GTK4 / Libadwaita.
 
+use crate::core::language::{LanguageIdentity, identity_from_track_key};
 use crate::core::metadata::{ImageOption, RefreshMetadataResult};
 use crate::core::poster_service::cached_path;
 use crate::db::media_repo::ListMediaOptions;
 use crate::db::{FileRepository, MediaRepository, close_db, open_db};
-use crate::ui::i18n::{Translations, TranslationsRef, load_translations};
+use crate::ui::i18n::{Translations, TranslationsRef, language_label, load_translations};
 use crate::ui::media_details::{MediaDetails, SeasonSelection};
 use crate::ui::media_list::MediaList;
 use crate::ui::poster::{placeholder_widget, poster_picture};
@@ -1769,6 +1770,13 @@ impl MainWindow {
         }
         self.update_filter_bar();
 
+        // Vista de detalles: vuelve a aplicar el idioma a los botones, al tipo
+        // de medio, al encabezado de temporada y a las tarjetas de episodios.
+        let details_media_id = self.media_details.borrow().media_id();
+        if details_media_id > 0 {
+            self.media_details.borrow_mut().refresh_texts();
+        }
+
         // Vista de ajustes (título, secciones, botones, filas de carpetas)
         self.settings_view.refresh_texts();
     }
@@ -2155,7 +2163,14 @@ impl MainWindow {
             crate::core::player::PlaybackStart::NeedsDefaultTrackFallback {
                 file_path: fallback_path,
                 default_tracks: fallback_defaults,
-            } => self.show_default_track_fallback_dialog(fallback_path, fallback_defaults),
+                missing_audio,
+                missing_subtitle,
+            } => self.show_default_track_fallback_dialog(
+                fallback_path,
+                fallback_defaults,
+                missing_audio,
+                missing_subtitle,
+            ),
         }
     }
 
@@ -2165,21 +2180,14 @@ impl MainWindow {
         &self,
         file_path: String,
         default_tracks: crate::config::DefaultTracks,
+        missing_audio: bool,
+        missing_subtitle: bool,
     ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
-        let audio_label = default_tracks
-            .audio
-            .as_deref()
-            .map(|key| format!("Audio: {key}"))
-            .unwrap_or_else(|| "Audio: (ninguno)".to_string());
-        let subtitle_label = default_tracks
-            .subtitle
-            .as_deref()
-            .map(|key| format!("Subtítulos: {key}"))
-            .unwrap_or_else(|| "Subtítulos: (ninguno)".to_string());
-
-        let message = format!(
-            "Este video no tiene las pistas predeterminadas configuradas:\n<b>{}</b>\n<b>{}</b>\n\n¿Qué desea hacer?",
-            audio_label, subtitle_label
+        let message = default_track_fallback_message(
+            &default_tracks,
+            missing_audio,
+            missing_subtitle,
+            &self.translations,
         );
 
         let dialog = gtk4::AlertDialog::builder()
@@ -2483,6 +2491,51 @@ fn restore_window_mode(window: &AdwApplicationWindow, mode: crate::core::player:
     }
 }
 
+/// Construye el mensaje del diálogo de fallback mencionando solo las pistas
+/// predeterminadas que el video no tiene.
+fn default_track_fallback_message(
+    default_tracks: &crate::config::DefaultTracks,
+    missing_audio: bool,
+    missing_subtitle: bool,
+    translations: &TranslationsRef,
+) -> String {
+    // `GtkAlertDialog::message` se muestra como texto plano: no se deben
+    // incluir etiquetas de marcado como `<b>`, o el usuario las vería tal cual.
+    let audio_word = translations.borrow().t("track.audio");
+    let subtitle_word = translations.borrow().t("track.subtitles");
+    let mut missing_labels = Vec::new();
+    if missing_audio && let Some(key) = default_tracks.audio.as_deref() {
+        missing_labels.push(format!(
+            "{}: {}",
+            audio_word,
+            default_track_language_label(key, translations)
+        ));
+    }
+    if missing_subtitle && let Some(key) = default_tracks.subtitle.as_deref() {
+        missing_labels.push(format!(
+            "{}: {}",
+            subtitle_word,
+            default_track_language_label(key, translations)
+        ));
+    }
+    format!(
+        "Este video no tiene estas pistas predeterminadas:\n{}\n\n¿Qué desea hacer?",
+        missing_labels.join("\n")
+    )
+}
+
+/// Convierte una clave de pista (`language:es`, `embedded:...`) en el nombre
+/// legible del idioma según el idioma activo de la interfaz.
+fn default_track_language_label(key: &str, translations: &TranslationsRef) -> String {
+    match identity_from_track_key(key) {
+        Some(LanguageIdentity::Known(code)) => language_label(translations, Some(code)),
+        Some(LanguageIdentity::Unknown) => language_label(translations, None),
+        // Claves que no representan un idioma (por ejemplo, una ruta externa)
+        // se muestran tal cual para no perder información.
+        None => key.to_string(),
+    }
+}
+
 /// Resumen legible del resultado de una actualización forzada de metadatos.
 fn metadata_refresh_summary(
     result: &RefreshMetadataResult,
@@ -2515,4 +2568,57 @@ fn metadata_refresh_summary(
         ));
     }
     summary
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::DefaultTracks;
+
+    fn defaults() -> DefaultTracks {
+        DefaultTracks {
+            audio: Some("language:ja".to_string()),
+            subtitle: Some("language:es".to_string()),
+        }
+    }
+
+    fn translations(language: &str) -> TranslationsRef {
+        load_translations(language).expect("cargar traducciones")
+    }
+
+    #[test]
+    fn fallback_solo_menciona_la_pista_ausente() {
+        let translations = translations("en");
+        let mensaje = default_track_fallback_message(&defaults(), true, false, &translations);
+        assert!(mensaje.contains("Audio: Japanese"));
+        assert!(!mensaje.contains("Subtitles: Spanish"));
+        assert!(!mensaje.contains("language:ja"));
+        assert!(!mensaje.contains("<b>"));
+
+        let mensaje = default_track_fallback_message(&defaults(), false, true, &translations);
+        assert!(!mensaje.contains("Audio: Japanese"));
+        assert!(mensaje.contains("Subtitles: Spanish"));
+        assert!(!mensaje.contains("language:es"));
+        assert!(!mensaje.contains("<b>"));
+    }
+
+    #[test]
+    fn fallback_menciona_ambas_pistas_si_faltan_las_dos() {
+        let mensaje = default_track_fallback_message(&defaults(), true, true, &translations("es"));
+        assert!(mensaje.contains("Audio: Japonés"));
+        assert!(mensaje.contains("Subtítulos: Español"));
+        assert!(!mensaje.contains("language:"));
+    }
+
+    #[test]
+    fn fallback_traduce_tambien_claves_antiguas() {
+        let antiguas = DefaultTracks {
+            audio: Some("embedded:audio:jpn:aac:japanese".to_string()),
+            subtitle: Some("embedded:subtitle:spa:ass:spanish".to_string()),
+        };
+        let mensaje = default_track_fallback_message(&antiguas, true, true, &translations("en"));
+        assert!(mensaje.contains("Audio: Japanese"));
+        assert!(mensaje.contains("Subtitles: Spanish"));
+        assert!(!mensaje.contains("embedded:"));
+    }
 }
