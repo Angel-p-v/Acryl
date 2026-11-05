@@ -1454,6 +1454,8 @@ impl MainWindow {
         language: &str,
     ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
         self.translations.borrow_mut().set_language(language)?;
+        // Forzar liberación del RefMut antes de usar self.t() abajo.
+        drop(self.translations.borrow_mut());
         self.show_toast(&self.t("status.language_applied"));
         self.refresh_ui_texts();
         Ok(())
