@@ -535,8 +535,8 @@ impl MainWindow {
         history_list.set_valign(gtk4::Align::Start);
         history_list.set_homogeneous(false);
         history_list.set_selection_mode(gtk4::SelectionMode::None);
-        history_list.set_row_spacing(8);
-        history_list.set_column_spacing(8);
+        history_list.set_row_spacing(4);
+        history_list.set_column_spacing(4);
         history_list.set_margin_top(0);
         history_list.set_margin_bottom(0);
         history_list.set_margin_start(0);
@@ -557,8 +557,8 @@ impl MainWindow {
         let scrolled_for_history_timeout = history_scrolled.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
             let width = scrolled_for_history_timeout.width() as f64;
-            const CARD_WIDTH: i32 = 216;
-            const SPACING: i32 = 8; // column_spacing + márgenes
+            const CARD_WIDTH: i32 = 176;
+            const SPACING: i32 = 4; // column_spacing + márgenes
             let card_total = CARD_WIDTH as f64 + SPACING as f64;
             let columns = (width / card_total).floor() as i32;
             let columns = columns.clamp(1, 12);
@@ -1547,10 +1547,10 @@ impl MainWindow {
 
         let translations = w.translations.clone();
         let this_clone = this.clone();
-        const CARD_POSTER_WIDTH: i32 = 200;
-        const CARD_POSTER_HEIGHT: i32 = 180;
+        const CARD_POSTER_WIDTH: i32 = 160;
+        const CARD_POSTER_HEIGHT: i32 = 240;
         const CARD_WIDTH: i32 = CARD_POSTER_WIDTH + 16;
-        const CARD_HEIGHT: i32 = 280;
+        const CARD_HEIGHT: i32 = 260;
 
         for entry in history.iter() {
             let card = Box::new(Orientation::Vertical, 3);
