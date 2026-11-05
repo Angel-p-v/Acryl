@@ -2,16 +2,13 @@
 
 use crate::core::language::{LanguageIdentity, identity_from_track_key};
 use crate::core::metadata::{ImageOption, RefreshMetadataResult};
-use crate::core::poster_service::cached_path;
 use crate::db::media_repo::ListMediaOptions;
 use crate::db::{FileRepository, MediaRepository, close_db, open_db};
 use crate::ui::i18n::{Translations, TranslationsRef, language_label, load_translations};
 use crate::ui::media_details::{MediaDetails, SeasonSelection};
-use crate::ui::media_list::MediaList;
-use crate::ui::poster::{placeholder_widget, poster_picture};
+use crate::ui::media_list::{MediaList, bind_history_card, build_card_widget};
 use crate::ui::poster_selector::{ImageChoice, PosterSelector};
 use crate::ui::settings_window::SettingsView;
-use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
 use gtk4::{
     Box, Button, CenterBox, FlowBox, GestureClick, Label, Orientation, Revealer, ScrolledWindow,
@@ -20,8 +17,12 @@ use gtk4::{
 use libadwaita::prelude::*;
 use libadwaita::{ApplicationWindow as AdwApplicationWindow, StatusPage, Toast, ToastOverlay};
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::rc::Rc;
-use std::sync::mpsc::{self, TryRecvError};
+use std::sync::{
+    Arc, Mutex,
+    mpsc::{self, TryRecvError},
+};
 use std::time::Duration;
 
 /// Vista recordada en la pila de navegación. Permite que «Volver» y la salida
@@ -1547,84 +1548,22 @@ impl MainWindow {
 
         let translations = w.translations.clone();
         let this_clone = this.clone();
-        const CARD_POSTER_WIDTH: i32 = 160;
-        const CARD_POSTER_HEIGHT: i32 = 240;
-        const CARD_HEIGHT: i32 = 340;
+
+        // Canales para descarga de pósters (igual que media_list.rs).
+        let (download_tx, _download_rx) = mpsc::channel();
+        let downloading_posters = Arc::new(Mutex::new(HashSet::new()));
 
         for entry in history.iter() {
-            let card = Box::new(Orientation::Vertical, 6);
-            card.add_css_class("media-card");
-            card.set_halign(gtk4::Align::Start);
-            card.set_valign(gtk4::Align::Start);
-            card.set_hexpand(true);
-            card.set_size_request(-1, CARD_HEIGHT);
-            card.set_margin_top(8);
-            card.set_margin_start(8);
-            card.set_margin_end(8);
-
-            // Póster con proporción fija 2:3.
-            let poster_stack = Box::new(Orientation::Vertical, 0);
-            poster_stack.set_halign(gtk4::Align::Start);
-            poster_stack.set_valign(gtk4::Align::Start);
-            poster_stack.set_size_request(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
-
-            let poster_url = entry.poster_path.as_deref();
-            let cache_path = poster_url.and_then(cached_path);
-            let pixbuf = cache_path.and_then(|cache_path| {
-                GtkPixbuf::from_file_at_scale(
-                    &cache_path,
-                    CARD_POSTER_WIDTH,
-                    CARD_POSTER_HEIGHT,
-                    true,
-                )
-                .ok()
-            });
-
-            match pixbuf {
-                Some(pixbuf) => {
-                    let picture = poster_picture(&pixbuf, CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
-                    picture.add_css_class("media-poster");
-                    poster_stack.append(&picture);
-                }
-                None => {
-                    let placeholder = placeholder_widget(CARD_POSTER_WIDTH, CARD_POSTER_HEIGHT);
-                    placeholder.add_css_class("media-poster");
-                    poster_stack.append(&placeholder);
-                }
-            }
-            card.append(&poster_stack);
-
-            // Etiqueta de tipo (Película / Serie / Anime).
-            let type_label_text = match entry.r#type.as_str() {
-                "anime" => translations.borrow().t("media.type.anime"),
-                "series" => translations.borrow().t("media.type.series"),
-                "movie" => translations.borrow().t("media.type.movie"),
-                other => other.to_string(),
-            };
-            let type_label = Label::new(Some(&type_label_text));
-            type_label.set_halign(gtk4::Align::Start);
-            type_label.add_css_class("card-type-label");
-            card.append(&type_label);
-
-            // Título del medio, limitado a dos líneas.
-            let title_label = Label::new(Some(&entry.title));
-            title_label.set_wrap(true);
-            title_label.set_max_width_chars(20);
-            title_label.set_justify(gtk4::Justification::Left);
-            title_label.set_halign(gtk4::Align::Start);
-            title_label.set_xalign(0.0);
-            title_label.set_lines(2);
-            title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-            title_label.add_css_class("poster-title");
-            card.append(&title_label);
-
-            // Año.
-            if let Some(year) = entry.year {
-                let year_label = Label::new(Some(&format!("{}", year)));
-                year_label.add_css_class("poster-year");
-                year_label.set_halign(gtk4::Align::Start);
-                card.append(&year_label);
-            }
+            // Usa exactamente el mismo código de construcción de tarjeta
+            // que la galería principal (media_list.rs).
+            let card = build_card_widget();
+            bind_history_card(
+                &card,
+                entry,
+                &translations,
+                &download_tx,
+                &downloading_posters,
+            );
 
             // Temporada y episodio si es una serie/anime.
             if let (Some(season), Some(episode)) = (entry.season, entry.episode)
