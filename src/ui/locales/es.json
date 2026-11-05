@@ -25,6 +25,8 @@
   "button.history": "Historial",
   "button.all_categories": "Todas las categorías",
   "button.clear_category": "Ver todo",
+  "button.filter_favorite": "Favoritos",
+  "button.filter_watched": "Visto",
   "button.settings": "⚙ Ajustes",
   "button.about": "Acerca de",
   "button.save": "Guardar",

@@ -104,6 +104,10 @@ pub struct MainWindow {
     top_bar_level2: Box,
     /// Chip removible "Filtrando por: X".
     filter_chip: Button,
+    /// Botón para activar/desactivar filtro de favoritos.
+    filter_favorite_button: Button,
+    /// Botón para activar/desactivar filtro de visto/no visto.
+    filter_watched_button: Button,
     /// Píldora "▶ Continuar S01E04 - Black Torch".
     continue_button: Button,
     /// Botones de modo de vista (Grid/Lista).
@@ -336,6 +340,16 @@ impl MainWindow {
         filter_label.set_xalign(0.0);
         filter_label.add_css_class("filter-label");
         filter_bar.append(&filter_label);
+
+        let filter_favorite_button = Button::with_label(&t("button.filter_favorite"));
+        filter_favorite_button.add_css_class("flat-button");
+        filter_favorite_button.set_valign(gtk4::Align::Center);
+        filter_bar.append(&filter_favorite_button);
+
+        let filter_watched_button = Button::with_label(&t("button.filter_watched"));
+        filter_watched_button.add_css_class("flat-button");
+        filter_watched_button.set_valign(gtk4::Align::Center);
+        filter_bar.append(&filter_watched_button);
 
         let filter_clear_button = Button::with_label(&t("button.clear_category"));
         filter_clear_button.add_css_class("flat-button");
@@ -585,6 +599,8 @@ impl MainWindow {
             filter_clear_button,
             top_bar_level2,
             filter_chip,
+            filter_favorite_button,
+            filter_watched_button,
             continue_button,
             view_grid_button,
             view_list_button,
@@ -702,6 +718,46 @@ impl MainWindow {
         this.borrow().filter_chip.connect_clicked(move |_| {
             Self::clear_category_filter(&this_chip);
         });
+
+        // Filtro de favoritos: activa/desactiva el filtro de is_favorite.
+        let this_fav = this.clone();
+        this.borrow()
+            .filter_favorite_button
+            .connect_clicked(move |_| {
+                let new_value = {
+                    let window = this_fav.borrow_mut();
+                    let f = window.current_favorite_filter.borrow_mut();
+                    match *f {
+                        None => Some(true),
+                        _ => None,
+                    }
+                };
+                {
+                    let window = this_fav.borrow_mut();
+                    *window.current_favorite_filter.borrow_mut() = new_value;
+                }
+                Self::load_media(&this_fav);
+            });
+
+        // Filtro de visto/no visto: activa/desactiva el filtro de is_watched.
+        let this_wat = this.clone();
+        this.borrow()
+            .filter_watched_button
+            .connect_clicked(move |_| {
+                let new_value = {
+                    let window = this_wat.borrow_mut();
+                    let f = window.current_watched_filter.borrow_mut();
+                    match *f {
+                        None => Some(true),
+                        _ => None,
+                    }
+                };
+                {
+                    let window = this_wat.borrow_mut();
+                    *window.current_watched_filter.borrow_mut() = new_value;
+                }
+                Self::load_media(&this_wat);
+            });
 
         // Nivel 2: píldora "Continuar viendo".
         let this_cont = this.clone();
