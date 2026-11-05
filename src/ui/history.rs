@@ -2,13 +2,14 @@
 //! Muestra las tarjetas de medios reproducidos con estilo visual completo:
 //! tarjetas con fondo, borde y esquinas redondeadas, póster, título, tipo,
 //! año, temporada/episodio y fecha de progreso.
-//! Nota: el cambio de idioma se aplica al reiniciar la aplicación.
+//! El cambio de idioma se aplica en caliente (sin reiniciar la aplicación).
 
 use crate::db::{MediaRepository, close_db, open_db};
 use crate::ui::i18n::TranslationsRef;
 use crate::ui::media_list::bind_history_card;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, FlowBox, GestureClick, Label, Orientation, ScrolledWindow};
+use std::rc::Rc;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
@@ -22,12 +23,21 @@ pub struct HistoryView {
     pub clear_button: Button,
     /// Rejilla de tarjetas.
     pub list: FlowBox,
+    /// Ruta de la base de datos (para recargar al cambiar idioma).
+    db_path: Option<String>,
+    /// Referencia a la ventana principal (para callbacks de clic).
+    this: Option<crate::ui::main_window::MainWindowRef>,
+    /// Referencia a las traducciones (para recargar al cambiar idioma).
+    translations: TranslationsRef,
+    /// Callback de clic en tarjeta (para recargar al cambiar idioma).
+    on_card_click: Option<Rc<dyn Fn(i64)>>,
 }
 
 impl HistoryView {
     /// Crea una nueva vista de historial vacía.
     pub fn new(translations: TranslationsRef) -> Self {
-        let t = move |key: &str| -> String { translations.borrow().t(key) };
+        let translations_clone = translations.clone();
+        let t = move |key: &str| -> String { translations_clone.borrow().t(key) };
 
         let page = Box::new(Orientation::Vertical, 0);
         page.set_hexpand(true);
@@ -108,24 +118,52 @@ impl HistoryView {
             back_button,
             clear_button,
             list,
+            db_path: None,
+            this: None,
+            translations,
+            on_card_click: None,
         }
     }
 
-    /// Carga el historial de reproducción desde la BD y lo muestra en la rejilla.
-    pub fn load(
-        &self,
+    /// Inicializa el contexto necesario para recargar el historial.
+    /// Se llama después de crear MainWindow, ya que `this` no existe
+    /// todavía en el momento de construir HistoryView.
+    pub fn init(
+        &mut self,
         db_path: &str,
-        this: &crate::ui::main_window::MainWindowRef,
+        this: crate::ui::main_window::MainWindowRef,
         on_card_click: impl Fn(i64) + 'static + Clone,
     ) {
-        let db_path_owned = db_path.to_string();
+        self.db_path = Some(db_path.to_string());
+        self.this = Some(this);
+        self.on_card_click = Some(Rc::new(on_card_click));
+    }
 
-        // Vaciar filas existentes.
-        while let Some(child) = self.list.first_child() {
-            self.list.remove(&child);
-        }
+    /// Carga el historial de reproducción desde la BD y lo muestra en la rejilla.
+    pub fn load(&self) {
+        self.load_history();
+    }
 
-        let mut conn = match open_db(&db_path_owned) {
+    /// Refresca los textos de la UI aplicando el idioma actual.
+    /// Se llama después de cambiar el idioma para que las tarjetas
+    /// muestren los textos traducidos sin reiniciar la aplicación.
+    pub fn refresh_texts(&self) {
+        self.load_history();
+    }
+
+    /// Carga el historial desde la BD y pinta las tarjetas con las
+    /// traducciones actuales.
+    fn load_history(&self) {
+        let db_path = match &self.db_path {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        let on_card_click = match &self.on_card_click {
+            Some(c) => c.clone(),
+            None => return,
+        };
+
+        let mut conn = match open_db(&db_path) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Error abriendo BD para historial: {}", e);
@@ -139,10 +177,12 @@ impl HistoryView {
         };
         close_db(conn);
 
-        let translations: TranslationsRef = {
-            let w = this.borrow();
-            w.translations.clone()
-        };
+        let translations = self.translations.clone();
+
+        // Vaciar filas existentes.
+        while let Some(child) = self.list.first_child() {
+            self.list.remove(&child);
+        }
 
         if history.is_empty() {
             let empty_box = Box::new(Orientation::Vertical, 8);
