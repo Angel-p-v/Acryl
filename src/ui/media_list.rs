@@ -591,15 +591,18 @@ pub fn bind_history_card(
                         HISTORY_CARD_POSTER_WIDTH,
                         HISTORY_CARD_POSTER_HEIGHT,
                     );
+                    picture.add_css_class("media-poster");
                     poster_stack.append(&picture);
                 } else {
                     let placeholder =
                         placeholder_widget(HISTORY_CARD_POSTER_WIDTH, HISTORY_CARD_POSTER_HEIGHT);
+                    placeholder.add_css_class("media-poster");
                     poster_stack.append(&placeholder);
                 }
             } else {
                 let placeholder =
                     placeholder_widget(HISTORY_CARD_POSTER_WIDTH, HISTORY_CARD_POSTER_HEIGHT);
+                placeholder.add_css_class("media-poster");
                 poster_stack.append(&placeholder);
             }
         }
@@ -608,6 +611,7 @@ pub fn bind_history_card(
             let spinner = gtk4::Spinner::new();
             spinner.start();
             spinner.set_size_request(HISTORY_CARD_POSTER_WIDTH, HISTORY_CARD_POSTER_HEIGHT);
+            spinner.add_css_class("media-poster");
             poster_stack.append(&spinner);
         }
         _ => {
@@ -640,6 +644,7 @@ pub fn bind_history_card(
             let spinner = gtk4::Spinner::new();
             spinner.start();
             spinner.set_size_request(HISTORY_CARD_POSTER_WIDTH, HISTORY_CARD_POSTER_HEIGHT);
+            spinner.add_css_class("media-poster");
             poster_stack.append(&spinner);
         }
     }
@@ -654,6 +659,7 @@ pub fn bind_history_card(
     };
     let type_label = Label::new(Some(&type_label_text));
     type_label.set_halign(gtk4::Align::Start);
+    type_label.add_css_class("card-type-label");
     card.append(&type_label);
 
     // Título.
@@ -665,11 +671,13 @@ pub fn bind_history_card(
     title_label.set_xalign(0.0);
     title_label.set_lines(2);
     title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    title_label.add_css_class("poster-title");
     card.append(&title_label);
 
     // Año.
     if let Some(year) = entry.year {
         let year_label = Label::new(Some(&format!("{year}")));
+        year_label.add_css_class("poster-year");
         year_label.set_halign(gtk4::Align::Start);
         card.append(&year_label);
     }

@@ -124,8 +124,18 @@ impl HistoryView {
         };
 
         if history.is_empty() {
-            let empty_box = Box::new(Orientation::Vertical, 0);
+            let empty_box = Box::new(Orientation::Vertical, 8);
+            empty_box.set_halign(gtk4::Align::Center);
+            empty_box.set_valign(gtk4::Align::Center);
+            empty_box.set_hexpand(true);
+            empty_box.set_vexpand(true);
+            empty_box.set_margin_top(48);
+
             let empty_label = Label::new(Some(&t(&translations, "history.empty")));
+            empty_label.set_halign(gtk4::Align::Center);
+            empty_label.set_xalign(0.5);
+            empty_label.add_css_class("dim-label");
+
             empty_box.append(&empty_label);
             self.list.append(&empty_box);
             return;
@@ -186,9 +196,10 @@ impl HistoryView {
     }
 }
 
-/// Crea una tarjeta de historial sin estilo visual.
+/// Crea una tarjeta de historial con estilo visual completo (clase media-card).
 fn build_history_card_widget() -> Box {
     let card = Box::new(Orientation::Vertical, 6);
+    card.add_css_class("media-card");
     card.set_halign(gtk4::Align::Start);
     card.set_valign(gtk4::Align::Start);
     card.set_size_request(-1, 300);
