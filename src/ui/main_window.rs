@@ -535,8 +535,8 @@ impl MainWindow {
         history_list.set_valign(gtk4::Align::Start);
         history_list.set_homogeneous(false);
         history_list.set_selection_mode(gtk4::SelectionMode::None);
-        history_list.set_row_spacing(4);
-        history_list.set_column_spacing(4);
+        history_list.set_row_spacing(0);
+        history_list.set_column_spacing(0);
         history_list.set_margin_top(0);
         history_list.set_margin_bottom(0);
         history_list.set_margin_start(0);
@@ -557,8 +557,8 @@ impl MainWindow {
         let scrolled_for_history_timeout = history_scrolled.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
             let width = scrolled_for_history_timeout.width() as f64;
-            const CARD_WIDTH: i32 = 200;
-            const SPACING: i32 = 4; // column_spacing + márgenes
+            const CARD_WIDTH: i32 = 176;
+            const SPACING: i32 = 0; // espacio proporcionado por márgenes de la tarjeta
             let card_total = CARD_WIDTH as f64 + SPACING as f64;
             let columns = (width / card_total).floor() as i32;
             let columns = columns.clamp(1, 12);
@@ -1547,17 +1547,20 @@ impl MainWindow {
 
         let translations = w.translations.clone();
         let this_clone = this.clone();
-        const CARD_POSTER_WIDTH: i32 = 200;
-        const CARD_POSTER_HEIGHT: i32 = 180;
-        const CARD_WIDTH: i32 = CARD_POSTER_WIDTH;
-        const CARD_HEIGHT: i32 = 240;
+        const CARD_POSTER_WIDTH: i32 = 160;
+        const CARD_POSTER_HEIGHT: i32 = 240;
+        const CARD_HEIGHT: i32 = 340;
 
         for entry in history.iter() {
-            let card = Box::new(Orientation::Vertical, 3);
+            let card = Box::new(Orientation::Vertical, 6);
             card.add_css_class("media-card");
             card.set_halign(gtk4::Align::Start);
             card.set_valign(gtk4::Align::Start);
-            card.set_size_request(CARD_WIDTH, CARD_HEIGHT);
+            card.set_hexpand(true);
+            card.set_size_request(-1, CARD_HEIGHT);
+            card.set_margin_top(8);
+            card.set_margin_start(8);
+            card.set_margin_end(8);
 
             // Póster con proporción fija 2:3.
             let poster_stack = Box::new(Orientation::Vertical, 0);
