@@ -5,6 +5,7 @@
 //! stop, seek, volumen) se envía a `mpv` a través de su socket IPC.
 
 use crate::config::DefaultTracks;
+use crate::core::language::{LanguageIdentity, canonical_code_from_hints, identity_from_track_key};
 use crate::db::file_repo::{FileRepository, TrackPreference, TrackSelection};
 use crate::db::media_repo::MediaStream;
 use crate::db::{MediaRepository, close_db, open_db};
@@ -563,50 +564,30 @@ fn resolve_subtitle_stream(
     None
 }
 
-/// Busca un stream por idioma, haciendo matching flexible cuando la clave
-/// exacta no coincide pero el idioma es el mismo (o compatible).
+/// Busca un stream por idioma cuando la clave exacta no coincide.
 ///
-/// Esto permite que, si el usuario seleccionó "jpn" en Ajustes pero el video
-/// tiene un track con idioma "japonese" o "Japanese", se encuentre la pista
-/// correcta.
+/// La clave predeterminada puede ser la nueva clave canónica (`language:ja`) o
+/// una clave antigua con la pista concreta (`embedded:audio:jpn:aac:japanese`).
+/// En ambos casos todas las variantes del mismo idioma (`jpn`, `ja`,
+/// `Japanese`, `japonese`, etc.) se consideran equivalentes. Si la clave
+/// representa un idioma desconocido, se busca una pista sin idioma reconocible.
 fn find_stream_by_language<'a>(
     streams: &'a [&MediaStream],
     stream_type: &str,
     default_key: &str,
 ) -> Option<&'a MediaStream> {
-    // Extraer el idioma de la clave predeterminada (formato: embedded:audio:jpn:aac:japanese).
-    let default_lang = default_key
-        .splitn(3, ':')
-        .nth(2)
-        .map(|s| s.trim().to_lowercase());
-
-    let default_lang = match default_lang {
-        Some(lang) if !lang.is_empty() => lang,
-        _ => return None,
-    };
-
-    // Primero intentar coincidencia exacta de idioma.
-    if let Some(stream) = streams.iter().find(|s| {
-        s.stream_type == stream_type
-            && s.language
-                .as_deref()
-                .is_some_and(|l| l.trim().to_lowercase() == default_lang)
-    }) {
-        return Some(stream);
-    }
-
-    // Luego intentar coincidencia por prefijo (ej. "jpn" vs "japonese").
-    if let Some(stream) = streams.iter().find(|s| {
-        s.stream_type == stream_type
-            && s.language.as_deref().is_some_and(|l| {
-                let l = l.trim().to_lowercase();
-                l.starts_with(&default_lang) || default_lang.starts_with(&l)
-            })
-    }) {
-        return Some(stream);
-    }
-
-    None
+    let identity = identity_from_track_key(default_key)?;
+    streams.iter().copied().find(|stream| {
+        if stream.stream_type != stream_type {
+            return false;
+        }
+        let stream_language =
+            canonical_code_from_hints(stream.language.as_deref(), stream.title.as_deref());
+        match identity {
+            LanguageIdentity::Known(code) => stream_language == Some(code),
+            LanguageIdentity::Unknown => stream_language.is_none(),
+        }
+    })
 }
 
 /// Lanza mpv y registra la reproducción en el historial si se conoce el medio.
@@ -1570,6 +1551,38 @@ mod tests {
             resolved.external_subtitles,
             vec!["/tmp/video.es.srt".to_string()]
         );
+    }
+
+    #[test]
+    fn encuentra_pista_por_idioma_canonico_y_por_alias_antiguo() {
+        let streams = [
+            stream("audio", 0, "jpn", Some("Japanese"), None),
+            stream("audio", 1, "eng", Some("English"), None),
+            stream("audio", 2, "und", Some("Unknown"), None),
+        ];
+        let refs: Vec<&crate::db::media_repo::MediaStream> = streams.iter().collect();
+
+        assert_eq!(
+            find_stream_by_language(&refs, "audio", "language:ja").map(|s| s.stream_index),
+            Some(0),
+            "una clave canónica debe encontrar la pista japonesa"
+        );
+        assert_eq!(
+            find_stream_by_language(&refs, "audio", "embedded:audio:jpn:aac:japanese")
+                .map(|s| s.stream_index),
+            Some(0),
+            "una clave antigua debe seguir resolviendo el mismo idioma"
+        );
+        assert_eq!(
+            find_stream_by_language(&refs, "audio", "language:en").map(|s| s.stream_index),
+            Some(1)
+        );
+        assert_eq!(
+            find_stream_by_language(&refs, "audio", "language:und").map(|s| s.stream_index),
+            Some(2),
+            "el idioma desconocido debe coincidir con pistas sin idioma reconocible"
+        );
+        assert!(find_stream_by_language(&refs, "audio", "language:fr").is_none());
     }
 
     #[test]

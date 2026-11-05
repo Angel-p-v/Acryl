@@ -6,8 +6,8 @@
 //! En CI se ejecutan bajo `xvfb-run`.
 
 use acryl::config::{AppConfig, Config, DefaultTracks};
+use acryl::core::language::language_key;
 use acryl::db::connection::open_db;
-use acryl::db::media_repo::stream_track_key;
 use acryl::ui::load_translations;
 use acryl::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
@@ -101,10 +101,7 @@ fn insertar_pistas_prueba(conn: &mut rusqlite::Connection) -> (String, String) {
         .expect("insertar pista de prueba");
     }
 
-    (
-        stream_track_key("audio", Some("jpn"), Some("aac"), Some("Japanese"), None),
-        stream_track_key("subtitle", Some("spa"), Some("ass"), Some("Spanish"), None),
-    )
+    (language_key(Some("ja")), language_key(Some("es")))
 }
 
 /// Pulsa Guardar y devuelve la configuración recibida por `on_save`.
@@ -163,6 +160,33 @@ fn escenario_pistas_predeterminadas_al_guardar() {
         Some(subtitle_key.as_str()),
         "los subtítulos predeterminados deben conservarse al guardar"
     );
+
+    drop(view);
+    drop(parent);
+}
+
+fn escenario_claves_antiguas_se_migran_al_idioma() {
+    let (mut config, _config_dir, _data_dir) = temp_config();
+    {
+        let mut conn = abrir_bd(&config);
+        insertar_pistas_prueba(&mut conn);
+    }
+
+    // Claves guardadas por versiones anteriores: pista concreta, no idioma.
+    config.inner.default_tracks.audio = Some("embedded:audio:jpn:aac:japanese".to_string());
+    config.inner.default_tracks.subtitle = Some("embedded:subtitle:spa:ass:spanish".to_string());
+    config.save().expect("guardar config con claves antiguas");
+
+    let (parent, mut view) = crear_settings_view(&config);
+    let guardado = Rc::new(RefCell::new(None));
+    let guardado_c = guardado.clone();
+    view.on_save(move |cfg| {
+        *guardado_c.borrow_mut() = Some(cfg);
+    });
+
+    let cfg = guardar_ajustes(&view, &guardado);
+    assert_eq!(cfg.default_tracks.audio.as_deref(), Some("language:ja"));
+    assert_eq!(cfg.default_tracks.subtitle.as_deref(), Some("language:es"));
 
     drop(view);
     drop(parent);
@@ -282,6 +306,7 @@ fn ajustes_integracion() {
 
     escenario_carpetas_configuradas();
     escenario_pistas_predeterminadas_al_guardar();
+    escenario_claves_antiguas_se_migran_al_idioma();
     escenario_seleccion_despues_de_registrar_callback();
     escenario_boton_acerca_de();
     escenario_dialogo_acerca_de();

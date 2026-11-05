@@ -257,9 +257,12 @@ Una vez iniciada la aplicación:
    a escanear las rutas configuradas. Al eliminar una carpeta se pide confirmación y
    solo se borran sus entradas de la biblioteca: **los archivos de vídeo del disco no
    se tocan**.
-11. **Pistas predeterminadas**: En Ajustes elige la pista de audio y de subtítulos
-   que se aplicarán por defecto. El desplegable incluye un buscador para filtrar
-   listas largas. Estas pistas tienen prioridad sobre la selección guardada por
+11. **Pistas predeterminadas**: En Ajustes elige el idioma de audio y de subtítulos
+   que se aplicarán por defecto. Los idiomas se agrupan y normalizan (`jpn`,
+   `ja`, `Japanese` o `japonese` equivalen a japonés), de modo que cada idioma
+   aparece una sola vez. El desplegable incluye un buscador para filtrar listas
+   largas. Al reproducir, Acryl busca la pista equivalente de ese idioma en el
+   archivo. Estas preferencias tienen prioridad sobre la selección guardada por
    archivo.
 12. **Acerca de**: Al final de Ajustes, el botón «Acerca de» muestra la versión, la
    licencia MIT, el autor, enlaces al repositorio, incidencias y soporte, además de

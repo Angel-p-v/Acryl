@@ -1769,6 +1769,13 @@ impl MainWindow {
         }
         self.update_filter_bar();
 
+        // Vista de detalles: vuelve a aplicar el idioma a los botones, al tipo
+        // de medio, al encabezado de temporada y a las tarjetas de episodios.
+        let details_media_id = self.media_details.borrow().media_id();
+        if details_media_id > 0 {
+            self.media_details.borrow_mut().refresh_texts();
+        }
+
         // Vista de ajustes (título, secciones, botones, filas de carpetas)
         self.settings_view.refresh_texts();
     }

@@ -321,6 +321,12 @@ impl MediaDetails {
     }
 
     pub fn load_media(&mut self, media_id: i64) {
+        self.load_media_with_season(media_id, None);
+    }
+
+    /// Carga un medio conservando la temporada solicitada. Se usa al cambiar
+    /// de idioma para redibujar la vista sin perder el contexto del usuario.
+    fn load_media_with_season(&mut self, media_id: i64, season: Option<SeasonSelection>) {
         let mut conn = match open_db(&self.db_path.borrow()) {
             Ok(conn) => conn,
             Err(error) => {
@@ -335,8 +341,18 @@ impl MediaDetails {
         close_db(conn);
 
         if let Some(media) = media {
-            self.set_media(&media);
+            self.set_media_with_season(&media, season);
         }
+    }
+
+    /// Vuelve a aplicar las traducciones activas a todos los textos de la
+    /// vista (botones, tipo de medio, temporada y tarjetas de episodios).
+    pub fn refresh_texts(&mut self) {
+        if self.media_id <= 0 {
+            return;
+        }
+        let season = self.season_selection();
+        self.load_media_with_season(self.media_id, season);
     }
 
     pub fn set_media(&mut self, media: &Media) {

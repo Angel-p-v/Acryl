@@ -30,11 +30,15 @@ pub fn default_data_dir() -> PathBuf {
 /// tienen prioridad sobre cualquier preferencia por-archivo.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DefaultTracks {
-    /// Clave estable de la pista de audio predeterminada (ej. `embedded:audio:jpn:aac:japanese`).
+    /// Idioma de audio predeterminado (`language:ja`, `language:es`, ...).
+    ///
+    /// Las claves antiguas por pista (`embedded:audio:jpn:aac:japanese`) se
+    /// siguen aceptando y se migran a la clave por idioma al cargar Ajustes.
     #[serde(default)]
     pub audio: Option<String>,
-    /// Clave estable de la pista de subtítulos predeterminada
-    /// (ej. `embedded:subtitle:spa:ass:spanish[esp]` o `external:/ruta/archivo.srt`).
+    /// Idioma de subtítulos predeterminado (`language:es`, `language:und`, ...).
+    ///
+    /// Las claves antiguas por pista también se aceptan por compatibilidad.
     #[serde(default)]
     pub subtitle: Option<String>,
 }

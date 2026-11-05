@@ -1,10 +1,11 @@
 //! Vista de ajustes integrada en el Stack de la aplicación principal.
 
 use crate::config::AppConfig;
+use crate::core::language;
 use crate::core::library::{IndexResult, LibraryService};
-use crate::db::media_repo::MediaRepository;
+use crate::db::media_repo::{AvailableTrack, MediaRepository};
 use crate::db::{close_db, open_db};
-use crate::ui::i18n::TranslationsRef;
+use crate::ui::i18n::{TranslationsRef, language_label};
 use gtk4::prelude::*;
 use gtk4::{
     Box, Button, DropDown, Entry, GestureClick, Label, ListBox, ListBoxRow, Orientation, Popover,
@@ -452,10 +453,10 @@ pub struct SettingsView {
     on_save: Option<Rc<dyn Fn(AppConfig)>>,
     on_refresh_metadata: Option<Rc<dyn Fn()>>,
     translations: TranslationsRef,
-    /// Opciones de pista de la BD (sin "Ninguno"), para reconstruir los
-    /// desplegables al cambiar de idioma.
-    audio_options: Vec<(String, String)>,
-    subtitle_options: Vec<(String, String)>,
+    /// Idiomas disponibles en la BD (sin "Ninguno"), para reconstruir los
+    /// selectores con las etiquetas del idioma activo.
+    audio_tracks: Vec<AvailableTrack>,
+    subtitle_tracks: Vec<AvailableTrack>,
     /// Selectores de pista predeterminada con búsqueda y filtrado real.
     /// Se usan Entry + Popover + ListBox para que escribir en el buscador
     /// oculte las opciones que no coincidan (filtrado visual).
@@ -488,6 +489,30 @@ pub fn obtener_label_para_clave<'a>(
         .iter()
         .find(|(k, _)| k == clave)
         .map(|(_, label)| label.as_str())
+}
+
+/// Construye las opciones del selector de pistas a partir de los idiomas
+/// disponibles, traduciendo sus nombres al idioma activo de la interfaz.
+fn build_track_options(
+    tracks: &[AvailableTrack],
+    translations: &TranslationsRef,
+    none_label: &str,
+) -> Vec<(String, String)> {
+    let mut options = vec![("none".to_string(), none_label.to_string())];
+    options.extend(tracks.iter().map(|track| {
+        (
+            track.key.clone(),
+            language_label(translations, track.language.as_deref()),
+        )
+    }));
+    options
+}
+
+/// Normaliza la clave guardada en la configuración a la forma canónica por
+/// idioma. Las claves antiguas (`embedded:audio:jpn:...`) se migran al
+/// cargar la vista; las claves que no representan un idioma se conservan.
+fn normalize_default_track_key(key: Option<&str>) -> Option<String> {
+    key.map(language::normalize_track_key)
 }
 
 /// Selector de pista con búsqueda y filtrado visual.
@@ -927,7 +952,7 @@ impl SettingsView {
         default_tracks_row.set_valign(gtk4::Align::Start);
 
         // Leer opciones de pista de la biblioteca.
-        let (audio_options, subtitle_options) = match open_db(db_path) {
+        let (audio_tracks, subtitle_tracks) = match open_db(db_path) {
             Ok(mut conn) => {
                 let mut repo = MediaRepository::new(&mut conn);
                 let audio = repo.list_available_tracks("audio").unwrap_or_default();
@@ -938,12 +963,18 @@ impl SettingsView {
             Err(_) => (Vec::new(), Vec::new()),
         };
 
-        // Opciones completas: "Ninguno" + pistas de la biblioteca.
+        // Opciones completas: "Ninguno" + idiomas de la biblioteca. Cada
+        // idioma aparece una sola vez, ya normalizado, y su etiqueta usa el
+        // idioma activo de la interfaz.
         let none_label = t("settings.default_tracks.none");
-        let mut all_audio: Vec<(String, String)> = vec![("none".to_string(), none_label.clone())];
-        all_audio.extend(audio_options.iter().cloned());
-        let mut all_subtitle: Vec<(String, String)> = vec![("none".to_string(), none_label)];
-        all_subtitle.extend(subtitle_options.iter().cloned());
+        let all_audio = build_track_options(&audio_tracks, &translations, &none_label);
+        let all_subtitle = build_track_options(&subtitle_tracks, &translations, &none_label);
+
+        // Las claves antiguas por pista se migran a la clave canónica por
+        // idioma para que la selección siga siendo visible y reutilizable.
+        let current_audio_key = normalize_default_track_key(config.default_tracks.audio.as_deref());
+        let current_subtitle_key =
+            normalize_default_track_key(config.default_tracks.subtitle.as_deref());
 
         // Audio predeterminado: selector con búsqueda y filtrado visual.
         // Escribir en el Entry filtra las opciones del ListBox dentro del
@@ -951,7 +982,7 @@ impl SettingsView {
         let (audio_entry_widget, default_audio_selector) = TrackSelector::new(
             &t("settings.default_tracks.audio"),
             &all_audio,
-            config.default_tracks.audio.as_deref(),
+            current_audio_key.as_deref(),
             &translations,
         );
         default_tracks_row.append(&audio_entry_widget);
@@ -960,7 +991,7 @@ impl SettingsView {
         let (subtitle_entry_widget, default_subtitle_selector) = TrackSelector::new(
             &t("settings.default_tracks.subtitle"),
             &all_subtitle,
-            config.default_tracks.subtitle.as_deref(),
+            current_subtitle_key.as_deref(),
             &translations,
         );
         default_tracks_row.append(&subtitle_entry_widget);
@@ -1103,8 +1134,8 @@ impl SettingsView {
             on_save: None,
             on_refresh_metadata: None,
             translations,
-            audio_options,
-            subtitle_options,
+            audio_tracks,
+            subtitle_tracks,
             default_audio_selector,
             default_subtitle_selector,
         }
@@ -1153,13 +1184,12 @@ impl SettingsView {
         self.about_label.set_label(&t("settings.about.description"));
         self.about_button_content.set_label(&t("button.about"));
 
-        // Actualizar los selectores de pista con la nueva etiqueta de "Ninguno",
-        // conservando la selección actual.
+        // Actualizar los selectores de pista con las etiquetas del nuevo
+        // idioma, conservando la selección actual.
         let none_label = t("settings.default_tracks.none");
-        let mut all_audio: Vec<(String, String)> = vec![("none".to_string(), none_label.clone())];
-        all_audio.extend(self.audio_options.iter().cloned());
-        let mut all_subtitle: Vec<(String, String)> = vec![("none".to_string(), none_label)];
-        all_subtitle.extend(self.subtitle_options.iter().cloned());
+        let all_audio = build_track_options(&self.audio_tracks, &self.translations, &none_label);
+        let all_subtitle =
+            build_track_options(&self.subtitle_tracks, &self.translations, &none_label);
         self.default_audio_selector.set_options(
             &all_audio,
             self.default_audio_selector.selected_key().as_deref(),

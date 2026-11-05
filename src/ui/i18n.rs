@@ -40,6 +40,11 @@ impl Translations {
             .unwrap_or_else(|| key.to_string())
     }
 
+    /// Indica si existe una traducción para `key`.
+    pub fn has(&self, key: &str) -> bool {
+        self.strings.contains_key(key)
+    }
+
     /// Recarga el diccionario para otro idioma.
     pub fn set_language(&mut self, language: &str) -> Result<(), Box<dyn std::error::Error>> {
         *self = Self::load(language)?;
@@ -54,6 +59,25 @@ pub type TranslationsRef = Rc<RefCell<Translations>>;
 /// Crea una nueva referencia a traducciones cargando el idioma dado.
 pub fn load_translations(language: &str) -> Result<TranslationsRef, Box<dyn std::error::Error>> {
     Ok(Rc::new(RefCell::new(Translations::load(language)?)))
+}
+
+/// Nombre legible de un idioma en el idioma activo de la interfaz.
+///
+/// `code` es un código ISO 639-1 canónico (`ja`, `es`, ...) o `None` para un
+/// idioma desconocido. Si el diccionario todavía no incluye ese código se
+/// muestra el código en mayúsculas en lugar de una clave interna.
+pub fn language_label(translations: &TranslationsRef, code: Option<&str>) -> String {
+    let key = match code {
+        Some(code) => format!("language.{code}"),
+        None => "language.unknown".to_string(),
+    };
+    let translations = translations.borrow();
+    if translations.has(&key) {
+        translations.t(&key)
+    } else {
+        code.map(str::to_uppercase)
+            .unwrap_or_else(|| translations.t("language.unknown"))
+    }
 }
 
 #[cfg(test)]
