@@ -550,7 +550,8 @@ pub fn build_card_widget() -> Box {
     card
 }
 
-/// Rellena una tarjeta de historial sin estilo visual.
+/// Rellena una tarjeta de historial con el contenido completo (póster, tipo, título, año,
+/// temporada/episodio, fecha y progreso). Sin estilo visual CSS adicional.
 pub fn bind_history_card(
     card: &Box,
     entry: &PlaybackHistoryEntry,
@@ -565,6 +566,9 @@ pub fn bind_history_card(
 
     // Póster.
     let poster_stack = Box::new(Orientation::Vertical, 0);
+    poster_stack.set_halign(gtk4::Align::Start);
+    poster_stack.set_valign(gtk4::Align::Start);
+    poster_stack.set_size_request(HISTORY_CARD_POSTER_WIDTH, HISTORY_CARD_POSTER_HEIGHT);
 
     let poster_url = entry.poster_path.as_deref();
     let is_cached = poster_url.and_then(cached_path).is_some();
@@ -603,6 +607,7 @@ pub fn bind_history_card(
             // Se está descargando: mostrar spinner.
             let spinner = gtk4::Spinner::new();
             spinner.start();
+            spinner.set_size_request(HISTORY_CARD_POSTER_WIDTH, HISTORY_CARD_POSTER_HEIGHT);
             poster_stack.append(&spinner);
         }
         _ => {
@@ -634,6 +639,7 @@ pub fn bind_history_card(
 
             let spinner = gtk4::Spinner::new();
             spinner.start();
+            spinner.set_size_request(HISTORY_CARD_POSTER_WIDTH, HISTORY_CARD_POSTER_HEIGHT);
             poster_stack.append(&spinner);
         }
     }
@@ -647,15 +653,24 @@ pub fn bind_history_card(
         other => other.to_string(),
     };
     let type_label = Label::new(Some(&type_label_text));
+    type_label.set_halign(gtk4::Align::Start);
     card.append(&type_label);
 
     // Título.
     let title_label = Label::new(Some(&entry.title));
+    title_label.set_wrap(true);
+    title_label.set_max_width_chars(20);
+    title_label.set_justify(gtk4::Justification::Left);
+    title_label.set_halign(gtk4::Align::Start);
+    title_label.set_xalign(0.0);
+    title_label.set_lines(2);
+    title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     card.append(&title_label);
 
     // Año.
     if let Some(year) = entry.year {
         let year_label = Label::new(Some(&format!("{year}")));
+        year_label.set_halign(gtk4::Align::Start);
         card.append(&year_label);
     }
 }

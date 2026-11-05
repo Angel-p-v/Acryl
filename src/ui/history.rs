@@ -155,6 +155,8 @@ impl HistoryView {
                     entry.episode_title.as_deref().unwrap_or(&entry.title)
                 );
                 let ep_label = Label::new(Some(&ep_label_text));
+                ep_label.set_halign(gtk4::Align::Start);
+                ep_label.set_xalign(0.0);
                 card.append(&ep_label);
             }
 
@@ -166,6 +168,8 @@ impl HistoryView {
                 "—".to_string()
             };
             let date_label = Label::new(Some(&format!("{} · {}", entry.played_at, progress)));
+            date_label.set_halign(gtk4::Align::Start);
+            date_label.set_xalign(0.0);
             card.append(&date_label);
 
             // Clic en la tarjeta.
