@@ -78,12 +78,20 @@ pub struct ListMediaOptions {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
     pub order_by: Option<String>,
+    /// Filtrar solo favoritos (true) o no favoritos (false). None = sin filtro.
+    pub favorite: Option<bool>,
+    /// Filtrar solo vistos (true) o no vistos (false). None = sin filtro.
+    pub watched: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct SearchMediaOptions {
     pub r#type: Option<String>,
     pub limit: Option<i64>,
+    /// Filtrar solo favoritos (true) o no favoritos (false). None = sin filtro.
+    pub favorite: Option<bool>,
+    /// Filtrar solo vistos (true) o no vistos (false). None = sin filtro.
+    pub watched: Option<bool>,
 }
 
 pub struct MediaRepository<'a> {
@@ -389,6 +397,16 @@ impl<'a> MediaRepository<'a> {
             params_vec.push(Box::new(t.clone()));
         }
 
+        if let Some(favorite) = options.favorite {
+            sql.push_str(" AND is_favorite = ?");
+            params_vec.push(Box::new(favorite));
+        }
+
+        if let Some(watched) = options.watched {
+            sql.push_str(" AND is_watched = ?");
+            params_vec.push(Box::new(watched));
+        }
+
         let order_clause = match options.order_by.as_deref().unwrap_or("title") {
             "added" => "ORDER BY created_at DESC",
             "recent" => "ORDER BY updated_at DESC",
@@ -447,6 +465,16 @@ impl<'a> MediaRepository<'a> {
                 params.push(Box::new(t.clone()));
             }
 
+            if let Some(favorite) = options.favorite {
+                sql.push_str(" AND m.is_favorite = ?");
+                params.push(Box::new(favorite));
+            }
+
+            if let Some(watched) = options.watched {
+                sql.push_str(" AND m.is_watched = ?");
+                params.push(Box::new(watched));
+            }
+
             sql.push_str(" ORDER BY bm25(media_fts), m.sort_title LIMIT ?");
             params.push(Box::new(options.limit.unwrap_or(20)));
 
@@ -472,6 +500,16 @@ impl<'a> MediaRepository<'a> {
                  WHERE m.sort_title LIKE ?1 ESCAPE '\\' AND m.parent_id IS NULL",
             );
             let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(like_pattern)];
+
+            if let Some(favorite) = options.favorite {
+                sql.push_str(" AND m.is_favorite = ?");
+                params.push(Box::new(favorite));
+            }
+
+            if let Some(watched) = options.watched {
+                sql.push_str(" AND m.is_watched = ?");
+                params.push(Box::new(watched));
+            }
 
             if let Some(ref t) = options.r#type {
                 sql.push_str(" AND m.type = ?");
@@ -721,6 +759,16 @@ impl<'a> MediaRepository<'a> {
         if let Some(ref t) = options.r#type {
             sql.push_str(" AND m.type = ?");
             params.push(Box::new(t.clone()));
+        }
+
+        if let Some(favorite) = options.favorite {
+            sql.push_str(" AND m.is_favorite = ?");
+            params.push(Box::new(favorite));
+        }
+
+        if let Some(watched) = options.watched {
+            sql.push_str(" AND m.is_watched = ?");
+            params.push(Box::new(watched));
         }
 
         let order_clause = match options.order_by.as_deref().unwrap_or("title") {

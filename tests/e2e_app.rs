@@ -187,6 +187,8 @@ fn busqueda_encuentra_medios_por_titulo() {
                 acryl::db::media_repo::SearchMediaOptions {
                     r#type: None,
                     limit: Some(10),
+                    favorite: None,
+                    watched: None,
                 },
             )
             .expect("buscar");
@@ -204,6 +206,8 @@ fn busqueda_encuentra_medios_por_titulo() {
                 acryl::db::media_repo::SearchMediaOptions {
                     r#type: None,
                     limit: Some(10),
+                    favorite: None,
+                    watched: None,
                 },
             )
             .expect("buscar");
@@ -339,6 +343,8 @@ fn biblioteca_carga_medios_desde_sqlite() {
                 limit: Some(50),
                 offset: Some(0),
                 order_by: None,
+                favorite: None,
+                watched: None,
             })
             .expect("listar medios");
         medios.len()

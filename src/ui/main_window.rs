@@ -1331,6 +1331,8 @@ impl MainWindow {
                 limit: Some(100),
                 offset: Some(offset),
                 order_by: None,
+                favorite: None,
+                watched: None,
             };
             match category_id {
                 Some(id) => repo.list_by_category(id, options),
@@ -1854,6 +1856,8 @@ impl MainWindow {
                 crate::db::media_repo::SearchMediaOptions {
                     r#type: None,
                     limit: Some(500),
+                    favorite: None,
+                    watched: None,
                 },
             )
             .unwrap_or_default()

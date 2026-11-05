@@ -212,6 +212,8 @@ fn upsert_y_list_media() {
             limit: Some(50),
             offset: Some(0),
             order_by: None,
+            favorite: None,
+            watched: None,
         })
         .expect("list all")
     };
@@ -224,6 +226,8 @@ fn upsert_y_list_media() {
             limit: Some(50),
             offset: Some(0),
             order_by: None,
+            favorite: None,
+            watched: None,
         })
         .expect("list movies")
     };
@@ -237,6 +241,8 @@ fn upsert_y_list_media() {
             limit: Some(50),
             offset: Some(0),
             order_by: None,
+            favorite: None,
+            watched: None,
         })
         .expect("list series")
     };
@@ -284,6 +290,8 @@ fn upsert_es_idempotente_por_folder_path() {
             limit: Some(50),
             offset: Some(0),
             order_by: None,
+            favorite: None,
+            watched: None,
         })
         .expect("list")
     };
@@ -499,6 +507,8 @@ fn busqueda_encuentra_medios_recien_insertados() {
             SearchMediaOptions {
                 r#type: None,
                 limit: Some(10),
+                favorite: None,
+                watched: None,
             },
         )
         .expect("buscar media");
@@ -536,6 +546,8 @@ fn busqueda_usa_like_cuando_el_indice_fts_esta_vacio() {
             SearchMediaOptions {
                 r#type: None,
                 limit: Some(10),
+                favorite: None,
+                watched: None,
             },
         )
         .expect("buscar media con fallback LIKE");
@@ -585,6 +597,8 @@ fn migracion_repara_triggers_fts_de_una_bd_existente() {
             SearchMediaOptions {
                 r#type: None,
                 limit: Some(10),
+                favorite: None,
+                watched: None,
             },
         )
         .expect("buscar medio antiguo");
@@ -1011,6 +1025,8 @@ fn overwrite_metadata_reemplaza_campos_y_actualiza_fts() {
             SearchMediaOptions {
                 r#type: None,
                 limit: Some(10),
+                favorite: None,
+                watched: None,
             },
         )
         .expect("buscar por el título nuevo");
@@ -1023,6 +1039,8 @@ fn overwrite_metadata_reemplaza_campos_y_actualiza_fts() {
             SearchMediaOptions {
                 r#type: None,
                 limit: Some(10),
+                favorite: None,
+                watched: None,
             },
         )
         .expect("buscar por el título antiguo");
@@ -1156,6 +1174,8 @@ fn filtrado_por_categoria_devuelve_solo_medios_asociados() {
                 limit: Some(50),
                 offset: Some(0),
                 order_by: None,
+                favorite: None,
+                watched: None,
             },
         )
         .expect("filtrar por categoría")
@@ -1173,6 +1193,8 @@ fn filtrado_por_categoria_devuelve_solo_medios_asociados() {
                 limit: Some(50),
                 offset: Some(0),
                 order_by: None,
+                favorite: None,
+                watched: None,
             },
         )
         .expect("filtrar por categoría")
