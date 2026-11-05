@@ -534,12 +534,12 @@ impl MainWindow {
         history_list.set_valign(gtk4::Align::Start);
         history_list.set_homogeneous(false);
         history_list.set_selection_mode(gtk4::SelectionMode::None);
-        history_list.set_row_spacing(16);
-        history_list.set_column_spacing(16);
-        history_list.set_margin_top(24);
-        history_list.set_margin_bottom(24);
-        history_list.set_margin_start(24);
-        history_list.set_margin_end(24);
+        history_list.set_row_spacing(0);
+        history_list.set_column_spacing(0);
+        history_list.set_margin_top(0);
+        history_list.set_margin_bottom(0);
+        history_list.set_margin_start(0);
+        history_list.set_margin_end(0);
         // Empieza con una columna; `recompute_history_columns` ajusta el
         // máximo real según el ancho del contenedor.
         history_list.set_min_children_per_line(1);
@@ -560,7 +560,7 @@ impl MainWindow {
         glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
             let width = scrolled_for_history_timeout.width() as f64;
             const CARD_WIDTH: i32 = 216;
-            const SPACING: i32 = 16 + 24 + 24; // columna + márgenes izquierdo/derecho
+            const SPACING: i32 = 0; // columna + márgenes izquierdo/derecho
             let card_total = CARD_WIDTH as f64 + SPACING as f64;
             let columns = (width / card_total).floor() as i32;
             let columns = columns.clamp(1, 12);
