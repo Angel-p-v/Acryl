@@ -557,7 +557,7 @@ impl MainWindow {
         let scrolled_for_history_timeout = history_scrolled.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
             let width = scrolled_for_history_timeout.width() as f64;
-            const CARD_WIDTH: i32 = 176;
+            const CARD_WIDTH: i32 = 200;
             const SPACING: i32 = 4; // column_spacing + márgenes
             let card_total = CARD_WIDTH as f64 + SPACING as f64;
             let columns = (width / card_total).floor() as i32;
@@ -1547,10 +1547,10 @@ impl MainWindow {
 
         let translations = w.translations.clone();
         let this_clone = this.clone();
-        const CARD_POSTER_WIDTH: i32 = 160;
-        const CARD_POSTER_HEIGHT: i32 = 240;
-        const CARD_WIDTH: i32 = CARD_POSTER_WIDTH + 16;
-        const CARD_HEIGHT: i32 = 260;
+        const CARD_POSTER_WIDTH: i32 = 200;
+        const CARD_POSTER_HEIGHT: i32 = 180;
+        const CARD_WIDTH: i32 = CARD_POSTER_WIDTH;
+        const CARD_HEIGHT: i32 = 240;
 
         for entry in history.iter() {
             let card = Box::new(Orientation::Vertical, 3);
