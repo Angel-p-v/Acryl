@@ -130,6 +130,10 @@ pub struct MainWindow {
     current_category: Rc<RefCell<Option<i64>>>,
     /// Nombre de la categoría activa, para mostrarlo en la interfaz.
     current_category_name: Rc<RefCell<Option<String>>>,
+    /// Filtro de favoritos activo (None = sin filtro).
+    current_favorite_filter: Rc<RefCell<Option<bool>>>,
+    /// Filtro de visto/no visto activo (None = sin filtro).
+    current_watched_filter: Rc<RefCell<Option<bool>>>,
     /// Rejilla de tarjetas del historial de reproducción.
     history_list: FlowBox,
     /// Botón «Volver» de la página de historial.
@@ -592,6 +596,8 @@ impl MainWindow {
             history: RefCell::new(Vec::new()),
             current_category: Rc::new(RefCell::new(None)),
             current_category_name: Rc::new(RefCell::new(None)),
+            current_favorite_filter: Rc::new(RefCell::new(None)),
+            current_watched_filter: Rc::new(RefCell::new(None)),
             history_list,
             history_back_button,
             history_clear_button,
@@ -1312,9 +1318,14 @@ impl MainWindow {
     /// reemplaza el contenido de la galería; si es mayor, lo añade al final
     /// (paginación infinita).
     fn load_media_page(this: &MainWindowRef, offset: i64) {
-        let (db_path, category_id) = {
+        let (db_path, category_id, favorite, watched) = {
             let w = this.borrow();
-            (w.db_path.clone(), *w.current_category.borrow())
+            (
+                w.db_path.clone(),
+                *w.current_category.borrow(),
+                *w.current_favorite_filter.borrow(),
+                *w.current_watched_filter.borrow(),
+            )
         };
 
         let mut conn = match open_db(&db_path) {
@@ -1331,8 +1342,8 @@ impl MainWindow {
                 limit: Some(100),
                 offset: Some(offset),
                 order_by: None,
-                favorite: None,
-                watched: None,
+                favorite,
+                watched,
             };
             match category_id {
                 Some(id) => repo.list_by_category(id, options),
