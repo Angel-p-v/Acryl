@@ -221,7 +221,6 @@ fn build_history_card_widget() -> Box {
     card.add_css_class("media-card");
     card.set_halign(gtk4::Align::Start);
     card.set_valign(gtk4::Align::Start);
-    card.set_hexpand(true);
     card.set_size_request(-1, 340);
     card.set_margin_top(0);
     card.set_margin_start(0);
