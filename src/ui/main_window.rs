@@ -768,6 +768,62 @@ impl MainWindow {
             }
         });
 
+        // Atajos de teclado globales.
+        let this_key = this.clone();
+        let key_controller = gtk4::EventControllerKey::new();
+        key_controller.connect_key_pressed(move |_, keyval, _keycode, _modifier| {
+            let name = keyval.name().unwrap_or_default();
+            match name.as_str() {
+                "f" | "F" => {
+                    let new_value = {
+                        let window = this_key.borrow_mut();
+                        let f = window.current_favorite_filter.borrow();
+                        match *f {
+                            None => Some(true),
+                            _ => None,
+                        }
+                    };
+                    {
+                        let window = this_key.borrow_mut();
+                        *window.current_favorite_filter.borrow_mut() = new_value;
+                    }
+                    Self::load_media(&this_key);
+                    gtk4::glib::Propagation::Stop
+                }
+                "v" | "V" => {
+                    let new_value = {
+                        let window = this_key.borrow_mut();
+                        let f = window.current_watched_filter.borrow();
+                        match *f {
+                            None => Some(true),
+                            _ => None,
+                        }
+                    };
+                    {
+                        let window = this_key.borrow_mut();
+                        *window.current_watched_filter.borrow_mut() = new_value;
+                    }
+                    Self::load_media(&this_key);
+                    gtk4::glib::Propagation::Stop
+                }
+                "Escape" => {
+                    let window = this_key.borrow_mut();
+                    *window.current_favorite_filter.borrow_mut() = None;
+                    *window.current_watched_filter.borrow_mut() = None;
+                    *window.current_category.borrow_mut() = None;
+                    drop(window);
+                    Self::load_media(&this_key);
+                    gtk4::glib::Propagation::Stop
+                }
+                "slash" => {
+                    this_key.borrow().search_entry.grab_focus();
+                    gtk4::glib::Propagation::Stop
+                }
+                _ => gtk4::glib::Propagation::Proceed,
+            }
+        });
+        this.borrow().window.add_controller(key_controller);
+
         // Nivel 2: botones de modo de vista.
         let this_grid = this.clone();
         this.borrow().view_grid_button.connect_clicked(move |_| {
