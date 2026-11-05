@@ -491,6 +491,23 @@ pub fn obtener_label_para_clave<'a>(
         .map(|(_, label)| label.as_str())
 }
 
+/// Ejecuta `apply` con una copia de la opción `index` sin mantener préstamos
+/// sobre `displayed`.
+///
+/// El callback puede volver a prestar el `RefCell` (por ejemplo, el handler
+/// `changed` del Entry al actualizar su texto). Mantener el préstamo de
+/// lectura durante esa reentrada provoca un panic por `RefCell already
+/// borrowed`.
+fn with_selected_option<F>(displayed: &RefCell<Vec<(String, String)>>, index: usize, apply: F)
+where
+    F: FnOnce(String, String),
+{
+    let selection = displayed.borrow().get(index).cloned();
+    if let Some((key, label)) = selection {
+        apply(key, label);
+    }
+}
+
 /// Construye las opciones del selector de pistas a partir de los idiomas
 /// disponibles, traduciendo sus nombres al idioma activo de la interfaz.
 fn build_track_options(
@@ -526,9 +543,11 @@ struct TrackSelector {
     options: Rc<RefCell<Vec<(String, String)>>>,
     /// Clave actualmente seleccionada (None = "Ninguno").
     selected_key: Rc<RefCell<Option<String>>>,
-    /// Evita abrir el popover cuando el texto del entry se actualiza por
-    /// código (cambio de idioma o selección programática).
-    suppress_popup: Rc<Cell<bool>>,
+    /// Evita filtrar y abrir el popover cuando el texto del entry se actualiza
+    /// por código (cambio de idioma o selección programática). Sin esto, el
+    /// `changed` de `set_text` puede reentrar mientras otra parte del selector
+    /// mantiene prestado su estado compartido.
+    suppress_changed: Rc<Cell<bool>>,
 }
 
 impl TrackSelector {
@@ -579,7 +598,7 @@ impl TrackSelector {
 
         let options_rc = Rc::new(RefCell::new(options.to_vec()));
         let selected_key = Rc::new(RefCell::new(current.map(String::from)));
-        let suppress_popup = Rc::new(Cell::new(false));
+        let suppress_changed = Rc::new(Cell::new(false));
         // Opciones visibles en el ListBox en este momento (el listado completo
         // o un subconjunto filtrado). Permite mapear la fila activada a su
         // clave real cuando el filtro está activo.
@@ -662,6 +681,7 @@ impl TrackSelector {
         let entry_for_activate = entry.clone();
         let selected_key_for_activate = selected_key.clone();
         let displayed_for_activate = displayed.clone();
+        let suppress_changed_for_activate = suppress_changed.clone();
         list_box.connect_row_activated(move |_list_box, row| {
             let index = {
                 let mut idx = 0usize;
@@ -680,11 +700,17 @@ impl TrackSelector {
                 found
             };
             if let Some(index) = index {
-                let displayed = displayed_for_activate.borrow();
-                if let Some((key, label)) = displayed.get(index) {
-                    *selected_key_for_activate.borrow_mut() = Some(key.clone());
-                    entry_for_activate.set_text(label);
-                }
+                // `with_selected_option` suelta el préstamo de `displayed`
+                // antes de actualizar el Entry. El `changed` de `set_text`
+                // reentra en el selector y necesita prestar ese mismo estado;
+                // mantenerlo prestado provocaba un panic por
+                // `RefCell already borrowed`.
+                with_selected_option(&displayed_for_activate, index, |key, label| {
+                    *selected_key_for_activate.borrow_mut() = Some(key);
+                    suppress_changed_for_activate.set(true);
+                    entry_for_activate.set_text(&label);
+                    suppress_changed_for_activate.set(false);
+                });
             }
             popover_for_activate.popdown();
         });
@@ -693,10 +719,13 @@ impl TrackSelector {
         let entry_for_filter = entry.clone();
         let popover_for_filter = popover.clone();
         let populate_filtered_clone = populate_filtered.clone();
-        let suppress_popup_for_filter = suppress_popup.clone();
+        let suppress_changed_for_filter = suppress_changed.clone();
         entry.connect_changed(move |_| {
+            if suppress_changed_for_filter.get() {
+                return;
+            }
             populate_filtered_clone();
-            if !suppress_popup_for_filter.get() && !entry_for_filter.text().is_empty() {
+            if !entry_for_filter.text().is_empty() {
                 popover_for_filter.popup();
             }
         });
@@ -720,7 +749,7 @@ impl TrackSelector {
                 entry,
                 options: options_rc,
                 selected_key,
-                suppress_popup,
+                suppress_changed,
             },
         )
     }
@@ -736,23 +765,23 @@ impl TrackSelector {
         let label = key.and_then(|clave| {
             obtener_label_para_clave(&self.options.borrow(), clave).map(String::from)
         });
-        self.suppress_popup.set(true);
+        self.suppress_changed.set(true);
         self.entry.set_text(label.as_deref().unwrap_or_default());
-        self.suppress_popup.set(false);
+        self.suppress_changed.set(false);
     }
 
     /// Actualiza las opciones y el valor actual (usado al cambiar de idioma).
     fn set_options(&self, options: &[(String, String)], current: Option<&str>) {
         *self.options.borrow_mut() = options.to_vec();
         *self.selected_key.borrow_mut() = current.map(String::from);
-        self.suppress_popup.set(true);
+        self.suppress_changed.set(true);
         self.entry.set_text("");
         if let Some(current_key) = current
             && let Some(label) = obtener_label_para_clave(options, current_key)
         {
             self.entry.set_text(label);
         }
-        self.suppress_popup.set(false);
+        self.suppress_changed.set(false);
     }
 }
 
@@ -1424,6 +1453,25 @@ mod tests {
             Some(expected.clone())
         );
         assert_eq!(normalize_folder_path(&expected), Some(expected));
+    }
+
+    #[test]
+    fn seleccionar_opcion_no_mantiene_el_prestamo_durante_el_callback() {
+        let displayed = RefCell::new(opciones());
+        let mut seleccionada = None;
+
+        with_selected_option(&displayed, 2, |key, label| {
+            // Si el préstamo de lectura siguiera activo, este `borrow_mut`
+            // entraría en panic, igual que ocurría al seleccionar una fila
+            // del selector de pistas en Ajustes.
+            *displayed.borrow_mut() = Vec::new();
+            seleccionada = Some((key, label));
+        });
+
+        assert_eq!(
+            seleccionada,
+            Some(("spa-5.1".to_string(), "Español 5.1".to_string()))
+        );
     }
 
     #[test]
