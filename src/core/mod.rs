@@ -1,5 +1,6 @@
 //! Capa de dominio.
 
+pub mod http_client;
 pub mod library;
 pub mod library_watcher;
 pub mod metadata;
