@@ -2162,7 +2162,14 @@ impl MainWindow {
             crate::core::player::PlaybackStart::NeedsDefaultTrackFallback {
                 file_path: fallback_path,
                 default_tracks: fallback_defaults,
-            } => self.show_default_track_fallback_dialog(fallback_path, fallback_defaults),
+                missing_audio,
+                missing_subtitle,
+            } => self.show_default_track_fallback_dialog(
+                fallback_path,
+                fallback_defaults,
+                missing_audio,
+                missing_subtitle,
+            ),
         }
     }
 
@@ -2172,22 +2179,11 @@ impl MainWindow {
         &self,
         file_path: String,
         default_tracks: crate::config::DefaultTracks,
+        missing_audio: bool,
+        missing_subtitle: bool,
     ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
-        let audio_label = default_tracks
-            .audio
-            .as_deref()
-            .map(|key| format!("Audio: {key}"))
-            .unwrap_or_else(|| "Audio: (ninguno)".to_string());
-        let subtitle_label = default_tracks
-            .subtitle
-            .as_deref()
-            .map(|key| format!("Subtítulos: {key}"))
-            .unwrap_or_else(|| "Subtítulos: (ninguno)".to_string());
-
-        let message = format!(
-            "Este video no tiene las pistas predeterminadas configuradas:\n<b>{}</b>\n<b>{}</b>\n\n¿Qué desea hacer?",
-            audio_label, subtitle_label
-        );
+        let message =
+            default_track_fallback_message(&default_tracks, missing_audio, missing_subtitle);
 
         let dialog = gtk4::AlertDialog::builder()
             .modal(true)
@@ -2490,6 +2486,26 @@ fn restore_window_mode(window: &AdwApplicationWindow, mode: crate::core::player:
     }
 }
 
+/// Construye el mensaje del diálogo de fallback mencionando solo las pistas
+/// predeterminadas que el video no tiene.
+fn default_track_fallback_message(
+    default_tracks: &crate::config::DefaultTracks,
+    missing_audio: bool,
+    missing_subtitle: bool,
+) -> String {
+    let mut missing_labels = Vec::new();
+    if missing_audio && let Some(key) = default_tracks.audio.as_deref() {
+        missing_labels.push(format!("<b>Audio: {key}</b>"));
+    }
+    if missing_subtitle && let Some(key) = default_tracks.subtitle.as_deref() {
+        missing_labels.push(format!("<b>Subtítulos: {key}</b>"));
+    }
+    format!(
+        "Este video no tiene estas pistas predeterminadas:\n{}\n\n¿Qué desea hacer?",
+        missing_labels.join("\n")
+    )
+}
+
 /// Resumen legible del resultado de una actualización forzada de metadatos.
 fn metadata_refresh_summary(
     result: &RefreshMetadataResult,
@@ -2522,4 +2538,35 @@ fn metadata_refresh_summary(
         ));
     }
     summary
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::DefaultTracks;
+
+    fn defaults() -> DefaultTracks {
+        DefaultTracks {
+            audio: Some("language:ja".to_string()),
+            subtitle: Some("language:es".to_string()),
+        }
+    }
+
+    #[test]
+    fn fallback_solo_menciona_la_pista_ausente() {
+        let mensaje = default_track_fallback_message(&defaults(), true, false);
+        assert!(mensaje.contains("Audio: language:ja"));
+        assert!(!mensaje.contains("Subtítulos: language:es"));
+
+        let mensaje = default_track_fallback_message(&defaults(), false, true);
+        assert!(!mensaje.contains("Audio: language:ja"));
+        assert!(mensaje.contains("Subtítulos: language:es"));
+    }
+
+    #[test]
+    fn fallback_menciona_ambas_pistas_si_faltan_las_dos() {
+        let mensaje = default_track_fallback_message(&defaults(), true, true);
+        assert!(mensaje.contains("Audio: language:ja"));
+        assert!(mensaje.contains("Subtítulos: language:es"));
+    }
 }

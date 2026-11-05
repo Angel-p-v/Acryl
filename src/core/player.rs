@@ -61,11 +61,15 @@ pub struct ResolvedTracks {
 /// `defaults_applicable` indica si las pistas predeterminadas se pudieron
 /// resolver contra los streams reales del video (false cuando el video no
 /// las tiene y se necesita un diálogo de fallback).
+/// `missing_default_audio` y `missing_default_subtitle` distinguen qué
+/// predeterminada concreta falta, para que la UI solo mencione esas.
 #[derive(Debug, Clone)]
 pub struct TrackResolution {
     pub tracks: ResolvedTracks,
     pub used_defaults: bool,
     pub defaults_applicable: bool,
+    pub missing_default_audio: bool,
+    pub missing_default_subtitle: bool,
 }
 
 /// Resultado de intentar iniciar una reproducción.
@@ -78,6 +82,10 @@ pub enum PlaybackStart {
     NeedsDefaultTrackFallback {
         file_path: String,
         default_tracks: DefaultTracks,
+        /// Predeterminadas de audio que el video no tiene.
+        missing_audio: bool,
+        /// Predeterminadas de subtítulos que el video no tiene.
+        missing_subtitle: bool,
     },
 }
 
@@ -302,6 +310,8 @@ fn saved_tracks(
             tracks: ResolvedTracks::default(),
             used_defaults: false,
             defaults_applicable: true,
+            missing_default_audio: false,
+            missing_default_subtitle: false,
         };
     };
     let preference = FileRepository::new(&mut conn)
@@ -357,24 +367,13 @@ fn saved_tracks(
     let subtitle_used_default = preference.subtitle_track_key.is_none()
         && default_tracks.is_some_and(|d| d.subtitle.is_some());
 
-    // Si el usuario configuró predeterminadas pero alguna no existe en el
-    // video y no hay preferencia por-archivo para ese campo, se necesita
-    // un diálogo de fallback.
-    let defaults_applicable = if let Some(defaults) = default_tracks {
-        // Determinar si cada predeterminada es aplicable (existe en el video
-        // o no se configuró para ese tipo).
-        let audio_ok = match defaults.audio.as_deref() {
-            Some(_) => resolved_audio.is_some(),
-            None => true,
-        };
-        let subtitle_ok = match defaults.subtitle.as_deref() {
-            Some(_) => resolved_subtitle.is_some(),
-            None => true,
-        };
-        audio_ok && subtitle_ok
-    } else {
-        true
-    };
+    // Solo cuentan como ausentes las predeterminadas que el reproductor iba a
+    // aplicar para este archivo. Así la UI puede ocultar las que sí existen y
+    // no molestar con una predeterminada que una preferencia por-archivo ya
+    // reemplaza.
+    let missing_default_audio = audio_used_default && resolved_audio.is_none();
+    let missing_default_subtitle = subtitle_used_default && resolved_subtitle.is_none();
+    let defaults_applicable = !missing_default_audio && !missing_default_subtitle;
 
     let mut external_subtitles: Vec<String> = subtitle_streams
         .iter()
@@ -403,6 +402,8 @@ fn saved_tracks(
         },
         used_defaults,
         defaults_applicable,
+        missing_default_audio,
+        missing_default_subtitle,
     }
 }
 
@@ -625,6 +626,8 @@ pub fn play_external_with_mode(
         return Ok(PlaybackStart::NeedsDefaultTrackFallback {
             file_path: file_path.to_string(),
             default_tracks: default_tracks.cloned().unwrap_or_default(),
+            missing_audio: resolution.missing_default_audio,
+            missing_subtitle: resolution.missing_default_subtitle,
         });
     }
 
@@ -717,6 +720,8 @@ pub fn play_with_resume_with_mode(
         return Ok(PlaybackStart::NeedsDefaultTrackFallback {
             file_path: file_path.to_string(),
             default_tracks: default_tracks.cloned().unwrap_or_default(),
+            missing_audio: resolution.missing_default_audio,
+            missing_subtitle: resolution.missing_default_subtitle,
         });
     }
 
@@ -1652,6 +1657,8 @@ mod tests {
             resolution.defaults_applicable,
             "las predeterminadas deben ser aplicables"
         );
+        assert!(!resolution.missing_default_audio);
+        assert!(!resolution.missing_default_subtitle);
         assert_eq!(
             resolution.tracks.selection.audio_stream_index,
             Some(0),
@@ -1738,6 +1745,11 @@ mod tests {
             !resolution.defaults_applicable,
             "las predeterminadas no deben ser aplicables"
         );
+        assert!(!resolution.missing_default_audio);
+        assert!(
+            resolution.missing_default_subtitle,
+            "solo faltan los subtítulos predeterminados"
+        );
         assert_eq!(
             resolution.tracks.selection.subtitle_stream_index, None,
             "no hay subtítulo español disponible"
@@ -1746,6 +1758,104 @@ mod tests {
             resolution.tracks.selection.subtitles_disabled,
             "los subtítulos deben desactivarse"
         );
+    }
+
+    #[test]
+    fn distingue_que_predeterminada_falta_en_el_video() {
+        use crate::config::DefaultTracks;
+        use crate::db::file_repo::{FileRepository, MediaFileInput};
+        use crate::db::media_repo::{MediaInput, MediaRepository};
+        use rusqlite::params;
+        use tempfile::TempDir;
+
+        let video_path = "/tmp/video_test_missing_defaults.mkv";
+        let temp_dir = TempDir::new().expect("crear dir temporal");
+        let db_path = temp_dir.path().join("test.db");
+        let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+        let media_id = {
+            let mut repo = MediaRepository::new(&mut conn);
+            repo.upsert(&MediaInput {
+                r#type: "series".to_string(),
+                title: "Test".to_string(),
+                sort_title: "test".to_string(),
+                year: None,
+                folder_path: "/tmp".to_string(),
+                parent_id: None,
+            })
+            .expect("upsert")
+            .id
+        };
+
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            repo.upsert_many(&[MediaFileInput {
+                media_id,
+                season: Some(1),
+                episode: Some(1),
+                title: Some("E01".to_string()),
+                file_path: video_path.to_string(),
+                size_bytes: None,
+                mtime_ms: None,
+            }])
+            .expect("insertar media_file");
+        }
+
+        for (stype, idx, lang) in [("audio", 0, "jpn"), ("subtitle", 1, "eng")] {
+            conn.execute(
+                "INSERT INTO media_streams
+                 (media_id, file_path, stream_type, stream_index, language, codec, title, external_path)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    media_id,
+                    video_path,
+                    stype,
+                    idx,
+                    lang,
+                    "aac",
+                    Option::<String>::None,
+                    Option::<String>::None
+                ],
+            )
+            .expect("insertar stream");
+        }
+
+        // Audio presente, subtítulo predeterminado ausente.
+        let solo_falta_subtitulo = saved_tracks(
+            db_path.to_str().unwrap(),
+            video_path,
+            Some(&DefaultTracks {
+                audio: Some("language:ja".to_string()),
+                subtitle: Some("language:es".to_string()),
+            }),
+        );
+        assert!(!solo_falta_subtitulo.missing_default_audio);
+        assert!(solo_falta_subtitulo.missing_default_subtitle);
+
+        // Subtítulo presente, audio predeterminado ausente.
+        let solo_falta_audio = saved_tracks(
+            db_path.to_str().unwrap(),
+            video_path,
+            Some(&DefaultTracks {
+                audio: Some("language:es".to_string()),
+                subtitle: Some("language:en".to_string()),
+            }),
+        );
+        assert!(solo_falta_audio.missing_default_audio);
+        assert!(!solo_falta_audio.missing_default_subtitle);
+
+        // Ambas presentes: no hay nada que avisar.
+        let ambas_presentes = saved_tracks(
+            db_path.to_str().unwrap(),
+            video_path,
+            Some(&DefaultTracks {
+                audio: Some("language:ja".to_string()),
+                subtitle: Some("language:en".to_string()),
+            }),
+        );
+        assert!(!ambas_presentes.missing_default_audio);
+        assert!(!ambas_presentes.missing_default_subtitle);
+        assert!(ambas_presentes.defaults_applicable);
     }
 
     #[test]
