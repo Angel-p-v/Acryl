@@ -26,9 +26,9 @@ use std::sync::{Arc, Mutex, mpsc};
 const CARD_POSTER_WIDTH: i32 = 160;
 const CARD_POSTER_HEIGHT: i32 = 240;
 
-/// Tamaño del póster en las tarjetas del historial (compacto).
-const HISTORY_CARD_POSTER_WIDTH: i32 = 180;
-const HISTORY_CARD_POSTER_HEIGHT: i32 = 270;
+/// Tamaño del póster en las tarjetas del historial (grande).
+const HISTORY_CARD_POSTER_WIDTH: i32 = 200;
+const HISTORY_CARD_POSTER_HEIGHT: i32 = 300;
 
 /// Ancho y alto de la tarjeta completa (póster + padding + textos).
 const CARD_WIDTH: i32 = CARD_POSTER_WIDTH + 16;
