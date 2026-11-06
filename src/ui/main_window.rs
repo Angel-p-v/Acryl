@@ -1469,9 +1469,6 @@ impl MainWindow {
         self.categories_button
             .set_label(&self.t("button.categories"));
         self.history_button.set_label(&self.t("button.history"));
-        self.history_view
-            .clear_button
-            .set_label(&self.t("history.clear"));
         self.clear_category_button
             .set_label(&self.t("button.clear_category"));
 
@@ -2188,6 +2185,25 @@ impl MainWindow {
         language: &str,
     ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
         self.set_language(language)
+    }
+
+    /// Método público para tests E2E: textos visibles de la cabecera del
+    /// historial (título, subtítulo, «Volver» y «Borrar historial»).
+    pub fn history_header_texts_for_test(&self) -> [String; 4] {
+        [
+            self.history_view.title.text().to_string(),
+            self.history_view.subtitle.text().to_string(),
+            self.history_view
+                .back_button
+                .label()
+                .unwrap_or_default()
+                .to_string(),
+            self.history_view
+                .clear_button
+                .label()
+                .unwrap_or_default()
+                .to_string(),
+        ]
     }
 
     pub fn widget(&self) -> &AdwApplicationWindow {
