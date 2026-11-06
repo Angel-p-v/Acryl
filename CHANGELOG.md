@@ -21,12 +21,15 @@ mantiene este archivo a partir de los commits convencionales.
 * **settings:** seleccionar la pista correcta cuando el filtro de búsqueda está activo, usando la lista visible en vez del índice completo.
 * **settings:** no abrir el desplegable de pistas al actualizar el campo de búsqueda por código.
 * **seasons:** permitir marcar y desmarcar como vista una temporada guardada en su propia carpeta hija.
+* **ui:** ejecutar siempre las acciones de marcar temporada como vista/no vista, también cuando la opción elegida ya era la seleccionada en el desplegable.
+* **ui:** guardar el estado exacto de visto/no visto de películas y demás medios en lugar de invertir el valor previo de la base de datos, evitando que la interfaz y la BD queden desincronizadas.
 * **history:** mantener una única entrada activa por archivo, actualizar su progreso al reanudar y archivar los duplicados antiguos sin borrar el historial.
 
 ### Tests
 
 * **settings:** añadir pruebas unitarias para el filtrado de pistas y la normalización de rutas de carpeta.
 * **settings:** añadir `tests/settings_integration.rs` con escenarios de carpetas, pistas predeterminadas, selección tras callbacks y diálogo «Acerca de», ejecutado en CI con `xvfb-run`.
+* **ui:** añadir pruebas E2E y de integración que verifican el marcado de temporadas y películas como vistas y su persistencia en SQLite.
 
 ### Documentation
 

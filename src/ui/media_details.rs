@@ -5,6 +5,7 @@
 //! - Puntuación de metadatos (vote_average de TVmaze) mostrada directamente.
 //! - Fila de acciones: Volver, Pistas, Continuar/Reproducir.
 //! - Desplegable de temporada con una temporada seleccionada por defecto.
+//! - Menú «Temporada» para marcar la temporada visible como vista o no vista.
 //! - Sinopsis.
 //! - Rejilla de episodios de la temporada seleccionada, cada uno con su propia
 //!   imagen individual y un fallback visual cuando no existe.
@@ -105,6 +106,8 @@ pub struct MediaDetails {
     on_toggle_season_watched: SharedToggleSeasonWatchedCallback,
     on_toggle_media_watched: SharedToggleMediaWatchedCallback,
     on_choose_images: Option<ChooseImagesCallback>,
+    /// Botones del menú de temporada del render actual, para tests E2E.
+    season_actions: Rc<RefCell<Option<(Button, Button)>>>,
     translations: TranslationsRef,
 }
 
@@ -213,6 +216,7 @@ impl MediaDetails {
             Rc::new(RefCell::new(None));
         let on_toggle_media_watched: SharedToggleMediaWatchedCallback = Rc::new(RefCell::new(None));
         let media_watched = Rc::new(Cell::new(false));
+        let season_actions: Rc<RefCell<Option<(Button, Button)>>> = Rc::new(RefCell::new(None));
 
         // Botón de marcar medio completo como visto/no visto.
         let watched_button_cb = watched_button.clone();
@@ -252,6 +256,7 @@ impl MediaDetails {
             let on_play_episode = on_play_episode.clone();
             let on_toggle_file_watched = on_toggle_file_watched.clone();
             let on_toggle_season_watched = on_toggle_season_watched.clone();
+            let season_actions = season_actions.clone();
 
             season_dropdown.connect_selected_notify(move |dropdown| {
                 if suppress.get() {
@@ -274,6 +279,7 @@ impl MediaDetails {
                     &on_play_episode,
                     &on_toggle_file_watched,
                     &on_toggle_season_watched,
+                    &season_actions,
                 );
             });
         }
@@ -308,6 +314,7 @@ impl MediaDetails {
             on_toggle_season_watched,
             on_toggle_media_watched,
             on_choose_images: None,
+            season_actions,
             translations,
         }
     }
@@ -483,6 +490,7 @@ impl MediaDetails {
                     &self.on_play_episode,
                     &self.on_toggle_file_watched,
                     &self.on_toggle_season_watched,
+                    &self.season_actions,
                 );
             }
             return;
@@ -519,6 +527,7 @@ impl MediaDetails {
             &self.on_play_episode,
             &self.on_toggle_file_watched,
             &self.on_toggle_season_watched,
+            &self.season_actions,
         );
     }
 
@@ -562,6 +571,19 @@ impl MediaDetails {
 
     pub fn season_selection(&self) -> Option<SeasonSelection> {
         *self.selected_season.borrow()
+    }
+
+    /// Método público para tests E2E: devuelve los botones del menú de
+    /// temporada («marcar como vista» y «marcar como no vista»). El test debe
+    /// activarlos después de liberar cualquier préstamo de `MediaDetails`.
+    pub fn season_actions_for_test(&self) -> Option<(Button, Button)> {
+        self.season_actions.borrow().clone()
+    }
+
+    /// Método público para tests E2E: devuelve el botón de visto/no visto del
+    /// medio. El test debe activarlo después de liberar cualquier préstamo.
+    pub fn watched_button_for_test(&self) -> Button {
+        self.watched_button.clone()
     }
 
     pub fn widget(&self) -> &Box {
@@ -665,6 +687,7 @@ fn render_selection(
     on_play_episode: &SharedPlayEpisodeCallback,
     on_toggle_file_watched: &SharedToggleFileWatchedCallback,
     on_toggle_season_watched: &SharedToggleSeasonWatchedCallback,
+    season_actions: &Rc<RefCell<Option<(Button, Button)>>>,
 ) {
     let (title, files) = match selection {
         SeasonSelection::Child(season_id) => {
@@ -725,6 +748,7 @@ fn render_selection(
         on_play_episode,
         on_toggle_file_watched,
         on_toggle_season_watched,
+        season_actions,
     );
 }
 
@@ -738,10 +762,13 @@ fn render_files(
     on_play_episode: &SharedPlayEpisodeCallback,
     on_toggle_file_watched: &SharedToggleFileWatchedCallback,
     on_toggle_season_watched: &SharedToggleSeasonWatchedCallback,
+    season_actions: &Rc<RefCell<Option<(Button, Button)>>>,
 ) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
+    // El render anterior deja de ser válido al reconstruir la rejilla.
+    *season_actions.borrow_mut() = None;
 
     if let Some(title) = title.filter(|title| !title.is_empty()) {
         let season_header = Box::new(Orientation::Horizontal, 6);
@@ -755,39 +782,68 @@ fn render_files(
         season_title.add_css_class("season-grid-title");
         season_header.append(&season_title);
 
-        // Spacer para empujar el desplegable a la derecha del encabezado.
+        // Spacer para empujar el menú de temporada a la derecha del encabezado.
         let spacer = Box::new(Orientation::Horizontal, 0);
         spacer.set_hexpand(true);
         season_header.append(&spacer);
 
-        // Desplegable para marcar toda la temporada como vista/no vista.
+        // Menú de acciones para marcar toda la temporada como vista/no vista.
         // Funciona tanto para temporadas por número como para carpetas de
         // temporada hijas; la selección identifica el objetivo exacto.
+        //
+        // Se usa un menú con botones en lugar de un GtkDropDown porque el
+        // desplegable solo emite `selected-notify` cuando cambia el índice:
+        // al elegir la opción que ya estaba seleccionada (el caso habitual,
+        // p. ej. "Marcar temporada como vista" en una temporada no vista) la
+        // acción nunca se ejecutaba.
         if let Some(target) = season_target {
-            let all_watched = files.iter().all(|f| f.is_watched);
-            let default_index = if all_watched { 1 } else { 0 };
-            let model = gtk4::StringList::new(&[
-                &translations.borrow().t("button.mark_season_watched"),
-                &translations.borrow().t("button.mark_season_unwatched"),
-            ]);
-            let season_dropdown = gtk4::DropDown::builder()
-                .model(&model)
-                .selected(default_index as u32)
-                .build();
-            season_dropdown.add_css_class("season-watched-dropdown");
-            season_dropdown.set_halign(gtk4::Align::End);
-            season_dropdown.set_valign(gtk4::Align::Center);
-            season_dropdown.set_margin_top(14);
-
             let cb = on_toggle_season_watched.borrow().clone();
             if let Some(callback) = cb {
-                season_dropdown.connect_selected_notify(move |dd| {
-                    let index = dd.selected() as usize;
-                    // Índice 0 = marcar como vista, 1 = marcar como no vista.
-                    callback(target, index == 0);
-                });
+                let menu = gtk4::MenuButton::new();
+                let menu_label = translations.borrow().t("button.season_menu");
+                menu.set_label(&menu_label);
+                menu.add_css_class("flat-button");
+                menu.add_css_class("season-watched-menu");
+                menu.set_halign(gtk4::Align::End);
+                menu.set_valign(gtk4::Align::Center);
+                menu.set_margin_top(14);
+
+                let popover = gtk4::Popover::new();
+                let actions = Box::new(Orientation::Vertical, 4);
+                actions.set_margin_top(6);
+                actions.set_margin_bottom(6);
+                actions.set_margin_start(6);
+                actions.set_margin_end(6);
+
+                let mark_watched =
+                    Button::with_label(&translations.borrow().t("button.mark_season_watched"));
+                mark_watched.add_css_class("flat-button");
+                mark_watched.set_halign(gtk4::Align::Fill);
+
+                let mark_unwatched =
+                    Button::with_label(&translations.borrow().t("button.mark_season_unwatched"));
+                mark_unwatched.add_css_class("flat-button");
+                mark_unwatched.set_halign(gtk4::Align::Fill);
+
+                actions.append(&mark_watched);
+                actions.append(&mark_unwatched);
+                popover.set_child(Some(&actions));
+                menu.set_popover(Some(&popover));
+                *season_actions.borrow_mut() = Some((mark_watched.clone(), mark_unwatched.clone()));
+
+                for (button, watched) in [(&mark_watched, true), (&mark_unwatched, false)] {
+                    let callback = Rc::clone(&callback);
+                    let popover = popover.clone();
+                    button.connect_clicked(move |_| {
+                        // Cerrar antes de recargar la vista: la acción reconstruye
+                        // el contenedor y este menú deja de existir.
+                        popover.popdown();
+                        callback(target, watched);
+                    });
+                }
+
+                season_header.append(&menu);
             }
-            season_header.append(&season_dropdown);
         }
 
         container.append(&season_header);

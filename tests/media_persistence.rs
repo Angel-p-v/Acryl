@@ -1795,3 +1795,182 @@ fn seleccion_de_audio_y_subtitulos_con_archivo_inventado() {
         "no debe haber --sub-file (sin sidecars externos), args: {args:?}"
     );
 }
+
+#[test]
+fn set_watched_guarda_el_estado_exacto_del_medio() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let media_id = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "movie".to_string(),
+            title: "Película de prueba".to_string(),
+            sort_title: "pelicula de prueba".to_string(),
+            year: Some(2024),
+            folder_path: "/media/pelicula-de-prueba".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert película")
+        .id
+    };
+
+    // Marcar como vista.
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_watched(media_id, true).expect("marcar como vista");
+        assert!(
+            repo.find_by_id(media_id)
+                .expect("buscar medio")
+                .expect("medio existente")
+                .is_watched
+        );
+    }
+
+    // Repetir el mismo estado no lo invierte: set_watched es idempotente y
+    // guarda exactamente lo que muestra la interfaz (a diferencia de un toggle).
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_watched(media_id, true)
+            .expect("repetir estado visto");
+        assert!(
+            repo.find_by_id(media_id)
+                .expect("buscar medio")
+                .expect("medio existente")
+                .is_watched
+        );
+    }
+
+    // Marcar como no vista.
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_watched(media_id, false)
+            .expect("marcar como no vista");
+        assert!(
+            !repo
+                .find_by_id(media_id)
+                .expect("buscar medio")
+                .expect("medio existente")
+                .is_watched
+        );
+    }
+}
+
+#[test]
+fn marcar_temporada_actualiza_solo_sus_archivos_y_persiste() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let root_id = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "series".to_string(),
+            title: "Serie de prueba".to_string(),
+            sort_title: "serie de prueba".to_string(),
+            year: Some(2023),
+            folder_path: "/media/serie-de-prueba".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert serie")
+        .id
+    };
+
+    let child_id = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "series".to_string(),
+            title: "Temporada 2".to_string(),
+            sort_title: "temporada 2".to_string(),
+            year: Some(2023),
+            folder_path: "/media/serie-de-prueba/temporada-2".to_string(),
+            parent_id: Some(root_id),
+        })
+        .expect("upsert temporada hija")
+        .id
+    };
+
+    let file = |media_id: i64, season: i32, episode: i32, path: &str| MediaFileInput {
+        media_id,
+        season: Some(season),
+        episode: Some(episode),
+        title: Some(format!("S{season:02}E{episode:02}")),
+        file_path: path.to_string(),
+        size_bytes: None,
+        mtime_ms: None,
+    };
+
+    {
+        let mut repo = FileRepository::new(&mut conn);
+        repo.upsert_many(&[
+            file(root_id, 1, 1, "/media/serie-de-prueba/S01E01.mkv"),
+            file(root_id, 1, 2, "/media/serie-de-prueba/S01E02.mkv"),
+            file(root_id, 2, 1, "/media/serie-de-prueba/S02E01.mkv"),
+            file(child_id, 2, 1, "/media/serie-de-prueba/temporada-2/E01.mkv"),
+        ])
+        .expect("insertar archivos de prueba");
+    }
+
+    // Marcar la temporada 1 de los archivos directos del medio raíz.
+    {
+        let mut repo = FileRepository::new(&mut conn);
+        let updated = repo
+            .set_season_watched(root_id, 1, true)
+            .expect("marcar temporada 1");
+        assert_eq!(updated, 2, "debe actualizar los dos episodios de la T1");
+    }
+
+    {
+        let mut repo = FileRepository::new(&mut conn);
+        let files = repo.list_by_media(root_id).expect("listar archivos raíz");
+        for file in &files {
+            let expected = file.season == Some(1);
+            assert_eq!(
+                file.is_watched, expected,
+                "estado inesperado para {}",
+                file.file_path
+            );
+        }
+    }
+
+    // Desmarcar la temporada 1 vuelve a dejar sus episodios como no vistos.
+    {
+        let mut repo = FileRepository::new(&mut conn);
+        let updated = repo
+            .set_season_watched(root_id, 1, false)
+            .expect("desmarcar temporada 1");
+        assert_eq!(updated, 2);
+        assert!(
+            repo.list_by_media(root_id)
+                .expect("listar archivos raíz")
+                .iter()
+                .all(|file| !file.is_watched)
+        );
+    }
+
+    // La temporada hija se marca por su propio media_id, sin depender del
+    // número de temporada.
+    {
+        let mut repo = FileRepository::new(&mut conn);
+        let updated = repo
+            .set_season_media_watched(child_id, true)
+            .expect("marcar temporada hija");
+        assert_eq!(updated, 1);
+    }
+
+    {
+        let mut repo = FileRepository::new(&mut conn);
+        let child_files = repo
+            .list_by_media(child_id)
+            .expect("listar archivos de la temporada hija");
+        assert!(
+            child_files.iter().all(|file| file.is_watched),
+            "los episodios de la temporada hija deben quedar vistos"
+        );
+
+        let root_files = repo.list_by_media(root_id).expect("listar archivos raíz");
+        assert!(
+            root_files.iter().all(|file| !file.is_watched),
+            "los archivos directos del medio raíz no deben cambiar"
+        );
+    }
+}

@@ -45,6 +45,7 @@
   "button.mark_unwatched": "○ No visto",
   "button.mark_season_watched": "Marcar temporada como vista",
   "button.mark_season_unwatched": "Marcar temporada como no vista",
+  "button.season_menu": "Temporada ▾",
   "status.watched": "Visto",
   "status.unwatched": "No visto",
   "button.redetect": "🔄 Volver a detectar pistas",

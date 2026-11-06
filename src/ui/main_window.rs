@@ -962,9 +962,10 @@ impl MainWindow {
         this.borrow_mut()
             .media_details
             .borrow_mut()
-            .on_toggle_media_watched(move |_new_state| {
+            .on_toggle_media_watched(move |new_state| {
                 let w = this_clone.borrow();
                 let media_id = w.media_details.borrow().media_id();
+                let season = w.media_details.borrow().season_selection();
                 let mut conn = match open_db(&w.db_path) {
                     Ok(c) => c,
                     Err(e) => {
@@ -973,8 +974,8 @@ impl MainWindow {
                     }
                 };
                 let mut repo = MediaRepository::new(&mut conn);
-                if let Err(e) = repo.toggle_watched(media_id) {
-                    eprintln!("Error toggle watched: {}", e);
+                if let Err(e) = repo.set_watched(media_id, new_state) {
+                    eprintln!("Error actualizando estado visto: {}", e);
                 }
                 close_db(conn);
                 // Refrescar la vista para que el botón y el estado se actualicen.
@@ -995,7 +996,7 @@ impl MainWindow {
                 } {
                     w2.media_details
                         .borrow_mut()
-                        .set_media_with_season(&media, None);
+                        .set_media_with_season(&media, season);
                 }
             });
 
@@ -2204,6 +2205,16 @@ impl MainWindow {
                 .unwrap_or_default()
                 .to_string(),
         ]
+    }
+
+    /// Método público para tests E2E: botones del menú de temporada.
+    pub fn season_actions_for_test(&self) -> Option<(Button, Button)> {
+        self.media_details.borrow().season_actions_for_test()
+    }
+
+    /// Método público para tests E2E: botón de visto/no visto del medio.
+    pub fn watched_button_for_test(&self) -> Button {
+        self.media_details.borrow().watched_button_for_test()
     }
 
     pub fn widget(&self) -> &AdwApplicationWindow {
