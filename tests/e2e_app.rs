@@ -15,9 +15,11 @@
 
 use acryl::config::{AppConfig, Config, DefaultTracks};
 use acryl::db::connection::open_db;
+use acryl::db::file_repo::{FileRepository, MediaFileInput};
 use acryl::db::media_repo::{ListMediaOptions, MediaInput, MediaRepository};
 use acryl::ui::main_window::MainWindow;
 use gtk4::Application;
+use gtk4::glib::object::ObjectExt;
 use rusqlite::params;
 use std::env;
 use std::fs;
@@ -547,6 +549,177 @@ fn cambio_de_idioma_en_caliente() {
             "🗑 Borrar historial".to_string(),
         ]
     );
+
+    drop(window);
+    drop(app);
+}
+
+#[test]
+fn marcar_temporada_y_pelicula_como_vistas_persiste() {
+    if !gtk_can_run() {
+        return;
+    }
+
+    let _guard = EnvGuard::new(&[ACRYL_CONFIG_ENV]);
+    let (config, _config_dir, _data_dir) = temp_config();
+    let db_path = config.inner.db_path.clone();
+
+    // Preparar una serie con dos episodios y una película antes de crear la
+    // ventana, para que sus vistas de detalle encuentren datos reales.
+    let (series_id, movie_id) = {
+        let mut conn = open_db(&db_path).expect("abrir BD temporal");
+        let (series_id, movie_id) = {
+            let mut repo = MediaRepository::new(&mut conn);
+            let series_id = repo
+                .upsert(&MediaInput {
+                    r#type: "series".to_string(),
+                    title: "Serie de prueba".to_string(),
+                    sort_title: "serie de prueba".to_string(),
+                    year: Some(2023),
+                    folder_path: "/media/serie-de-prueba".to_string(),
+                    parent_id: None,
+                })
+                .expect("insertar serie")
+                .id;
+            let movie_id = repo
+                .upsert(&MediaInput {
+                    r#type: "movie".to_string(),
+                    title: "Película de prueba".to_string(),
+                    sort_title: "pelicula de prueba".to_string(),
+                    year: Some(2024),
+                    folder_path: "/media/pelicula-de-prueba".to_string(),
+                    parent_id: None,
+                })
+                .expect("insertar película")
+                .id;
+            (series_id, movie_id)
+        };
+        {
+            let mut repo = FileRepository::new(&mut conn);
+            repo.upsert_many(&[
+                MediaFileInput {
+                    media_id: series_id,
+                    season: Some(1),
+                    episode: Some(1),
+                    title: Some("S01E01".to_string()),
+                    file_path: "/media/serie-de-prueba/S01E01.mkv".to_string(),
+                    size_bytes: None,
+                    mtime_ms: None,
+                },
+                MediaFileInput {
+                    media_id: series_id,
+                    season: Some(1),
+                    episode: Some(2),
+                    title: Some("S01E02".to_string()),
+                    file_path: "/media/serie-de-prueba/S01E02.mkv".to_string(),
+                    size_bytes: None,
+                    mtime_ms: None,
+                },
+                MediaFileInput {
+                    media_id: movie_id,
+                    season: None,
+                    episode: None,
+                    title: Some("Película de prueba".to_string()),
+                    file_path: "/media/pelicula-de-prueba/pelicula.mkv".to_string(),
+                    size_bytes: None,
+                    mtime_ms: None,
+                },
+            ])
+            .expect("insertar archivos de prueba");
+        }
+        (series_id, movie_id)
+    };
+
+    let app = Application::builder()
+        .application_id("com.angelpv.acryl.e2e.watched")
+        .build();
+    let window = run_gtk_or_skip(|| MainWindow::new(&app, config));
+    let window = match window {
+        Some(w) => w,
+        None => return,
+    };
+
+    // Serie: abrir detalles y marcar la temporada como vista desde el menú.
+    assert!(
+        run_gtk_or_skip(|| window.borrow().show_details_for_test(series_id, None)).unwrap_or(false),
+        "debe abrir la vista de detalles de la serie"
+    );
+
+    let season_actions = run_gtk_or_skip(|| window.borrow().season_actions_for_test())
+        .flatten()
+        .expect("la temporada debe ofrecer acciones de visto/no visto");
+    run_gtk_or_skip(|| season_actions.0.emit_by_name::<()>("clicked", &[]));
+
+    {
+        let mut conn = open_db(&db_path).expect("abrir BD temporal");
+        let mut repo = FileRepository::new(&mut conn);
+        let files = repo
+            .list_by_media(series_id)
+            .expect("listar episodios de la serie");
+        assert!(
+            files.iter().all(|file| file.is_watched),
+            "marcar la temporada como vista debe persistir en todos sus episodios"
+        );
+    }
+
+    // Desmarcar la temporada usando la segunda acción del menú.
+    let season_actions = run_gtk_or_skip(|| window.borrow().season_actions_for_test())
+        .flatten()
+        .expect("la temporada sigue ofreciendo acciones");
+    run_gtk_or_skip(|| season_actions.1.emit_by_name::<()>("clicked", &[]));
+
+    {
+        let mut conn = open_db(&db_path).expect("abrir BD temporal");
+        let mut repo = FileRepository::new(&mut conn);
+        let files = repo
+            .list_by_media(series_id)
+            .expect("listar episodios de la serie");
+        assert!(
+            files.iter().all(|file| !file.is_watched),
+            "marcar la temporada como no vista debe persistir"
+        );
+    }
+
+    // Película: el botón de visto/no visto guarda el estado exacto en `media`.
+    assert!(
+        run_gtk_or_skip(|| window.borrow().show_details_for_test(movie_id, None)).unwrap_or(false),
+        "debe abrir la vista de detalles de la película"
+    );
+
+    let watched_button = run_gtk_or_skip(|| window.borrow().watched_button_for_test())
+        .expect("debe existir el botón de visto/no visto");
+    run_gtk_or_skip(|| watched_button.emit_by_name::<()>("clicked", &[]));
+
+    {
+        let mut conn = open_db(&db_path).expect("abrir BD temporal");
+        let mut repo = MediaRepository::new(&mut conn);
+        let movie = repo
+            .find_by_id(movie_id)
+            .expect("buscar película")
+            .expect("la película existe");
+        assert!(
+            movie.is_watched,
+            "la película debe quedar marcada como vista"
+        );
+    }
+
+    // Volver a pulsar el botón debe desmarcarla, no invertir un estado viejo.
+    let watched_button = run_gtk_or_skip(|| window.borrow().watched_button_for_test())
+        .expect("debe existir el botón de visto/no visto");
+    run_gtk_or_skip(|| watched_button.emit_by_name::<()>("clicked", &[]));
+
+    {
+        let mut conn = open_db(&db_path).expect("abrir BD temporal");
+        let mut repo = MediaRepository::new(&mut conn);
+        let movie = repo
+            .find_by_id(movie_id)
+            .expect("buscar película")
+            .expect("la película existe");
+        assert!(
+            !movie.is_watched,
+            "el segundo clic debe guardar el estado no visto"
+        );
+    }
 
     drop(window);
     drop(app);

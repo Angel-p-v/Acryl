@@ -527,7 +527,7 @@ pub fn install_theme_css(mode: ThemeMode) {
 
         /* Dropdown de temporada */
         css.push_str(".season-dropdown { min-width: 180px; }\n");
-        css.push_str(".season-watched-dropdown { min-height: 30px; min-width: 150px; }\n");
+        css.push_str(".season-watched-menu { min-height: 30px; min-width: 110px; }\n");
 
         /* Esqueleto de carga (skeleton) */
         css.push_str(&format!(

@@ -45,6 +45,7 @@
   "button.mark_unwatched": "○ Unwatched",
   "button.mark_season_watched": "Mark season as watched",
   "button.mark_season_unwatched": "Mark season as unwatched",
+  "button.season_menu": "Season ▾",
   "status.watched": "Watched",
   "status.unwatched": "Unwatched",
   "button.redetect": "🔄 Re-detect tracks",
