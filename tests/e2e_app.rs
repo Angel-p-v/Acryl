@@ -493,6 +493,18 @@ fn cambio_de_idioma_en_caliente() {
     let t_es = run_gtk_or_skip(|| window.borrow().t_for_test("button.categories"));
     assert_eq!(t_es.unwrap_or_default(), "Categorías");
 
+    // La cabecera del historial también debe estar en español.
+    let header_es = run_gtk_or_skip(|| window.borrow().history_header_texts_for_test());
+    assert_eq!(
+        header_es.unwrap_or_default(),
+        [
+            "Historial de reproducción".to_string(),
+            "Películas, series y episodios que has reproducido.".to_string(),
+            "← Volver".to_string(),
+            "🗑 Borrar historial".to_string(),
+        ]
+    );
+
     // Cambiar a inglés.
     run_gtk_or_skip(|| {
         window
@@ -503,6 +515,18 @@ fn cambio_de_idioma_en_caliente() {
     let t_en = run_gtk_or_skip(|| window.borrow().t_for_test("button.categories"));
     assert_eq!(t_en.unwrap_or_default(), "Categories");
 
+    // La cabecera del historial debe actualizarse en caliente.
+    let header_en = run_gtk_or_skip(|| window.borrow().history_header_texts_for_test());
+    assert_eq!(
+        header_en.unwrap_or_default(),
+        [
+            "Playback history".to_string(),
+            "Movies, series and episodes you have played.".to_string(),
+            "← Back".to_string(),
+            "🗑 Clear history".to_string(),
+        ]
+    );
+
     // Volver a español.
     run_gtk_or_skip(|| {
         window
@@ -512,6 +536,17 @@ fn cambio_de_idioma_en_caliente() {
     });
     let t_es2 = run_gtk_or_skip(|| window.borrow().t_for_test("button.categories"));
     assert_eq!(t_es2.unwrap_or_default(), "Categorías");
+
+    let header_es2 = run_gtk_or_skip(|| window.borrow().history_header_texts_for_test());
+    assert_eq!(
+        header_es2.unwrap_or_default(),
+        [
+            "Historial de reproducción".to_string(),
+            "Películas, series y episodios que has reproducido.".to_string(),
+            "← Volver".to_string(),
+            "🗑 Borrar historial".to_string(),
+        ]
+    );
 
     drop(window);
     drop(app);

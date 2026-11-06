@@ -17,6 +17,10 @@ use std::sync::{Arc, Mutex};
 pub struct HistoryView {
     /// Página completa (se añade al Stack).
     pub page: Box,
+    /// Título de la página.
+    pub title: Label,
+    /// Subtítulo de la página.
+    pub subtitle: Label,
     /// Botón «Volver».
     pub back_button: Button,
     /// Botón «Borrar historial».
@@ -115,6 +119,8 @@ impl HistoryView {
 
         Self {
             page,
+            title,
+            subtitle,
             back_button,
             clear_button,
             list,
@@ -145,9 +151,17 @@ impl HistoryView {
     }
 
     /// Refresca los textos de la UI aplicando el idioma actual.
-    /// Se llama después de cambiar el idioma para que las tarjetas
-    /// muestren los textos traducidos sin reiniciar la aplicación.
+    /// Se llama después de cambiar el idioma para que la cabecera y las
+    /// tarjetas muestren los textos traducidos sin reiniciar la aplicación.
     pub fn refresh_texts(&self) {
+        let translations = self.translations.clone();
+        self.title.set_label(&t(&translations, "history.title"));
+        self.subtitle
+            .set_label(&t(&translations, "history.subtitle"));
+        self.back_button
+            .set_label(&t(&translations, "history.back"));
+        self.clear_button
+            .set_label(&t(&translations, "history.clear"));
         self.load_history();
     }
 
