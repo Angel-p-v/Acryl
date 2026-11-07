@@ -566,7 +566,7 @@ pub fn bind_history_card(
 
     // Póster.
     let poster_stack = Box::new(Orientation::Vertical, 0);
-    poster_stack.set_halign(gtk4::Align::Start);
+    poster_stack.set_halign(gtk4::Align::Center);
     poster_stack.set_valign(gtk4::Align::Start);
     poster_stack.set_size_request(HISTORY_CARD_POSTER_WIDTH, HISTORY_CARD_POSTER_HEIGHT);
 
