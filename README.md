@@ -23,6 +23,15 @@
   <a href="https://gtk.org/">
     <img src="https://img.shields.io/badge/gtk-4.x-497975?style=for-the-badge" alt="GTK4"/>
   </a>
+  <a href="https://github.com/Angel-p-v/app-media-manager/releases">
+    <img src="https://img.shields.io/github/downloads/Angel-p-v/app-media-manager/total?label=descargas&style=for-the-badge" alt="Descargas"/>
+  </a>
+  <a href="https://github.com/Angel-p-v/app-media-manager/stargazers">
+    <img src="https://img.shields.io/github/stars/Angel-p-v/app-media-manager?style=for-the-badge" alt="Estrellas"/>
+  </a>
+  <a href="https://github.com/Angel-p-v/app-media-manager/network/members">
+    <img src="https://img.shields.io/github/forks/Angel-p-v/app-media-manager?style=for-the-badge" alt="Forks"/>
+  </a>
 </p>
 
 ---
