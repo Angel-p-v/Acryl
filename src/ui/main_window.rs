@@ -147,7 +147,9 @@ pub type MainWindowRef = Rc<RefCell<MainWindow>>;
 
 impl MainWindow {
     pub fn new(app: &gtk4::Application, config: crate::Config) -> MainWindowRef {
-        crate::ui::theme::install_theme_css(crate::ui::theme::ThemeMode::Dark);
+        crate::ui::theme::set_theme_mode(crate::ui::theme::ThemeMode::from_config(
+            &config.inner().theme,
+        ));
 
         let db_path = config.inner().db_path.clone();
         let config_path = config.path().to_path_buf();

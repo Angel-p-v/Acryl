@@ -13,11 +13,13 @@ use crate::core::poster_service::cached_path;
 use crate::ui::theme;
 use gtk4::gdk_pixbuf::Pixbuf as GtkPixbuf;
 use gtk4::prelude::*;
-use gtk4::{Box, DrawingArea, Image, Label, Orientation, Overflow, Overlay, Picture};
+use gtk4::{
+    Box, CssProvider, DrawingArea, Image, Label, Orientation, Overflow, Overlay, Picture,
+    gdk::Display,
+};
 use std::cell::RefCell;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use std::rc::Rc;
-use std::sync::Once;
 
 /// Altura máxima del banner: por encima de este valor la imagen se recorta
 /// para llenar el ancho, en lugar de ocupar toda la ventana.
@@ -33,7 +35,11 @@ const BANNER_IMAGE_MAX_HEIGHT: i32 = 1080;
 /// Radio de las esquinas del banner.
 const BANNER_RADIUS: f64 = 0.0; // Crunchyroll usa esquinas cuadradas en el banner hero
 
-static INSTALL_POSTER_CSS: Once = Once::new();
+thread_local! {
+    /// Proveedor CSS de los pósters instalado actualmente (para reemplazarlo
+    /// al cambiar de tema).
+    static POSTER_PROVIDER: RefCell<Option<CssProvider>> = const { RefCell::new(None) };
+}
 
 mod banner_layout {
     use super::{BANNER_FALLBACK_HEIGHT, banner_height_for_width};
@@ -156,10 +162,10 @@ impl BannerFrame {
 
 /// Instala los estilos de los pósters y el banner hero.
 pub fn install_poster_css() {
-    INSTALL_POSTER_CSS.call_once(|| {
-        let provider = gtk4::CssProvider::new();
-        let css = format!(
-            ".poster-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; padding: 8px; transition: all {}; }}\n\
+    let c = theme::ThemeColors::for_mode(theme::current_mode());
+    let provider = gtk4::CssProvider::new();
+    let css = format!(
+        ".poster-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; padding: 8px; transition: all {}; }}\n\
              .poster-card:hover {{ background-color: {}; border-color: {}; transform: scale(1.02); }}\n\
              .poster-card:selected {{ background-color: {}; border-color: {}; }}\n\
              .poster-placeholder {{ background-color: {}; border-radius: {}; }}\n\
@@ -200,54 +206,88 @@ pub fn install_poster_css() {
              .rating-stars {{ color: {}; }}\n\
              .rating-stars .filled {{ color: {}; }}\n\
              .thumbnail-placeholder {{ background-color: {}; border: 1px dashed {}; border-radius: {}; }}\n",
-            theme::colors::CARD, theme::colors::BORDER, theme::radius::LARGE, theme::transition::NORMAL,
-            theme::colors::SURFACE, theme::colors::BORDER_HOVER,
-            theme::colors::SURFACE, theme::colors::ACCENT,
-            theme::colors::CARD, theme::radius::MEDIUM,
-            theme::colors::TEXT_PRIMARY,
-            theme::colors::TEXT_SECONDARY,
-            theme::radius::LARGE,
-            theme::colors::TEXT_PRIMARY,
-            theme::colors::TEXT_SECONDARY,
-            theme::colors::CARD, theme::colors::BORDER, theme::radius::MEDIUM, theme::transition::FAST,
-            theme::colors::SURFACE, theme::colors::BORDER_HOVER,
-            theme::colors::SURFACE, theme::colors::ACCENT,
-            theme::colors::TEXT_PRIMARY,
-            theme::colors::ACCENT, theme::colors::BTN_PRIMARY_TEXT, theme::radius::SMALL,
-            theme::colors::ACCENT_HOVER,
-            theme::colors::TEXT_SECONDARY,
-            theme::colors::TEXT_PRIMARY, theme::colors::SURFACE, theme::radius::SMALL,
-            theme::colors::SURFACE, theme::radius::LARGE,
-            theme::colors::TEXT_SECONDARY,
-            theme::colors::ACCENT,
-            theme::colors::CARD, theme::colors::BORDER, theme::radius::MEDIUM, theme::transition::FAST,
-            theme::colors::SURFACE, theme::colors::BORDER_HOVER,
-            theme::colors::SURFACE, theme::colors::ACCENT,
-            theme::radius::SMALL,
-            theme::colors::TEXT_PRIMARY,
-            theme::colors::TEXT_SECONDARY,
-            theme::colors::ACCENT, theme::colors::BTN_PRIMARY_TEXT, theme::radius::SMALL,
-            theme::colors::ACCENT_HOVER,
-            theme::colors::TEXT_PRIMARY,
-            theme::radius::SMALL,
-            theme::colors::ACCENT, theme::colors::BTN_PRIMARY_TEXT,
-            theme::colors::ACCENT_HOVER,
-            theme::colors::SURFACE, theme::colors::TEXT_PRIMARY, theme::colors::BORDER,
-            theme::colors::BORDER_HOVER, theme::colors::CARD,
-            theme::colors::TEXT_MUTED,
-            theme::colors::ACCENT,
-            theme::colors::SURFACE, theme::colors::BORDER, theme::radius::SMALL,
-        );
-        provider.load_from_data(&css);
+        c.card,
+        c.border,
+        theme::radius::LARGE,
+        theme::transition::NORMAL,
+        c.surface,
+        c.border_hover,
+        c.surface,
+        c.accent,
+        c.card,
+        theme::radius::MEDIUM,
+        c.text_primary,
+        c.text_secondary,
+        theme::radius::LARGE,
+        c.text_primary,
+        c.text_secondary,
+        c.card,
+        c.border,
+        theme::radius::MEDIUM,
+        theme::transition::FAST,
+        c.surface,
+        c.border_hover,
+        c.surface,
+        c.accent,
+        c.text_primary,
+        c.accent,
+        c.btn_primary_text,
+        theme::radius::SMALL,
+        c.accent_hover,
+        c.text_secondary,
+        c.text_primary,
+        c.surface,
+        theme::radius::SMALL,
+        c.surface,
+        theme::radius::LARGE,
+        c.text_secondary,
+        c.accent,
+        c.card,
+        c.border,
+        theme::radius::MEDIUM,
+        theme::transition::FAST,
+        c.surface,
+        c.border_hover,
+        c.surface,
+        c.accent,
+        theme::radius::SMALL,
+        c.text_primary,
+        c.text_secondary,
+        c.accent,
+        c.btn_primary_text,
+        theme::radius::SMALL,
+        c.accent_hover,
+        c.text_primary,
+        theme::radius::SMALL,
+        c.accent,
+        c.btn_primary_text,
+        c.accent_hover,
+        c.surface,
+        c.text_primary,
+        c.border,
+        c.border_hover,
+        c.card,
+        c.text_muted,
+        c.accent,
+        c.surface,
+        c.border,
+        theme::radius::SMALL,
+    );
+    provider.load_from_data(&css);
 
-        if let Some(display) = gtk4::gdk::Display::default() {
-            gtk4::style_context_add_provider_for_display(
-                &display,
-                &provider,
-                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-            );
-        }
-    });
+    if let Some(display) = Display::default() {
+        POSTER_PROVIDER.with(|p| {
+            if let Some(prev) = p.borrow_mut().take() {
+                gtk4::style_context_remove_provider_for_display(&display, &prev);
+            }
+        });
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+        POSTER_PROVIDER.with(|p| *p.borrow_mut() = Some(provider));
+    }
 }
 
 /// Crea un widget de póster que escala la imagen al espacio disponible.

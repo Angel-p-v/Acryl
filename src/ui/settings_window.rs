@@ -464,6 +464,8 @@ pub struct SettingsView {
     restore_button: Button,
     #[allow(dead_code)]
     data_status: Label,
+    theme_title: Label,
+    theme_combo: DropDown,
     config: Rc<RefCell<AppConfig>>,
     folder_manager: FolderManager,
     on_save: Option<Rc<dyn Fn(AppConfig)>>,
@@ -1081,6 +1083,20 @@ impl SettingsView {
         data_status.add_css_class("dim-label");
         data_section.append(&data_status);
 
+        let theme_row = Box::new(Orientation::Horizontal, 10);
+        theme_row.set_hexpand(true);
+
+        let theme_title = Label::new(Some(&t("settings.theme.title")));
+        theme_title.set_halign(gtk4::Align::Start);
+        theme_title.set_valign(gtk4::Align::Center);
+        theme_row.append(&theme_title);
+
+        let theme_combo = DropDown::from_strings(&[&t("theme.dark"), &t("theme.light")]);
+        theme_combo.set_selected(if config.theme == "light" { 1 } else { 0 });
+        theme_row.append(&theme_combo);
+
+        data_section.append(&theme_row);
+
         content.append(&data_section);
 
         // --- Sección: Acerca de ---
@@ -1369,6 +1385,8 @@ impl SettingsView {
             backup_button,
             restore_button,
             data_status,
+            theme_title,
+            theme_combo,
             config: config_rc,
             folder_manager,
             on_save: None,
@@ -1422,6 +1440,17 @@ impl SettingsView {
         self.data_label.set_label(&t("settings.data.description"));
         self.backup_button.set_label(&t("button.backup_db"));
         self.restore_button.set_label(&t("button.restore_db"));
+        self.theme_title.set_label(&t("settings.theme.title"));
+
+        // Actualizar las opciones del desplegable de tema conservando la
+        // selección actual del usuario al cambiar de idioma.
+        let theme_selected = self.theme_combo.selected();
+        let theme_options = [t("theme.dark"), t("theme.light")];
+        let theme_option_refs: Vec<&str> = theme_options.iter().map(String::as_str).collect();
+        let theme_model = gtk4::StringList::new(&theme_option_refs);
+        self.theme_combo.set_model(Some(&theme_model));
+        self.theme_combo.set_selected(theme_selected.min(1));
+
         self.cancel_button.set_label(&t("button.cancel"));
         self.save_button.set_label(&t("button.save"));
         self.about_title.set_label(&t("settings.about.title"));
@@ -1461,8 +1490,14 @@ impl SettingsView {
         // había al registrar el callback.
         let default_audio_key = self.default_audio_selector.selected_key.clone();
         let default_subtitle_key = self.default_subtitle_selector.selected_key.clone();
+        let theme_combo = self.theme_combo.clone();
 
         self.save_button.connect_clicked(move |_| {
+            let new_theme = if theme_combo.selected() == 0 {
+                "dark".to_string()
+            } else {
+                "light".to_string()
+            };
             {
                 let mut config = config.borrow_mut();
                 config.language = if language_combo.selected() == 0 {
@@ -1474,7 +1509,18 @@ impl SettingsView {
                 // Guardar pistas predeterminadas seleccionadas en los selectores.
                 config.default_tracks.audio = default_audio_key.borrow().clone();
                 config.default_tracks.subtitle = default_subtitle_key.borrow().clone();
+
+                // Persistir el modo de tema elegido.
+                config.theme = new_theme.clone();
             }
+
+            // Aplicar el tema inmediatamente (CSS y AdwStyleManager).
+            let mode = if new_theme == "light" {
+                crate::ui::theme::ThemeMode::Light
+            } else {
+                crate::ui::theme::ThemeMode::Dark
+            };
+            crate::ui::theme::set_theme_mode(mode);
 
             if let Some(callback) = &on_save {
                 callback(config.borrow().clone());

@@ -53,6 +53,9 @@ pub struct AppConfig {
     pub default_player: String,
     #[serde(default)]
     pub default_tracks: DefaultTracks,
+    /// Modo de tema: "dark" (por defecto) o "light".
+    #[serde(default)]
+    pub theme: String,
     /// Umbral de completado de una reproducción, en segundos.
     ///
     /// Una reproducción se marca como completada (y el archivo como visto) cuando
@@ -75,6 +78,7 @@ impl Default for AppConfig {
             auto_sync_metadata: false,
             default_player: "mpv".to_string(),
             default_tracks: DefaultTracks::default(),
+            theme: "dark".to_string(),
             playback_completion_threshold_seconds: default_completion_threshold_seconds(),
         }
     }
@@ -263,6 +267,7 @@ mod tests {
                 auto_sync_metadata: false,
                 default_player: "mpv".to_string(),
                 default_tracks: DefaultTracks::default(),
+                theme: "dark".to_string(),
                 playback_completion_threshold_seconds: 300,
             },
         };
@@ -428,5 +433,20 @@ default_tracks: {}
         assert!(resultado.is_err(), "debe rechazar una copia corrupta");
         drop(config);
         drop(config_dir);
+    }
+
+    #[test]
+    fn app_config_theme_se_guarda_y_carga() {
+        // El tema por defecto es oscuro.
+        assert_eq!(AppConfig::default().theme, "dark");
+
+        // Un tema claro se serializa y deserializa correctamente.
+        let claro = AppConfig {
+            theme: "light".to_string(),
+            ..Default::default()
+        };
+        let yaml = serde_yaml::to_string(&claro).expect("serializar tema");
+        let de_serializado: AppConfig = serde_yaml::from_str(&yaml).expect("deserializar tema");
+        assert_eq!(de_serializado.theme, "light");
     }
 }

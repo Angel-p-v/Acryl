@@ -49,6 +49,10 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 | ℹ️ **Acerca de** | Versión, licencia, autor, enlaces e información de depuración para reportar fallos |
 | 🌐 **Idiomas** | Interfaz disponible en español e inglés |
 | 📦 **Instalación** | Clona el repositorio y ejecuta `./scripts/install.sh` |
+| ❤️ **Favoritos** | Marca medios como favoritos desde la ficha de detalles y filtra la biblioteca por favoritos. |
+| 🔀 **Selector de orden** | Ordena la galería por título, año o tipo desde la barra superior. |
+| 💾 **Copia de seguridad** | Guarda y restaura una copia de la base de datos (favoritos, progreso e historial) desde Ajustes. |
+| ☀️ **Tema claro** | Elige entre tema oscuro y claro desde Ajustes; se aplica al guardar los ajustes. |
 
 ---
 
@@ -267,6 +271,17 @@ Una vez iniciada la aplicación:
 12. **Acerca de**: Al final de Ajustes, el botón «Acerca de» muestra la versión, la
    licencia MIT, el autor, enlaces al repositorio, incidencias y soporte, además de
    información de depuración con las versiones de Acryl, GTK, Libadwaita y el sistema.
+13. **Favoritos**: En la vista de detalles de un medio, pulsa el botón de favorito
+   (☆/★) para marcarlo o desmarcarlo. El estado se guarda en la biblioteca y la
+   tarjeta se actualiza. Desde la barra superior puedes filtrar solo los favoritos.
+14. **Orden de la galería**: Usa el desplegable de la barra superior para ordenar
+   los medios por título, año (más recientes primero) o tipo (anime, movie, series).
+15. **Copia de seguridad**: En Ajustes, sección «Datos», pulsa «Guardar copia de
+   seguridad» para exportar la base de datos (favoritos, progreso e historial) o
+   «Restaurar copia de seguridad» para importar una copia previa. Los archivos de
+   vídeo no se incluyen.
+16. **Tema claro**: En Ajustes, sección «Datos», elige «Oscuro» o «Claro» y pulsa
+   Guardar. El tema se aplica al instante (incluidos diálogos y pósters).
 
 ### Pistas de audio y subtítulos
 

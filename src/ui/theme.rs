@@ -9,8 +9,8 @@
 //! - Bordes sutiles y esquinas redondeadas (8px)
 //! - Transiciones suaves (150-200ms)
 
-use gtk4::CssProvider;
-use std::sync::Once;
+use gtk4::{CssProvider, gdk::Display};
+use std::cell::{Cell, RefCell};
 
 /// Modo de tema de la aplicación.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -22,7 +22,50 @@ pub enum ThemeMode {
     Light,
 }
 
-static INSTALL_THEME_CSS: Once = Once::new();
+impl ThemeMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ThemeMode::Dark => "dark",
+            ThemeMode::Light => "light",
+        }
+    }
+
+    /// Lee el modo de tema guardado en la configuración. Cualquier valor
+    /// distinto de "light" se interpreta como oscuro.
+    pub fn from_config(value: &str) -> Self {
+        match value {
+            "light" => ThemeMode::Light,
+            _ => ThemeMode::Dark,
+        }
+    }
+}
+
+thread_local! {
+    /// Proveedor CSS instalado actualmente (para poder reemplazarlo al
+    /// cambiar de tema sin reiniciar la aplicación).
+    static THEME_PROVIDER: RefCell<Option<CssProvider>> = const { RefCell::new(None) };
+    /// Modo de tema activo.
+    static CURRENT_MODE: Cell<ThemeMode> = Cell::new(ThemeMode::default());
+}
+
+/// Devuelve el modo de tema actualmente activo.
+pub fn current_mode() -> ThemeMode {
+    CURRENT_MODE.with(|m| m.get())
+}
+
+/// Establece el modo de tema, reinstala los estilos GTK y configura
+/// AdwStyleManager para que diálogos y popovers usen el modo correspondiente.
+pub fn set_theme_mode(mode: ThemeMode) {
+    install_theme_css(mode);
+    // Los estilos de los pósters también dependen del modo de tema.
+    crate::ui::poster::install_poster_css();
+    let style_manager = libadwaita::StyleManager::default();
+    let scheme = match mode {
+        ThemeMode::Light => libadwaita::ColorScheme::ForceLight,
+        ThemeMode::Dark => libadwaita::ColorScheme::ForceDark,
+    };
+    style_manager.set_color_scheme(scheme);
+}
 
 /// Colores de la paleta Crunchyroll (tema oscuro).
 pub mod colors {
@@ -209,328 +252,340 @@ pub mod transition {
 /// reintentar la instalación.
 pub fn install_theme_css(mode: ThemeMode) {
     let c = ThemeColors::for_mode(mode);
-    INSTALL_THEME_CSS.call_once(|| {
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let provider = CssProvider::new();
-            let mut css = String::new();
+    install_theme_css_inner(&c, mode);
+}
 
-            css.push_str(&format!(
+fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let provider = CssProvider::new();
+        let mut css = String::new();
+
+        css.push_str(&format!(
                 "window {{ background-color: {}; color: {}; font-family: 'Inter', 'Roboto', 'Helvetica', 'Arial', sans-serif; }}\n",
                 c.bg, c.text_primary,
             ));
-            css.push_str("box { background-color: transparent; }\n");
-            css.push_str(&format!("label {{ color: {}; }}\n", c.text_primary));
-            css.push_str(&format!("label.dim-label {{ color: {}; }}\n", c.text_muted));
-            css.push_str(&format!(
+        css.push_str("box { background-color: transparent; }\n");
+        css.push_str(&format!("label {{ color: {}; }}\n", c.text_primary));
+        css.push_str(&format!("label.dim-label {{ color: {}; }}\n", c.text_muted));
+        css.push_str(&format!(
                 "entry {{ background-color: {}; color: {}; border: 1px solid {}; border-radius: {}; padding: 8px 12px; }}\n",
                 c.card, c.text_primary, c.border, radius::MEDIUM,
             ));
-            css.push_str(&format!("entry:focus {{ border-color: {}; }}\n", c.accent));
-            css.push_str(&format!(
+        css.push_str(&format!("entry:focus {{ border-color: {}; }}\n", c.accent));
+        css.push_str(&format!(
                 "button {{ background-color: {}; color: {}; border: 1px solid {}; border-radius: {}; padding: 8px 16px; font-weight: 600; min-height: 36px; transition: all {}; }}\n",
                 c.card, c.text_primary, c.border, radius::MEDIUM, transition::FAST,
             ));
-            css.push_str(&format!(
-                "button:hover {{ background-color: {}; border-color: {}; }}\n",
-                c.surface, c.border_hover,
-            ));
-            css.push_str(&format!(
-                "button:active {{ background-color: {}; border-color: {}; color: {}; }}\n",
-                c.accent_active, c.accent, c.btn_primary_text,
-            ));
-            css.push_str(&format!(
+        css.push_str(&format!(
+            "button:hover {{ background-color: {}; border-color: {}; }}\n",
+            c.surface, c.border_hover,
+        ));
+        css.push_str(&format!(
+            "button:active {{ background-color: {}; border-color: {}; color: {}; }}\n",
+            c.accent_active, c.accent, c.btn_primary_text,
+        ));
+        css.push_str(&format!(
                 "button.flat {{ background-color: transparent; border: none; color: {}; padding: 6px 12px; }}\n",
                 c.text_secondary,
             ));
-            css.push_str(&format!(
-                "button.flat:hover {{ background-color: {}; color: {}; border-radius: {}; }}\n",
-                c.surface, c.text_primary, radius::SMALL,
-            ));
-            css.push_str(&format!(
-                "button.flat:active {{ color: {}; }}\n",
-                c.accent,
-            ));
-            css.push_str(&format!(
-                "button.primary {{ background-color: {}; color: {}; border: none; }}\n",
-                c.btn_primary_bg, c.btn_primary_text,
-            ));
-            css.push_str(&format!(
-                "button.primary:hover {{ background-color: {}; }}\n",
-                c.accent_hover,
-            ));
-            css.push_str(&format!(
-                "button.primary:active {{ background-color: {}; }}\n",
-                c.accent_active,
-            ));
-            css.push_str("button.danger { background-color: #dc2626; color: #ffffff; border: none; }\n");
-            css.push_str("button.danger:hover { background-color: #b91c1c; }\n");
-            css.push_str("scrolledwindow { background-color: transparent; }\n");
-            css.push_str("viewport { background-color: transparent; }\n");
-            css.push_str("flowbox { background-color: transparent; }\n");
-            css.push_str("overlay { background-color: transparent; }\n");
-            css.push_str("stack { background-color: transparent; }\n");
+        css.push_str(&format!(
+            "button.flat:hover {{ background-color: {}; color: {}; border-radius: {}; }}\n",
+            c.surface,
+            c.text_primary,
+            radius::SMALL,
+        ));
+        css.push_str(&format!("button.flat:active {{ color: {}; }}\n", c.accent,));
+        css.push_str(&format!(
+            "button.primary {{ background-color: {}; color: {}; border: none; }}\n",
+            c.btn_primary_bg, c.btn_primary_text,
+        ));
+        css.push_str(&format!(
+            "button.primary:hover {{ background-color: {}; }}\n",
+            c.accent_hover,
+        ));
+        css.push_str(&format!(
+            "button.primary:active {{ background-color: {}; }}\n",
+            c.accent_active,
+        ));
+        css.push_str(
+            "button.danger { background-color: #dc2626; color: #ffffff; border: none; }\n",
+        );
+        css.push_str("button.danger:hover { background-color: #b91c1c; }\n");
+        css.push_str("scrolledwindow { background-color: transparent; }\n");
+        css.push_str("viewport { background-color: transparent; }\n");
+        css.push_str("flowbox { background-color: transparent; }\n");
+        css.push_str("overlay { background-color: transparent; }\n");
+        css.push_str("stack { background-color: transparent; }\n");
 
-            /* Historial: eliminar cualquier fondo oscuro del contenedor y asegurar
-             * que las tarjetas se vean sobre el fondo de la aplicación. */
-            css.push_str(".history-grid { background-color: transparent; }\n");
-            css.push_str(&format!(
-                ".history-grid .media-card {{ background-color: {}; }}\n",
-                c.card,
-            ));
-            css.push_str(&format!(
-                ".history-grid .media-card:hover {{ background-color: {}; }}\n",
-                c.surface,
-            ));
+        /* Historial: eliminar cualquier fondo oscuro del contenedor y asegurar
+         * que las tarjetas se vean sobre el fondo de la aplicación. */
+        css.push_str(".history-grid { background-color: transparent; }\n");
+        css.push_str(&format!(
+            ".history-grid .media-card {{ background-color: {}; }}\n",
+            c.card,
+        ));
+        css.push_str(&format!(
+            ".history-grid .media-card:hover {{ background-color: {}; }}\n",
+            c.surface,
+        ));
 
-            /* Título del historial: al pasar el cursor se resalta para indicar
-             * que pulsarlo abre solo la ficha, sin reanudar la reproducción. */
-            css.push_str(&format!(
-                ".history-title-link {{ transition: color {}; }}\n",
-                transition::FAST,
-            ));
-            css.push_str(&format!(
+        /* Título del historial: al pasar el cursor se resalta para indicar
+         * que pulsarlo abre solo la ficha, sin reanudar la reproducción. */
+        css.push_str(&format!(
+            ".history-title-link {{ transition: color {}; }}\n",
+            transition::FAST,
+        ));
+        css.push_str(&format!(
                 ".history-title-link:hover {{ color: {}; text-decoration-line: underline; text-decoration-color: {}; }}\n",
                 c.accent, c.accent,
             ));
 
-            /* Barra de progreso del historial de reproducción. */
-            css.push_str(&format!(
+        /* Barra de progreso del historial de reproducción. */
+        css.push_str(&format!(
                 ".history-progress trough {{ min-height: 5px; border-radius: 999px; background-color: {}; }}\n",
                 c.border,
             ));
-            css.push_str(&format!(
-                ".history-progress progress {{ border-radius: 999px; background-color: {}; }}\n",
-                c.accent,
-            ));
-            css.push_str(&format!(
+        css.push_str(&format!(
+            ".history-progress progress {{ border-radius: 999px; background-color: {}; }}\n",
+            c.accent,
+        ));
+        css.push_str(&format!(
                 ".history-progress-completed trough {{ min-height: 5px; border-radius: 999px; background-color: {}; }}\n",
                 c.border,
             ));
-            css.push_str(&format!(
+        css.push_str(&format!(
                 ".history-progress-completed progress {{ border-radius: 999px; background-color: {}; }}\n",
                 c.accent_active,
             ));
 
-            /* Cabecera de detalles. */
-            css.push_str(&format!(
+        /* Cabecera de detalles. */
+        css.push_str(&format!(
                 ".details-header {{ background-color: {}; border-radius: {}; padding: 0; margin-bottom: 24px; }}\n",
                 c.surface, radius::LARGE,
             ));
 
-            /* Barra superior. */
-            css.push_str(&format!(
+        /* Barra superior. */
+        css.push_str(&format!(
                 ".top-bar {{ background-color: {}; border-bottom: 1px solid {}; padding: 10px 20px; }}\n",
                 c.top_bar, c.border,
             ));
-            css.push_str(".top-bar .app-title { font-weight: 800; font-size: 1.35rem; }\n");
-            css.push_str(
+        css.push_str(".top-bar .app-title { font-weight: 800; font-size: 1.35rem; }\n");
+        css.push_str(
                 ".logo-button { background-color: transparent; border: none; padding: 4px 8px; min-height: 0; }\n",
             );
-            css.push_str(
+        css.push_str(
                 ".logo-button:hover { background-color: transparent; border: none; transform: none; }\n",
             );
 
-            /* Barra secundaria (nivel 2). */
-            css.push_str(&format!(
+        /* Barra secundaria (nivel 2). */
+        css.push_str(&format!(
                 ".top-bar-level2 {{ background-color: {}; border-bottom: 1px solid {}; padding: 8px 20px; font-size: 0.88rem; }}\n",
                 c.surface, c.border,
             ));
 
-            /* Chip removible de filtro activo */
-            css.push_str(&format!(
+        /* Chip removible de filtro activo */
+        css.push_str(&format!(
                 ".filter-chip {{ background-color: {}; border: 1px solid {}; color: {}; border-radius: 999px; padding: 6px 16px; min-height: 32px; font-weight: 600; }}\n",
                 c.card, c.border, c.text_secondary,
             ));
-            css.push_str(&format!(
-                ".filter-chip:hover {{ border-color: {}; color: {}; background-color: {}; }}\n",
-                c.border_hover, c.text_primary, c.surface,
-            ));
+        css.push_str(&format!(
+            ".filter-chip:hover {{ border-color: {}; color: {}; background-color: {}; }}\n",
+            c.border_hover, c.text_primary, c.surface,
+        ));
 
-            /* Píldora "Continuar viendo" */
-            css.push_str(&format!(
+        /* Píldora "Continuar viendo" */
+        css.push_str(&format!(
                 ".continue-button {{ background-color: {}; border: 1px solid {}; color: {}; border-radius: 999px; padding: 6px 16px; min-height: 32px; font-weight: 600; }}\n",
                 c.accent, c.accent, c.btn_primary_text,
             ));
-            css.push_str(&format!(
-                ".continue-button:hover {{ background-color: {}; border-color: {}; }}\n",
-                c.accent_hover, c.accent,
-            ));
+        css.push_str(&format!(
+            ".continue-button:hover {{ background-color: {}; border-color: {}; }}\n",
+            c.accent_hover, c.accent,
+        ));
 
-            /* Botones de modo de vista (Grid/Lista) */
-            css.push_str(&format!(
+        /* Botones de modo de vista (Grid/Lista) */
+        css.push_str(&format!(
                 ".view-mode-button {{ background-color: {}; border: 1px solid {}; color: {}; border-radius: {}; padding: 6px 12px; min-height: 32px; font-weight: 600; }}\n",
                 c.card, c.border, c.text_secondary, radius::SMALL,
             ));
-            css.push_str(&format!(
-                ".view-mode-button:hover {{ border-color: {}; color: {}; background-color: {}; }}\n",
-                c.border_hover, c.text_primary, c.surface,
-            ));
+        css.push_str(&format!(
+            ".view-mode-button:hover {{ border-color: {}; color: {}; background-color: {}; }}\n",
+            c.border_hover, c.text_primary, c.surface,
+        ));
 
-            /* Selector de orden de la galería */
-            css.push_str(".sort-dropdown { min-width: 120px; font-size: 0.88rem; }\n");
+        /* Selector de orden de la galería */
+        css.push_str(".sort-dropdown { min-width: 120px; font-size: 0.88rem; }\n");
 
-            /* Navegación horizontal (Categorías) */
-            css.push_str(&format!(
+        /* Navegación horizontal (Categorías) */
+        css.push_str(&format!(
                 ".nav-button {{ background-color: transparent; border: none; color: {}; font-size: 0.9rem; font-weight: 600; padding: 6px 12px; margin: 0 4px; border-radius: {}; min-height: 32px; }}\n",
                 c.text_secondary, radius::SMALL,
             ));
-            css.push_str(&format!(
-                ".nav-button:hover {{ background-color: {}; color: {}; }}\n",
-                c.surface, c.text_primary,
-            ));
-            css.push_str(&format!(
-                ".nav-button.active {{ background-color: {}; color: {}; }}\n",
-                c.accent, c.btn_primary_text,
-            ));
+        css.push_str(&format!(
+            ".nav-button:hover {{ background-color: {}; color: {}; }}\n",
+            c.surface, c.text_primary,
+        ));
+        css.push_str(&format!(
+            ".nav-button.active {{ background-color: {}; color: {}; }}\n",
+            c.accent, c.btn_primary_text,
+        ));
 
-            /* Título de página */
-            css.push_str(&format!(
-                ".page-title {{ font-size: 1.6rem; font-weight: 800; color: {}; }}\n",
-                c.text_primary,
-            ));
+        /* Título de página */
+        css.push_str(&format!(
+            ".page-title {{ font-size: 1.6rem; font-weight: 800; color: {}; }}\n",
+            c.text_primary,
+        ));
 
-            /* Barra de filtro activo sobre la galería */
-            css.push_str(&format!(
+        /* Barra de filtro activo sobre la galería */
+        css.push_str(&format!(
                 ".filter-bar {{ background-color: {}; border-bottom: 1px solid {}; padding: 10px 24px; }}\n",
                 c.surface, c.border,
             ));
-            css.push_str(&format!(
-                ".filter-label {{ color: {}; font-weight: 600; font-size: 0.92rem; }}\n",
-                c.text_secondary,
-            ));
+        css.push_str(&format!(
+            ".filter-label {{ color: {}; font-weight: 600; font-size: 0.92rem; }}\n",
+            c.text_secondary,
+        ));
 
-            /* Chips de categoría */
-            css.push_str(&format!(
+        /* Chips de categoría */
+        css.push_str(&format!(
                 ".category-chip {{ background-color: {}; border: 1px solid {}; color: {}; border-radius: 999px; padding: 8px 18px; min-height: 36px; }}\n",
                 c.card, c.border, c.text_secondary,
             ));
-            css.push_str(&format!(
-                ".category-chip:hover {{ border-color: {}; color: {}; }}\n",
-                c.border_hover, c.text_primary,
-            ));
-            css.push_str(&format!(
-                ".category-chip.active {{ background-color: {}; border-color: {}; color: {}; }}\n",
-                c.accent, c.accent, c.btn_primary_text,
-            ));
+        css.push_str(&format!(
+            ".category-chip:hover {{ border-color: {}; color: {}; }}\n",
+            c.border_hover, c.text_primary,
+        ));
+        css.push_str(&format!(
+            ".category-chip.active {{ background-color: {}; border-color: {}; color: {}; }}\n",
+            c.accent, c.accent, c.btn_primary_text,
+        ));
 
-            /* Tarjeta de medio en galería */
-            css.push_str(&format!(
+        /* Tarjeta de medio en galería */
+        css.push_str(&format!(
                 ".media-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; padding: 8px; transition: all {}; }}\n",
                 c.card, c.border, radius::LARGE, transition::NORMAL,
             ));
-            css.push_str(&format!(
+        css.push_str(&format!(
                 ".media-card:hover {{ background-color: {}; border-color: {}; transform: scale(1.03); }}\n",
                 c.surface, c.border_hover,
             ));
-            /* Anular el fondo de acento que GTK4 aplica por defecto al ítem
-             * seleccionado de un GtkGridView/GtkListView. */
-            css.push_str(&format!(
-                ".media-card:selected {{ background-color: {}; border-color: {}; }}\n",
-                c.card, c.border,
-            ));
+        /* Anular el fondo de acento que GTK4 aplica por defecto al ítem
+         * seleccionado de un GtkGridView/GtkListView. */
+        css.push_str(&format!(
+            ".media-card:selected {{ background-color: {}; border-color: {}; }}\n",
+            c.card, c.border,
+        ));
 
-            /* Póster de medio */
-            css.push_str(&format!(
-                ".media-poster {{ border-radius: {}; }}\n",
-                radius::MEDIUM,
-            ));
+        /* Póster de medio */
+        css.push_str(&format!(
+            ".media-poster {{ border-radius: {}; }}\n",
+            radius::MEDIUM,
+        ));
 
-            /* Etiqueta de tipo en tarjeta de galería */
-            css.push_str(&format!(
+        /* Etiqueta de tipo en tarjeta de galería */
+        css.push_str(&format!(
                 ".card-type-label {{ color: {}; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }}\n",
                 c.accent,
             ));
 
-            /* Badge de continuación */
-            css.push_str(&format!(
+        /* Badge de continuación */
+        css.push_str(&format!(
                 ".continue-badge {{ background-color: {}; color: {}; border-radius: {}; font-size: 0.68rem; font-weight: 700; padding: 2px 8px; }}\n",
                 c.accent, c.btn_primary_text, radius::SMALL,
             ));
 
-            /* Título de sección */
-            css.push_str(&format!(
-                ".section-title {{ color: {}; font-weight: 700; font-size: 1.25rem; }}\n",
-                c.text_primary,
-            ));
+        /* Título de sección */
+        css.push_str(&format!(
+            ".section-title {{ color: {}; font-weight: 700; font-size: 1.25rem; }}\n",
+            c.text_primary,
+        ));
 
-            /* Texto sutil */
-            css.push_str(&format!(".text-muted {{ color: {}; }}\n", c.text_muted));
-            css.push_str(&format!(".text-secondary {{ color: {}; }}\n", c.text_secondary));
+        /* Texto sutil */
+        css.push_str(&format!(".text-muted {{ color: {}; }}\n", c.text_muted));
+        css.push_str(&format!(
+            ".text-secondary {{ color: {}; }}\n",
+            c.text_secondary
+        ));
 
-            /* Botón de reproducción de episodio */
-            css.push_str(&format!(
+        /* Botón de reproducción de episodio */
+        css.push_str(&format!(
                 ".episode-play-btn {{ background-color: {}; color: {}; border: none; border-radius: {}; font-weight: 700; min-width: 72px; min-height: 30px; }}\n",
                 c.accent, c.btn_primary_text, radius::SMALL,
             ));
-            css.push_str(&format!(
-                ".episode-play-btn:hover {{ background-color: {}; }}\n",
-                c.accent_hover,
-            ));
+        css.push_str(&format!(
+            ".episode-play-btn:hover {{ background-color: {}; }}\n",
+            c.accent_hover,
+        ));
 
-            /* Botón de marcar episodio como visto/no visto */
-            css.push_str(&format!(
+        /* Botón de marcar episodio como visto/no visto */
+        css.push_str(&format!(
                 ".episode-watched-btn {{ background-color: transparent; color: {}; border: 1px solid {}; border-radius: {}; font-weight: 600; min-width: 72px; min-height: 30px; }}\n",
                 c.text_secondary, c.border, radius::SMALL,
             ));
-            css.push_str(&format!(
-                ".episode-watched-btn:hover {{ color: {}; border-color: {}; }}\n",
-                c.text_primary, c.border_hover,
-            ));
-            css.push_str(&format!(
+        css.push_str(&format!(
+            ".episode-watched-btn:hover {{ color: {}; border-color: {}; }}\n",
+            c.text_primary, c.border_hover,
+        ));
+        css.push_str(&format!(
                 ".episode-watched-btn.watched {{ color: {}; border-color: {}; background-color: {}; }}\n",
                 c.btn_primary_text, c.accent, c.accent,
             ));
 
-            /* Botón de favorito activo */
-            css.push_str(&format!(
-                "button.favorite-active {{ color: {}; }}\n",
-                c.accent,
-            ));
+        /* Botón de favorito activo */
+        css.push_str(&format!(
+            "button.favorite-active {{ color: {}; }}\n",
+            c.accent,
+        ));
 
-            /* Tarjeta de episodio marcada como visto */
-            css.push_str(".episode-card.episode-watched { opacity: 0.55; }\n");
-            css.push_str(".episode-card.episode-watched:hover { opacity: 0.75; }\n");
+        /* Tarjeta de episodio marcada como visto */
+        css.push_str(".episode-card.episode-watched { opacity: 0.55; }\n");
+        css.push_str(".episode-card.episode-watched:hover { opacity: 0.75; }\n");
 
-            /* Estado visto/no visto en tarjeta de episodio */
-            css.push_str(".episode-status { font-size: 0.75em; font-weight: 600; margin-top: 4px; }\n");
-            css.push_str(&format!(
-                ".episode-status-watched {{ color: {}; }}\n",
-                c.accent,
-            ));
-            css.push_str(&format!(
-                ".episode-status-unwatched {{ color: {}; }}\n",
-                c.text_muted,
-            ));
+        /* Estado visto/no visto en tarjeta de episodio */
+        css.push_str(".episode-status { font-size: 0.75em; font-weight: 600; margin-top: 4px; }\n");
+        css.push_str(&format!(
+            ".episode-status-watched {{ color: {}; }}\n",
+            c.accent,
+        ));
+        css.push_str(&format!(
+            ".episode-status-unwatched {{ color: {}; }}\n",
+            c.text_muted,
+        ));
 
-            /* Tarjeta de episodio en rejilla */
-            css.push_str(&format!(
+        /* Tarjeta de episodio en rejilla */
+        css.push_str(&format!(
                 ".episode-card {{ background-color: {}; border: 1px solid {}; border-radius: {}; transition: all {}; }}\n",
                 c.card, c.border, radius::MEDIUM, transition::FAST,
             ));
-            css.push_str(&format!(
+        css.push_str(&format!(
                 ".episode-card:hover {{ background-color: {}; border-color: {}; transform: scale(1.02); }}\n",
                 c.surface, c.border_hover,
             ));
-            css.push_str(&format!(
-                ".episode-card:selected {{ background-color: {}; border-color: {}; }}\n",
-                c.surface, c.accent,
-            ));
+        css.push_str(&format!(
+            ".episode-card:selected {{ background-color: {}; border-color: {}; }}\n",
+            c.surface, c.accent,
+        ));
 
-            /* Portada de episodio */
-            css.push_str(&format!(
-                ".episode-poster-img {{ border-radius: {}; }}\n",
-                radius::SMALL,
-            ));
+        /* Portada de episodio */
+        css.push_str(&format!(
+            ".episode-poster-img {{ border-radius: {}; }}\n",
+            radius::SMALL,
+        ));
 
-            /* Sobrelay de estado visto en episodio */
-            css.push_str(".watched-overlay { background-color: rgba(0, 0, 0, 0.5); border-radius: 6px; }\n");
+        /* Sobrelay de estado visto en episodio */
+        css.push_str(
+            ".watched-overlay { background-color: rgba(0, 0, 0, 0.5); border-radius: 6px; }\n",
+        );
 
-            /* Estrellas de calificación */
-            css.push_str(&format!(".star {{ color: {}; }}\n", c.text_muted));
-            css.push_str(&format!(".star.filled {{ color: {}; }}\n", c.accent));
+        /* Estrellas de calificación */
+        css.push_str(&format!(".star {{ color: {}; }}\n", c.text_muted));
+        css.push_str(&format!(".star.filled {{ color: {}; }}\n", c.accent));
 
         /* Banner hero de detalles */
-        css.push_str(&format!(".banner {{ border-radius: {}; }}\n", radius::LARGE));
+        css.push_str(&format!(
+            ".banner {{ border-radius: {}; }}\n",
+            radius::LARGE
+        ));
         css.push_str(&format!(
             ".banner-title {{ font-size: 2.5em; font-weight: 800; color: {}; }}\n",
             c.text_primary,
@@ -595,7 +650,9 @@ pub fn install_theme_css(mode: ThemeMode) {
         ));
         css.push_str(&format!(
             ".flat-button:hover {{ color: {}; background-color: {}; border-radius: {}; }}\n",
-            c.text_primary, c.surface, radius::SMALL,
+            c.text_primary,
+            c.surface,
+            radius::SMALL,
         ));
 
         /* Rejilla de episodios */
@@ -614,13 +671,39 @@ pub fn install_theme_css(mode: ThemeMode) {
 
         provider.load_from_data(&css);
 
-        if let Some(display) = gtk4::gdk::Display::default() {
+        if let Some(display) = Display::default() {
+            THEME_PROVIDER.with(|p| {
+                if let Some(prev) = p.borrow_mut().take() {
+                    gtk4::style_context_remove_provider_for_display(&display, &prev);
+                }
+            });
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &provider,
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
+            THEME_PROVIDER.with(|p| *p.borrow_mut() = Some(provider));
         }
+        CURRENT_MODE.with(|m| m.set(mode));
     }));
-});
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn theme_mode_as_str() {
+        assert_eq!(ThemeMode::Dark.as_str(), "dark");
+        assert_eq!(ThemeMode::Light.as_str(), "light");
+    }
+
+    #[test]
+    fn theme_mode_from_config() {
+        assert_eq!(ThemeMode::from_config("light"), ThemeMode::Light);
+        assert_eq!(ThemeMode::from_config("dark"), ThemeMode::Dark);
+        // Cualquier valor distinto de "light" se interpreta como oscuro.
+        assert_eq!(ThemeMode::from_config("otro"), ThemeMode::Dark);
+        assert_eq!(ThemeMode::from_config(""), ThemeMode::Dark);
+    }
 }
