@@ -953,10 +953,14 @@ impl MainWindow {
                 Self::update_library_status(&w);
             });
 
-        // Callback: la indexación terminó -> recargar la galería.
+        // Callback: la indexación terminó -> recargar la galería y asegurar
+        // de que el Stack se muestre en la página correcta (list o empty).
+        // Si no se llama a show_list(), el Stack puede quedar atascado en
+        // "empty" aunque load_media() haya cargado los medios en media_list.
         let this_clone = this.clone();
         this.borrow_mut().settings_view.on_library_changed(move || {
             Self::load_media(&this_clone);
+            this_clone.borrow().show_list();
             let this = this_clone.clone();
             glib::timeout_add_local(Duration::from_millis(500), move || {
                 let w = this.borrow();
