@@ -112,18 +112,19 @@ impl HistoryView {
         // Rejilla de tarjetas.
         let list = FlowBox::new();
         list.add_css_class("history-grid");
-        list.set_hexpand(true);
+        list.set_hexpand(false);
         list.set_valign(gtk4::Align::Start);
+        list.set_halign(gtk4::Align::Start);
         list.set_homogeneous(false);
         list.set_selection_mode(gtk4::SelectionMode::None);
-        list.set_row_spacing(0);
-        list.set_column_spacing(0);
-        list.set_margin_top(16);
+        list.set_row_spacing(12);
+        list.set_column_spacing(12);
+        list.set_margin_top(12);
         list.set_margin_bottom(0);
         list.set_margin_start(0);
         list.set_margin_end(0);
         list.set_min_children_per_line(1);
-        list.set_max_children_per_line(12);
+        list.set_max_children_per_line(6);
 
         let scrolled = ScrolledWindow::new();
         scrolled.set_hexpand(true);
@@ -354,7 +355,7 @@ fn build_history_card_widget() -> Box {
     card.add_css_class("media-card");
     card.set_halign(gtk4::Align::Start);
     card.set_valign(gtk4::Align::Start);
-    card.set_size_request(-1, 340);
+    card.set_size_request(-1, 270);
     card.set_margin_top(0);
     card.set_margin_start(0);
     card.set_margin_end(0);
@@ -362,7 +363,7 @@ fn build_history_card_widget() -> Box {
     let poster_stack = Box::new(Orientation::Vertical, 0);
     poster_stack.set_halign(gtk4::Align::Start);
     poster_stack.set_valign(gtk4::Align::Start);
-    poster_stack.set_size_request(200, 300);
+    poster_stack.set_size_request(150, 220);
     card.append(&poster_stack);
 
     let type_label = Label::new(None);
@@ -371,7 +372,7 @@ fn build_history_card_widget() -> Box {
 
     let title_label = Label::new(None);
     title_label.set_wrap(true);
-    title_label.set_max_width_chars(20);
+    title_label.set_max_width_chars(16);
     title_label.set_justify(gtk4::Justification::Left);
     title_label.set_halign(gtk4::Align::Start);
     title_label.set_xalign(0.0);
