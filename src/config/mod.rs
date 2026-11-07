@@ -86,9 +86,10 @@ impl Default for AppConfig {
     }
 }
 
-/// Umbral de completado por defecto: 300 segundos (5 minutos).
+/// Umbral de completado por defecto: 180 segundos (3 minutos) para
+/// episodios/anime. Las películas usan 600 segundos (10 minutos) fijos.
 fn default_completion_threshold_seconds() -> u64 {
-    300
+    180
 }
 
 /// Reproducción automática del siguiente episodio activada por defecto.
@@ -274,7 +275,7 @@ mod tests {
                 default_player: "mpv".to_string(),
                 default_tracks: DefaultTracks::default(),
                 theme: "dark".to_string(),
-                playback_completion_threshold_seconds: 300,
+                playback_completion_threshold_seconds: 180,
                 auto_play_next_episode: true,
             },
         };

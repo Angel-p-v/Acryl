@@ -100,6 +100,8 @@
   "settings.metadata.description": "Vuelve a consultar TVmaze (y AniList para anime) y sobrescribe el título, el año, la sinopsis, el póster y el banner de todos los medios indexados.",
   "settings.data.title": "Datos",
   "settings.data.description": "Guarda una copia de la biblioteca (favoritos, progreso e historial) o restaura una copia anterior. Los archivos de vídeo no se incluyen en la copia.",
+  "settings.auto_play_next.title": "Reproducir siguiente episodio automáticamente",
+  "settings.auto_play_next.description": "Al terminar un episodio de serie o anime, se reproduce el siguiente no visto tras 5 segundos (3 min antes del final). Las películas usan 10 min.",
   "settings.theme.title": "Tema",
   "settings.theme.description": "Elige entre el tema oscuro y el tema claro. Se aplica al guardar los ajustes.",
   "theme.dark": "Oscuro",

@@ -9,7 +9,7 @@ use crate::ui::i18n::{TranslationsRef, language_label};
 use gtk4::prelude::*;
 use gtk4::{
     Box, Button, DropDown, Entry, GestureClick, Label, ListBox, ListBoxRow, Orientation, Popover,
-    ScrolledWindow, Spinner, gio, glib,
+    ScrolledWindow, Spinner, Switch, gio, glib,
 };
 use libadwaita::ButtonContent;
 use std::cell::{Cell, RefCell};
@@ -466,6 +466,7 @@ pub struct SettingsView {
     data_status: Label,
     theme_title: Label,
     theme_combo: DropDown,
+    auto_play_next_switch: Switch,
     config: Rc<RefCell<AppConfig>>,
     folder_manager: FolderManager,
     on_save: Option<Rc<dyn Fn(AppConfig)>>,
@@ -1097,6 +1098,22 @@ impl SettingsView {
 
         data_section.append(&theme_row);
 
+        // Toggle: siguiente episodio automático.
+        let auto_play_next_row = Box::new(Orientation::Horizontal, 10);
+        auto_play_next_row.set_hexpand(true);
+
+        let auto_play_next_title = Label::new(Some(&t("settings.auto_play_next.title")));
+        auto_play_next_title.set_halign(gtk4::Align::Start);
+        auto_play_next_title.set_valign(gtk4::Align::Center);
+        auto_play_next_row.append(&auto_play_next_title);
+
+        let auto_play_next_switch = Switch::new();
+        auto_play_next_switch.set_valign(gtk4::Align::Center);
+        auto_play_next_switch.set_active(config.auto_play_next_episode);
+        auto_play_next_row.append(&auto_play_next_switch);
+
+        data_section.append(&auto_play_next_row);
+
         content.append(&data_section);
 
         // --- Sección: Acerca de ---
@@ -1387,6 +1404,7 @@ impl SettingsView {
             data_status,
             theme_title,
             theme_combo,
+            auto_play_next_switch,
             config: config_rc,
             folder_manager,
             on_save: None,
@@ -1450,6 +1468,10 @@ impl SettingsView {
         let theme_model = gtk4::StringList::new(&theme_option_refs);
         self.theme_combo.set_model(Some(&theme_model));
         self.theme_combo.set_selected(theme_selected.min(1));
+        self.auto_play_next_switch
+            .set_active(self.config.borrow().auto_play_next_episode);
+        // El label del switch se actualiza con el texto del título.
+        // GTK4 Switch no tiene label propio; usamos el Label separado.
 
         self.cancel_button.set_label(&t("button.cancel"));
         self.save_button.set_label(&t("button.save"));
@@ -1491,6 +1513,7 @@ impl SettingsView {
         let default_audio_key = self.default_audio_selector.selected_key.clone();
         let default_subtitle_key = self.default_subtitle_selector.selected_key.clone();
         let theme_combo = self.theme_combo.clone();
+        let auto_play_next_switch = self.auto_play_next_switch.clone();
 
         self.save_button.connect_clicked(move |_| {
             let new_theme = if theme_combo.selected() == 0 {
@@ -1512,6 +1535,9 @@ impl SettingsView {
 
                 // Persistir el modo de tema elegido.
                 config.theme = new_theme.clone();
+
+                // Persistir el siguiente episodio automático.
+                config.auto_play_next_episode = auto_play_next_switch.is_active();
             }
 
             // Aplicar el tema inmediatamente (CSS y AdwStyleManager).

@@ -77,7 +77,7 @@ fn temp_config() -> (Config, TempDir, TempDir) {
         default_player: "mpv".to_string(),
         default_tracks: DefaultTracks::default(),
         theme: "dark".to_string(),
-        playback_completion_threshold_seconds: 300,
+        playback_completion_threshold_seconds: 180,
         auto_play_next_episode: true,
     };
 

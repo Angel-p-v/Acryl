@@ -100,6 +100,8 @@
   "settings.metadata.description": "Queries TVmaze (and AniList for anime) again and overwrites title, year, synopsis, poster and banner of all indexed media.",
   "settings.data.title": "Data",
   "settings.data.description": "Save a copy of the library (favorites, progress and history) or restore a previous copy. Video files are not included in the copy.",
+  "settings.auto_play_next.title": "Play next episode automatically",
+  "settings.auto_play_next.description": "When a series or anime episode ends, the next unwatched one plays after 5 seconds (3 min before the end). Movies use 10 min.",
   "settings.theme.title": "Theme",
   "settings.theme.description": "Choose between the dark theme and the light theme. It is applied when saving the settings.",
   "theme.dark": "Dark",

@@ -2131,8 +2131,13 @@ impl MainWindow {
                     }
                     restore_window_mode(&window_for_restore, window_mode);
 
-                    // Siguiente episodio automático.
-                    if auto_play_next && let Some(media_id) = media_id_for_next {
+                    // Siguiente episodio automático: solo si la reproducción
+                    // se completó (faltaban menos del umbral para terminar),
+                    // no si el usuario cerró mpv antes.
+                    if auto_play_next
+                        && session.completed()
+                        && let Some(media_id) = media_id_for_next
+                    {
                         Self::schedule_next_episode(&this_for_next, media_id, db_path.clone());
                     }
                     glib::ControlFlow::Break
