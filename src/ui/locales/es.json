@@ -20,6 +20,8 @@
   "history.clear_confirm.detail": "Se eliminarán todos los registros de reproducción. Esta acción no se puede deshacer.",
   "history.clear_confirm.delete": "Borrar",
   "history.cleared": "Historial borrado",
+  "history.watched": "Visto",
+  "history.remaining_format": "quedan {}",
 
   "button.categories": "Categorías",
   "button.history": "Historial",

@@ -558,7 +558,7 @@ pub fn bind_history_card(
     translations: &TranslationsRef,
     download_tx: &mpsc::Sender<()>,
     downloading_posters: &Arc<Mutex<HashSet<String>>>,
-) {
+) -> Label {
     // Limpiar hijos existentes para reutilizar el widget sin fugas.
     while let Some(child) = card.first_child() {
         card.remove(&child);
@@ -672,6 +672,9 @@ pub fn bind_history_card(
     title_label.set_lines(2);
     title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     title_label.add_css_class("poster-title");
+    // En el historial el título es interactivo por sí mismo: al pulsarlo se
+    // abre la ficha sin reanudar la reproducción.
+    title_label.add_css_class("history-title-link");
     card.append(&title_label);
 
     // Año.
@@ -681,6 +684,10 @@ pub fn bind_history_card(
         year_label.set_halign(gtk4::Align::Start);
         card.append(&year_label);
     }
+
+    // Se devuelve el título para que el historial pueda distinguir un clic
+    // sobre el nombre de la serie/película de un clic en el resto de la tarjeta.
+    title_label
 }
 
 #[cfg(test)]

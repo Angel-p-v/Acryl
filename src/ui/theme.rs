@@ -282,6 +282,35 @@ pub fn install_theme_css(mode: ThemeMode) {
                 c.surface,
             ));
 
+            /* Título del historial: al pasar el cursor se resalta para indicar
+             * que pulsarlo abre solo la ficha, sin reanudar la reproducción. */
+            css.push_str(&format!(
+                ".history-title-link {{ transition: color {}; }}\n",
+                transition::FAST,
+            ));
+            css.push_str(&format!(
+                ".history-title-link:hover {{ color: {}; text-decoration-line: underline; text-decoration-color: {}; }}\n",
+                c.accent, c.accent,
+            ));
+
+            /* Barra de progreso del historial de reproducción. */
+            css.push_str(&format!(
+                ".history-progress trough {{ min-height: 5px; border-radius: 999px; background-color: {}; }}\n",
+                c.border,
+            ));
+            css.push_str(&format!(
+                ".history-progress progress {{ border-radius: 999px; background-color: {}; }}\n",
+                c.accent,
+            ));
+            css.push_str(&format!(
+                ".history-progress-completed trough {{ min-height: 5px; border-radius: 999px; background-color: {}; }}\n",
+                c.border,
+            ));
+            css.push_str(&format!(
+                ".history-progress-completed progress {{ border-radius: 999px; background-color: {}; }}\n",
+                c.accent_active,
+            ));
+
             /* Cabecera de detalles. */
             css.push_str(&format!(
                 ".details-header {{ background-color: {}; border-radius: {}; padding: 0; margin-bottom: 24px; }}\n",

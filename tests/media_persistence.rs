@@ -1353,6 +1353,11 @@ fn historial_mantiene_una_entrada_activa_por_archivo() {
             .list_playback_history(Some(10), Some(0))
             .expect("listar historial");
         assert_eq!(history.len(), 1);
+        assert_eq!(
+            history[0].file_path.as_deref(),
+            Some(file_path),
+            "la entrada debe exponer la ruta para poder reanudar la reproducción"
+        );
 
         // El índice único parcial también protege ante inserciones directas.
         let duplicate = probe.execute(
@@ -1369,6 +1374,32 @@ fn historial_mantiene_una_entrada_activa_por_archivo() {
                 .expect("leer tras completar"),
             None,
             "una reproducción completada no debe reanudarse"
+        );
+
+        // completed_at debe haberse marcado tras completar.
+        let probe = open_db(db_path.to_str().unwrap()).expect("abrir conexión de prueba");
+        let completed_at: Option<String> = probe
+            .query_row(
+                "SELECT completed_at FROM playback_history
+                 WHERE file_path = ?1 AND completed_at IS NOT NULL
+                 LIMIT 1",
+                [file_path],
+                |row| row.get(0),
+            )
+            .expect("leer completed_at");
+        assert!(completed_at.is_some(), "completed_at debe estar presente");
+
+        let history = repo
+            .list_playback_history(Some(10), Some(0))
+            .expect("listar historial");
+        assert_eq!(
+            history.len(),
+            1,
+            "el historial muestra solo la entrada más reciente del archivo"
+        );
+        assert!(
+            history[0].completed_at.is_some(),
+            "la entrada del historial debe llevar completed_at"
         );
     }
 
