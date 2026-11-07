@@ -423,6 +423,8 @@ impl<'a> MediaRepository<'a> {
         let order_clause = match options.order_by.as_deref().unwrap_or("title") {
             "added" => "ORDER BY created_at DESC",
             "recent" => "ORDER BY updated_at DESC",
+            "year" => "ORDER BY year IS NULL, year DESC, sort_title ASC",
+            "type" => "ORDER BY type ASC, sort_title ASC",
             _ => "ORDER BY sort_title ASC",
         };
         sql.push(' ');
@@ -811,6 +813,8 @@ impl<'a> MediaRepository<'a> {
         let order_clause = match options.order_by.as_deref().unwrap_or("title") {
             "added" => "ORDER BY m.created_at DESC",
             "recent" => "ORDER BY m.updated_at DESC",
+            "year" => "ORDER BY m.year IS NULL, m.year DESC, m.sort_title ASC",
+            "type" => "ORDER BY m.type ASC, m.sort_title ASC",
             _ => "ORDER BY m.sort_title ASC",
         };
         sql.push(' ');

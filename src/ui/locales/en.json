@@ -76,6 +76,7 @@
   "topbar.sort_title": "Title",
   "topbar.sort_year": "Year",
   "topbar.sort_type": "Type",
+  "tooltip.sort": "Sort the library",
 
   "status.no_media_indexed": "No media indexed",
   "status.one_media_indexed": "1 media item",

@@ -366,6 +366,9 @@ pub fn install_theme_css(mode: ThemeMode) {
                 c.border_hover, c.text_primary, c.surface,
             ));
 
+            /* Selector de orden de la galería */
+            css.push_str(".sort-dropdown { min-width: 120px; font-size: 0.88rem; }\n");
+
             /* Navegación horizontal (Categorías) */
             css.push_str(&format!(
                 ".nav-button {{ background-color: transparent; border: none; color: {}; font-size: 0.9rem; font-weight: 600; padding: 6px 12px; margin: 0 4px; border-radius: {}; min-height: 32px; }}\n",

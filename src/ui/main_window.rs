@@ -12,8 +12,8 @@ use crate::ui::poster_selector::{ImageChoice, PosterSelector};
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
 use gtk4::{
-    Box, Button, CenterBox, FlowBox, Label, Orientation, Revealer, ScrolledWindow, SearchEntry,
-    Spinner, Stack, gio, glib,
+    Box, Button, CenterBox, DropDown, FlowBox, Label, Orientation, Revealer, ScrolledWindow,
+    SearchEntry, Spinner, Stack, gio, glib,
 };
 use libadwaita::prelude::*;
 use libadwaita::{ApplicationWindow as AdwApplicationWindow, StatusPage, Toast, ToastOverlay};
@@ -112,9 +112,11 @@ pub struct MainWindow {
     /// Botones de modo de vista (Grid/Lista).
     view_grid_button: Button,
     view_list_button: Button,
-    /// Etiqueta de ordenamiento (placeholder visual).
-    #[allow(dead_code)]
-    sort_label: Label,
+    /// Selector de orden de la galería (título, año o tipo).
+    sort_combo: DropDown,
+    /// Evita recargar la galería mientras se reconstruyen las opciones del
+    /// selector de orden (por ejemplo, al cambiar de idioma).
+    suppress_sort_change: Rc<Cell<bool>>,
     /// Campo de búsqueda prominente en el centro de la barra superior.
     search_entry: SearchEntry,
     /// Spinner de sincronización de metadatos.
@@ -295,10 +297,18 @@ impl MainWindow {
         view_list_button.set_valign(gtk4::Align::Center);
         top_bar_level2.append(&view_list_button);
 
-        // Etiqueta de ordenamiento (placeholder visual).
-        let sort_label = Label::new(Some(&t("topbar.sort_title")));
-        sort_label.set_valign(gtk4::Align::Center);
-        top_bar_level2.append(&sort_label);
+        // Selector de orden de la galería.
+        let sort_options = [
+            t("topbar.sort_title"),
+            t("topbar.sort_year"),
+            t("topbar.sort_type"),
+        ];
+        let sort_option_refs: Vec<&str> = sort_options.iter().map(String::as_str).collect();
+        let sort_combo = DropDown::from_strings(&sort_option_refs);
+        sort_combo.add_css_class("sort-dropdown");
+        sort_combo.set_valign(gtk4::Align::Center);
+        sort_combo.set_tooltip_text(Some(&t("tooltip.sort")));
+        top_bar_level2.append(&sort_combo);
 
         content.append(&top_bar_level2);
 
@@ -474,6 +484,8 @@ impl MainWindow {
 
         stack.set_visible_child_name("list");
 
+        let suppress_sort_change = Rc::new(Cell::new(false));
+
         let this = Rc::new(RefCell::new(Self {
             window,
             stack,
@@ -506,7 +518,8 @@ impl MainWindow {
             continue_button,
             view_grid_button,
             view_list_button,
-            sort_label,
+            sort_combo,
+            suppress_sort_change: suppress_sort_change.clone(),
             search_entry,
             sync_spinner,
             settings_menu_button,
@@ -765,6 +778,16 @@ impl MainWindow {
         let this_list = this.clone();
         this.borrow().view_list_button.connect_clicked(move |_| {
             let _ = this_list;
+        });
+
+        // Nivel 2: al cambiar el orden, recargar la galería desde el principio.
+        let this_sort = this.clone();
+        let suppress_sort = suppress_sort_change.clone();
+        this.borrow().sort_combo.connect_selected_notify(move |_| {
+            if suppress_sort.get() {
+                return;
+            }
+            Self::load_media(&this_sort);
         });
 
         // Logo: acceso directo al inicio desde cualquier vista. Limpia la
@@ -1421,13 +1444,19 @@ impl MainWindow {
     /// reemplaza el contenido de la galería; si es mayor, lo añade al final
     /// (paginación infinita).
     fn load_media_page(this: &MainWindowRef, offset: i64) {
-        let (db_path, category_id, favorite, watched) = {
+        let (db_path, category_id, favorite, watched, order_by) = {
             let w = this.borrow();
+            let order_by = match w.sort_combo.selected() {
+                1 => Some("year".to_string()),
+                2 => Some("type".to_string()),
+                _ => None,
+            };
             (
                 w.db_path.clone(),
                 *w.current_category.borrow(),
                 *w.current_favorite_filter.borrow(),
                 *w.current_watched_filter.borrow(),
+                order_by,
             )
         };
 
@@ -1444,7 +1473,7 @@ impl MainWindow {
                 r#type: None,
                 limit: Some(100),
                 offset: Some(offset),
-                order_by: None,
+                order_by,
                 favorite,
                 watched,
             };
@@ -1556,6 +1585,23 @@ impl MainWindow {
             .set_label(&self.t("topbar.continue_watching"));
         self.view_grid_button.set_label(&self.t("topbar.view_grid"));
         self.view_list_button.set_label(&self.t("topbar.view_list"));
+
+        // Actualizar las opciones del selector de orden conservando la
+        // selección actual del usuario.
+        let selected_order = self.sort_combo.selected();
+        let order_options = [
+            self.t("topbar.sort_title"),
+            self.t("topbar.sort_year"),
+            self.t("topbar.sort_type"),
+        ];
+        let order_option_refs: Vec<&str> = order_options.iter().map(String::as_str).collect();
+        let order_model = gtk4::StringList::new(&order_option_refs);
+        self.suppress_sort_change.set(true);
+        self.sort_combo.set_model(Some(&order_model));
+        self.sort_combo.set_selected(selected_order.min(2));
+        self.suppress_sort_change.set(false);
+        self.sort_combo
+            .set_tooltip_text(Some(&self.t("tooltip.sort")));
 
         // Página vacía
         self.empty_page.set_title(&self.t("empty.title"));

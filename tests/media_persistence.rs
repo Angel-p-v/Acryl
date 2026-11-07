@@ -393,6 +393,55 @@ fn toggle_favorite_y_watched() {
 }
 
 #[test]
+fn list_ordena_por_anio_y_tipo() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        for (title, sort, year, media_type) in [
+            ("Antigua", "antigua", Some(1999), "movie"),
+            ("Reciente", "reciente", Some(2024), "series"),
+            ("Sin año", "sin anio", None, "anime"),
+        ] {
+            repo.upsert(&MediaInput {
+                r#type: media_type.to_string(),
+                title: title.to_string(),
+                sort_title: sort.to_string(),
+                year,
+                folder_path: format!("/media/{sort}"),
+                parent_id: None,
+            })
+            .expect("upsert");
+        }
+    }
+
+    let by_year = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.list(ListMediaOptions {
+            order_by: Some("year".to_string()),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .expect("listar por año")
+    };
+    let years: Vec<Option<i32>> = by_year.iter().map(|media| media.year).collect();
+    assert_eq!(years, vec![Some(2024), Some(1999), None]);
+
+    let by_type = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.list(ListMediaOptions {
+            order_by: Some("type".to_string()),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .expect("listar por tipo")
+    };
+    let types: Vec<&str> = by_type.iter().map(|media| media.r#type.as_str()).collect();
+    assert_eq!(types, vec!["anime", "movie", "series"]);
+}
+
+#[test]
 fn set_favorite_guarda_el_estado_exacto() {
     let (db_path, _dir) = temp_db();
     let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
