@@ -56,6 +56,9 @@ pub struct AppConfig {
     /// Modo de tema: "dark" (por defecto) o "light".
     #[serde(default)]
     pub theme: String,
+    /// Reproducir automáticamente el siguiente episodio al terminar uno.
+    #[serde(default = "default_auto_play_next_episode")]
+    pub auto_play_next_episode: bool,
     /// Umbral de completado de una reproducción, en segundos.
     ///
     /// Una reproducción se marca como completada (y el archivo como visto) cuando
@@ -79,6 +82,7 @@ impl Default for AppConfig {
             default_player: "mpv".to_string(),
             default_tracks: DefaultTracks::default(),
             theme: "dark".to_string(),
+            auto_play_next_episode: default_auto_play_next_episode(),
             playback_completion_threshold_seconds: default_completion_threshold_seconds(),
         }
     }
@@ -87,6 +91,11 @@ impl Default for AppConfig {
 /// Umbral de completado por defecto: 300 segundos (5 minutos).
 fn default_completion_threshold_seconds() -> u64 {
     300
+}
+
+/// Reproducción automática del siguiente episodio activada por defecto.
+fn default_auto_play_next_episode() -> bool {
+    true
 }
 
 pub struct Config {
@@ -269,6 +278,7 @@ mod tests {
                 default_tracks: DefaultTracks::default(),
                 theme: "dark".to_string(),
                 playback_completion_threshold_seconds: 300,
+                auto_play_next_episode: true,
             },
         };
         (config, config_dir, data_dir)

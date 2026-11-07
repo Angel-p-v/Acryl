@@ -207,6 +207,7 @@
   "toast.indexing_completed": "Indexing completed",
   "toast.tracks_saved": "Tracks saved",
   "toast.images_updated": "Poster/banner updated",
+  "toast.next_episode": "Playing next episode in a few seconds",
 
   "metadata.refresh.title": "Refresh all metadata?",
   "metadata.refresh.detail": "Will query TVmaze (and AniList for anime) and overwrite title, year, synopsis, poster and banner of all indexed media. This action cannot be undone.",

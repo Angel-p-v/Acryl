@@ -207,6 +207,7 @@
   "toast.indexing_completed": "Indexación completada",
   "toast.tracks_saved": "Pistas guardadas",
   "toast.images_updated": "Póster/banner actualizados",
+  "toast.next_episode": "Reproduciendo el siguiente episodio en unos segundos",
 
   "metadata.refresh.title": "¿Actualizar todos los metadatos?",
   "metadata.refresh.detail": "Se consultará TVmaze (y AniList para anime) y se sobrescribirán el título, el año, la sinopsis, el póster y el banner de todos los medios indexados. Esta acción no se puede deshacer.",

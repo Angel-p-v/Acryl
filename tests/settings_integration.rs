@@ -41,6 +41,7 @@ fn temp_config() -> (Config, TempDir, TempDir) {
         default_tracks: DefaultTracks::default(),
         theme: "dark".to_string(),
         playback_completion_threshold_seconds: 300,
+        auto_play_next_episode: true,
     };
 
     let config = Config {

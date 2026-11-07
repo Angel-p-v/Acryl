@@ -552,9 +552,9 @@ impl MainWindow {
                     // mpv abra su ventana.
                     let this_play = this_clone.clone();
                     glib::timeout_add_local(Duration::from_millis(200), move || {
-                        let w = this_play.borrow();
-                        if let Err(error) = w.play_episode(&file_path) {
+                        if let Err(error) = Self::play_episode(&this_play, &file_path) {
                             eprintln!("No se pudo reanudar '{}': {}", file_path, error);
+                            let w = this_play.borrow();
                             w.show_error(&w.t("error.play_episode"), &error.to_string());
                         }
                         glib::ControlFlow::Break
@@ -989,9 +989,9 @@ impl MainWindow {
             .media_details
             .borrow_mut()
             .on_play_episode(move |file_path| {
-                let w = this_clone.borrow();
-                if let Err(error) = w.play_episode(&file_path) {
+                if let Err(error) = Self::play_episode(&this_clone, &file_path) {
                     eprintln!("No se pudo reproducir '{}': {}", file_path, error);
+                    let w = this_clone.borrow();
                     w.show_error(&w.t("error.play_episode"), &error.to_string());
                 }
             });
@@ -1984,32 +1984,34 @@ impl MainWindow {
         drop(w);
     }
 
-    fn play_episode(&self, file_path: &str) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
+    /// Reproduce un archivo de vídeo en mpv. Cuando la reproducción termina,
+    /// si `auto_play_next_episode` está activado y el medio es una serie o
+    /// anime, busca y reproduce el siguiente episodio no visto tras una breve
+    /// cuenta atrás.
+    fn play_episode(
+        this: &MainWindowRef,
+        file_path: &str,
+    ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
+        let w = this.borrow();
         let media_id = {
-            let mut conn = open_db(&self.db_path)?;
+            let mut conn = open_db(&w.db_path)?;
             let mut repo = MediaRepository::new(&mut conn);
             let media_id = repo.find_media_id_by_file(file_path)?;
             close_db(conn);
             media_id
         };
-
-        // El modo de mpv se deriva del estado real de Acryl: una ventana
-        // maximizada no es pantalla completa. Forzar --fullscreen en ese caso
-        // hacía que Hyprland reubicara y encogiera la ventana de Acryl.
-        let window_mode = player_window_mode(&self.window);
-
-        // Las pistas predeterminadas del usuario tienen prioridad sobre
-        // cualquier preferencia guardada por archivo.
-        let default_tracks = {
-            let config = self.config.borrow();
-            config.default_tracks.clone()
-        };
-
-        let completion_threshold = Some(self.config.borrow().playback_completion_threshold_seconds);
+        let window_mode = player_window_mode(&w.window);
+        let default_tracks = w.config.borrow().default_tracks.clone();
+        let completion_threshold =
+            Some(w.config.borrow().playback_completion_threshold_seconds);
+        let auto_play_next = w.config.borrow().auto_play_next_episode;
+        let db_path = w.db_path.clone();
+        let window = w.window.clone();
+        drop(w);
 
         let playback_start = match media_id {
             Some(media_id) => crate::core::player::play_with_resume_with_mode(
-                &self.db_path,
+                &db_path,
                 media_id,
                 file_path,
                 window_mode,
@@ -2017,7 +2019,7 @@ impl MainWindow {
                 completion_threshold,
             )?,
             None => crate::core::player::play_external_with_mode(
-                &self.db_path,
+                &db_path,
                 None,
                 file_path,
                 window_mode,
@@ -2030,12 +2032,25 @@ impl MainWindow {
                 // Al cerrar mpv se reafirma el estado original para deshacer
                 // cualquier reubicación que el compositor haya aplicado mientras
                 // estaba abierto.
-                let window = self.window.clone();
+                let window_for_restore = window.clone();
+                let this_for_next = this.clone();
+                let media_id_for_next = media_id;
                 glib::timeout_add_local(Duration::from_millis(250), move || {
                     if !session.finished() {
                         return glib::ControlFlow::Continue;
                     }
-                    restore_window_mode(&window, window_mode);
+                    restore_window_mode(&window_for_restore, window_mode);
+
+                    // Siguiente episodio automático.
+                    if auto_play_next
+                        && let Some(media_id) = media_id_for_next
+                    {
+                        Self::schedule_next_episode(
+                            &this_for_next,
+                            media_id,
+                            db_path.clone(),
+                        );
+                    }
                     glib::ControlFlow::Break
                 });
                 Ok(())
@@ -2045,13 +2060,94 @@ impl MainWindow {
                 default_tracks: fallback_defaults,
                 missing_audio,
                 missing_subtitle,
-            } => self.show_default_track_fallback_dialog(
-                fallback_path,
-                fallback_defaults,
-                missing_audio,
-                missing_subtitle,
-            ),
+            } => {
+                let w = this.borrow();
+                w.show_default_track_fallback_dialog(
+                    fallback_path,
+                    fallback_defaults,
+                    missing_audio,
+                    missing_subtitle,
+                )
+            }
         }
+    }
+
+    /// Busca el siguiente episodio no visto de la serie/anime de `media_id` y
+    /// lo programa para reproducirse tras una cuenta atrás de 5 segundos,
+    /// mostrando un toast informativo.
+    fn schedule_next_episode(
+        this: &MainWindowRef,
+        media_id: i64,
+        db_path: String,
+    ) {
+        let w = this.borrow();
+        let (is_serie, serie_id) = match w.find_media_for_next(media_id) {
+            Some((is_serie, sid)) => (is_serie, sid),
+            None => return,
+        };
+        drop(w);
+
+        if !is_serie {
+            return;
+        }
+
+        let next_path = {
+            let mut conn = match open_db(&db_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error abriendo BD para siguiente episodio: {}", e);
+                    return;
+                }
+            };
+            let mut repo = MediaRepository::new(&mut conn);
+            let next = repo.get_next_episode_to_watch(serie_id).ok().flatten();
+            close_db(conn);
+            match next {
+                Some((_file_id, path, _label)) => path,
+                None => return,
+            }
+        };
+
+        // Mostrar toast informativo (ya estamos en el hilo principal de GTK).
+        let w_toast = this.borrow();
+        w_toast.show_toast(&w_toast.t("toast.next_episode"));
+
+        let this_for_play = this.clone();
+        let next_path_owned = next_path.clone();
+        glib::timeout_add_local(Duration::from_secs(5), move || {
+            if let Err(e) = Self::play_episode(&this_for_play, &next_path_owned) {
+                eprintln!(
+                    "No se pudo reproducir el siguiente episodio: {}",
+                    e
+                );
+            }
+            glib::ControlFlow::Break
+        });
+    }
+
+    /// Determina si `media_id` es una serie/anime y devuelve su ID de serie
+    /// para buscar el siguiente episodio. Para un episodio, devuelve el
+    /// `parent_id`; para una serie/anime directamente, devuelve su propio ID.
+    /// Para películas, devuelve `None`.
+    fn find_media_for_next(
+        &self,
+        media_id: i64,
+    ) -> Option<(bool, i64)> {
+        let mut conn = open_db(&self.db_path).ok()?;
+        let mut repo = MediaRepository::new(&mut conn);
+        let media = repo.find_by_id(media_id).ok().flatten()?;
+        close_db(conn);
+        let (is_serie, serie_id) = if let Some(parent_id) = media.parent_id {
+            // Es un episodio: usar el padre como serie.
+            (true, parent_id)
+        } else if media.r#type != "movie" {
+            // Es una serie/anime directamente.
+            (true, media_id)
+        } else {
+            // Es una película: no hay siguiente episodio.
+            return None;
+        };
+        Some((is_serie, serie_id))
     }
 
     /// Muestra el diálogo de fallback cuando las pistas predeterminadas del
