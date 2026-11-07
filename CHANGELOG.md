@@ -29,6 +29,7 @@ mantiene este archivo a partir de los commits convencionales.
 * **ui:** ejecutar siempre las acciones de marcar temporada como vista/no vista, también cuando la opción elegida ya era la seleccionada en el desplegable.
 * **ui:** guardar el estado exacto de visto/no visto de películas y demás medios en lugar de invertir el valor previo de la base de datos, evitando que la interfaz y la BD queden desincronizadas.
 * **history:** mantener una única entrada activa por archivo, actualizar su progreso al reanudar y archivar los duplicados antiguos sin borrar el historial.
+* **config:** eliminar el campo `auto_sync_metadata` de `AppConfig` (no tenía implementación asociada; generaba una expectativa falsa en el YAML).
 
 ### Tests
 

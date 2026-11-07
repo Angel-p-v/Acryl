@@ -49,7 +49,6 @@ pub struct AppConfig {
     #[serde(default)]
     pub media_folders: Vec<String>,
     pub language: String,
-    pub auto_sync_metadata: bool,
     pub default_player: String,
     #[serde(default)]
     pub default_tracks: DefaultTracks,
@@ -78,7 +77,6 @@ impl Default for AppConfig {
                 .to_string(),
             media_folders: Vec::new(),
             language: "es".to_string(),
-            auto_sync_metadata: false,
             default_player: "mpv".to_string(),
             default_tracks: DefaultTracks::default(),
             theme: "dark".to_string(),
@@ -273,7 +271,6 @@ mod tests {
                 db_path: db_path.to_string_lossy().to_string(),
                 media_folders: vec!["/tmp/foo".to_string()],
                 language: "es".to_string(),
-                auto_sync_metadata: false,
                 default_player: "mpv".to_string(),
                 default_tracks: DefaultTracks::default(),
                 theme: "dark".to_string(),
@@ -311,7 +308,6 @@ db_path: /tmp/imported.db
 media_folders:
   - /tmp/bar
 language: en
-auto_sync_metadata: true
 default_player: mpv
 default_tracks: {}
 playback_completion_threshold_seconds: 600
@@ -339,7 +335,6 @@ db_path: /tmp/x.db
 media_folders:
   - /tmp/no-existe-xyz-12345
 language: es
-auto_sync_metadata: false
 default_player: mpv
 default_tracks: {}
 "#;
