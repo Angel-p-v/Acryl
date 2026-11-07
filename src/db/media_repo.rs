@@ -558,6 +558,18 @@ impl<'a> MediaRepository<'a> {
         Ok(value)
     }
 
+    /// Marca un medio como favorito o no favorito con el estado exacto indicado.
+    ///
+    /// A diferencia de `toggle_favorite`, no invierte el valor actual: la base
+    /// de datos siempre coincide con el estado que muestra la interfaz.
+    pub fn set_favorite(&mut self, id: i64, favorite: bool) -> RusqliteResult<()> {
+        self.conn.execute(
+            "UPDATE media SET is_favorite = ?2, updated_at = datetime('now') WHERE id = ?1",
+            params![id, i64::from(favorite)],
+        )?;
+        Ok(())
+    }
+
     /// Marca un medio como visto/no visto con el estado exacto indicado.
     ///
     /// A diferencia de `toggle_watched`, no invierte el valor actual: así la

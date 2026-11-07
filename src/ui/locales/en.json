@@ -43,6 +43,8 @@
   "button.continue_prefix": "▶ Continue",
   "button.continue_format": "▶ Continue {}",
   "button.play_episode": "Play",
+  "button.favorite_add": "☆ Favorite",
+  "button.favorite_remove": "★ Favorite",
   "button.mark_watched": "✓ Watched",
   "button.mark_unwatched": "○ Unwatched",
   "button.mark_season_watched": "Mark season as watched",
@@ -124,6 +126,8 @@
   "tooltip.tracks": "Choose audio and subtitle tracks",
   "tooltip.choose_images": "Choose a different poster or banner, or remove the current one",
   "tooltip.redetect": "Run ffprobe again to read all tracks of the file",
+  "tooltip.favorite_add": "Mark as favorite",
+  "tooltip.favorite_remove": "Remove from favorites",
   "tooltip.mark_watched": "Mark episode as watched",
   "tooltip.mark_unwatched": "Mark episode as unwatched",
 

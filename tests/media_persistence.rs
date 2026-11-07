@@ -393,6 +393,63 @@ fn toggle_favorite_y_watched() {
 }
 
 #[test]
+fn set_favorite_guarda_el_estado_exacto() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let media = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "movie".to_string(),
+            title: "Favorita".to_string(),
+            sort_title: "favorita".to_string(),
+            year: None,
+            folder_path: "/media/favorita".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert")
+    };
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_favorite(media.id, true).expect("marcar favorito");
+    }
+    let favorita = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.find_by_id(media.id)
+            .expect("buscar favorita")
+            .expect("la favorita existe")
+    };
+    assert!(favorita.is_favorite);
+
+    // Volver a marcar como favorito no debe invertir el estado.
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_favorite(media.id, true)
+            .expect("mantener favorito");
+    }
+    let favorita = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.find_by_id(media.id)
+            .expect("buscar favorita")
+            .expect("la favorita existe")
+    };
+    assert!(favorita.is_favorite);
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_favorite(media.id, false).expect("quitar favorito");
+    }
+    let no_favorita = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.find_by_id(media.id)
+            .expect("buscar favorita")
+            .expect("la favorita existe")
+    };
+    assert!(!no_favorita.is_favorite);
+}
+
+#[test]
 fn find_by_id_devuelve_none_si_no_existe() {
     let (db_path, _dir) = temp_db();
     let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");

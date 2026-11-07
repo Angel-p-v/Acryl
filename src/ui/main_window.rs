@@ -1015,6 +1015,63 @@ impl MainWindow {
                 }
             });
 
+        // Callback: marcar/desmarcar el medio como favorito.
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_toggle_favorite(move |new_state| {
+                let (media_id, season, favorite_filter_active) = {
+                    let w = this_clone.borrow();
+                    (
+                        w.media_details.borrow().media_id(),
+                        w.media_details.borrow().season_selection(),
+                        w.current_favorite_filter.borrow().is_some(),
+                    )
+                };
+                let db_path = this_clone.borrow().db_path.clone();
+                let mut conn = match open_db(&db_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Error abriendo BD para toggle favorite: {}", e);
+                        return;
+                    }
+                };
+                let mut repo = MediaRepository::new(&mut conn);
+                if let Err(e) = repo.set_favorite(media_id, new_state) {
+                    eprintln!("Error actualizando favorito: {}", e);
+                }
+                close_db(conn);
+
+                // Refrescar la ficha con el estado persistido.
+                let media = {
+                    let mut conn = match open_db(&db_path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Error abriendo BD para refrescar favorite: {}", e);
+                            return;
+                        }
+                    };
+                    let mut repo = MediaRepository::new(&mut conn);
+                    let m = repo.find_by_id(media_id).ok().flatten();
+                    close_db(conn);
+                    m
+                };
+                if let Some(media) = media {
+                    this_clone
+                        .borrow()
+                        .media_details
+                        .borrow_mut()
+                        .set_media_with_season(&media, season);
+                }
+
+                // Si la galería está filtrada por favoritos, al quitar el
+                // favorito el medio debe desaparecer de la lista.
+                if favorite_filter_active {
+                    Self::load_media(&this_clone);
+                }
+            });
+
         // Callback: abrir el selector de audio y subtítulos del archivo principal.
         let this_clone = this.clone();
         this.borrow_mut()
@@ -2250,6 +2307,11 @@ impl MainWindow {
     /// Método público para tests E2E: botón de visto/no visto del medio.
     pub fn watched_button_for_test(&self) -> Button {
         self.media_details.borrow().watched_button_for_test()
+    }
+
+    /// Método público para tests E2E: botón de favorito del medio.
+    pub fn favorite_button_for_test(&self) -> Button {
+        self.media_details.borrow().favorite_button_for_test()
     }
 
     pub fn widget(&self) -> &AdwApplicationWindow {
