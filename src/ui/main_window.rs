@@ -9,6 +9,7 @@ use crate::ui::i18n::{Translations, TranslationsRef, language_label, load_transl
 use crate::ui::media_details::{MediaDetails, SeasonSelection};
 use crate::ui::media_list::MediaList;
 use crate::ui::poster_selector::{ImageChoice, PosterSelector};
+use crate::core::library_watcher::FolderWatcher;
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
 use gtk4::{
@@ -20,6 +21,7 @@ use libadwaita::{ApplicationWindow as AdwApplicationWindow, StatusPage, Toast, T
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::mpsc::{self, TryRecvError};
+use std::thread;
 use std::time::Duration;
 
 /// Vista recordada en la pila de navegación. Permite que «Volver» y la salida
@@ -153,6 +155,24 @@ impl MainWindow {
 
         let db_path = config.inner().db_path.clone();
         let config_path = config.path().to_path_buf();
+
+        // Vigilador de carpetas: reindexa automáticamente al detectar archivos de
+        // vídeo nuevos o modificados en cada carpeta configurada. Cada carpeta se
+        // vigila en un hilo secundario independiente que vive mientras la
+        // aplicación esté abierta.
+        for folder in config.inner().media_folders.clone() {
+            let db_path_watch = db_path.clone();
+            thread::spawn(move || {
+                let watcher = match FolderWatcher::new(&folder, &db_path_watch, 2) {
+                    Ok(w) => w,
+                    Err(e) => {
+                        eprintln!("No se pudo crear vigilador para {}: {}", folder, e);
+                        return;
+                    }
+                };
+                let _ = watcher.run();
+            });
+        }
 
         let language = config.inner().language.clone();
         let translations = load_translations(&language)
@@ -719,7 +739,22 @@ impl MainWindow {
         // Atajos de teclado globales.
         let this_key = this.clone();
         let key_controller = gtk4::EventControllerKey::new();
-        key_controller.connect_key_pressed(move |_, keyval, _keycode, _modifier| {
+        key_controller.connect_key_pressed(move |_, keyval, _keycode, modifier| {
+            // Atajos con Ctrl.
+            if modifier.contains(gtk4::gdk::ModifierType::CONTROL_MASK) {
+                let name = keyval.name().unwrap_or_default();
+                if name == "f" || name == "F" {
+                    this_key.borrow().search_entry.grab_focus();
+                    return gtk4::glib::Propagation::Stop;
+                }
+                if name == "comma" {
+                    let w = this_key.borrow();
+                    w.push_current_view();
+                    w.stack.set_visible_child_name("settings");
+                    drop(w);
+                    return gtk4::glib::Propagation::Stop;
+                }
+            }
             let name = keyval.name().unwrap_or_default();
             match name.as_str() {
                 "f" | "F" => {
@@ -1162,7 +1197,7 @@ impl MainWindow {
                 let (tx, rx) = mpsc::channel::<Vec<ImageOption>>();
 
                 // Consultar las APIs en un hilo secundario (solo datos Send).
-                std::thread::spawn(move || {
+                thread::spawn(move || {
                     let rt = match tokio::runtime::Runtime::new() {
                         Ok(rt) => rt,
                         Err(_) => return,
@@ -1231,7 +1266,7 @@ impl MainWindow {
 
                                 // Descargar y persistir en segundo plano para no bloquear
                                 // el hilo principal de GTK.
-                                std::thread::spawn(move || {
+                                thread::spawn(move || {
                                     let mut outcome = ImageUpdateOutcome::default();
                                     let runtime = match tokio::runtime::Runtime::new() {
                                         Ok(rt) => rt,
@@ -2237,7 +2272,7 @@ impl MainWindow {
         this.borrow().metadata_sync_running.set(true);
 
         let (sender, receiver) = mpsc::channel();
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             let result = crate::core::metadata::MetadataService::sync_missing_metadata(&db_path);
             let _ = sender.send(result);
         });
@@ -2323,7 +2358,7 @@ impl MainWindow {
         }
 
         let (sender, receiver) = mpsc::channel();
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             let result = crate::core::metadata::MetadataService::refresh_all_metadata(&db_path);
             let _ = sender.send(result);
         });
