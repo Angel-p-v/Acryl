@@ -54,6 +54,16 @@ fn normalize_folder_path(path: &str) -> Option<String> {
     Some(normalized)
 }
 
+/// Muestra un diálogo de error modal sobre `parent`.
+fn show_alert(parent: &gtk4::Window, title: &str, detail: &str) {
+    gtk4::AlertDialog::builder()
+        .modal(true)
+        .message(title)
+        .detail(detail)
+        .build()
+        .show(Some(parent));
+}
+
 /// Resumen de una operación de indexado en segundo plano.
 struct IndexSummary {
     total_folders: usize,
@@ -448,6 +458,12 @@ pub struct SettingsView {
     metadata_button: Button,
     metadata_spinner: Spinner,
     metadata_status: Label,
+    data_title: Label,
+    data_label: Label,
+    backup_button: Button,
+    restore_button: Button,
+    #[allow(dead_code)]
+    data_status: Label,
     config: Rc<RefCell<AppConfig>>,
     folder_manager: FolderManager,
     on_save: Option<Rc<dyn Fn(AppConfig)>>,
@@ -1029,6 +1045,44 @@ impl SettingsView {
 
         content.append(&default_tracks_section);
 
+        // --- Sección: Datos ---
+        let data_section = Box::new(Orientation::Vertical, 10);
+        data_section.set_hexpand(true);
+        data_section.set_margin_top(20);
+        data_section.set_margin_bottom(20);
+
+        let data_title = Label::new(Some(&t("settings.data.title")));
+        data_title.set_halign(gtk4::Align::Start);
+        data_title.add_css_class("subheading");
+        data_section.append(&data_title);
+
+        let data_label = Label::new(Some(&t("settings.data.description")));
+        data_label.set_halign(gtk4::Align::Start);
+        data_label.set_wrap(true);
+        data_section.append(&data_label);
+
+        let data_row = Box::new(Orientation::Horizontal, 10);
+        data_row.set_hexpand(true);
+
+        let backup_button = Button::with_label(&t("button.backup_db"));
+        backup_button.set_halign(gtk4::Align::Start);
+        data_row.append(&backup_button);
+
+        let restore_button = Button::with_label(&t("button.restore_db"));
+        restore_button.set_halign(gtk4::Align::Start);
+        data_row.append(&restore_button);
+
+        data_section.append(&data_row);
+
+        let data_status = Label::new(None);
+        data_status.set_halign(gtk4::Align::Start);
+        data_status.set_wrap(true);
+        data_status.set_visible(false);
+        data_status.add_css_class("dim-label");
+        data_section.append(&data_status);
+
+        content.append(&data_section);
+
         // --- Sección: Acerca de ---
         let about_section = Box::new(Orientation::Vertical, 10);
         about_section.set_hexpand(true);
@@ -1130,6 +1184,158 @@ impl SettingsView {
             );
         });
 
+        // Copia de seguridad de la base de datos.
+        let config_backup = config_rc.clone();
+        let config_path_backup = config_path.to_path_buf();
+        let window_backup = parent.upcast_ref::<gtk4::Window>().clone();
+        let translations_backup = translations.clone();
+        let data_status_backup = data_status.clone();
+        backup_button.connect_clicked(move |_| {
+            let dialog = gtk4::FileDialog::new();
+            dialog.set_title(&translations_backup.borrow().t("dialog.backup_db.title"));
+            dialog.set_initial_name(Some("acryl-backup.db"));
+            let config = config_backup.clone();
+            let config_path = config_path_backup.clone();
+            let window = window_backup.clone();
+            let window_cb = window.clone();
+            let translations = translations_backup.clone();
+            let status = data_status_backup.clone();
+            dialog.save(
+                Some(&window),
+                None::<&gio::Cancellable>,
+                move |result| match result {
+                    Ok(file) => {
+                        let Some(path) = file.path() else {
+                            return;
+                        };
+                        let config = crate::config::Config {
+                            path: config_path.clone(),
+                            inner: config.borrow().clone(),
+                        };
+                        match config.backup_db_to(&path) {
+                            Ok(()) => {
+                                let message = translations
+                                    .borrow()
+                                    .t("status.backup_done_format")
+                                    .replacen("{}", &path.display().to_string(), 1);
+                                status.set_label(&message);
+                                status.set_visible(true);
+                            }
+                            Err(error) => {
+                                eprintln!("No se pudo guardar la copia de seguridad: {}", error);
+                                let title = translations.borrow().t("error.backup.title");
+                                show_alert(&window_cb, &title, &error.to_string());
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        if !error.matches(gio::IOErrorEnum::Cancelled) {
+                            eprintln!("No se pudo elegir el destino del backup: {}", error);
+                        }
+                    }
+                },
+            );
+        });
+
+        // Restauración de una copia de seguridad de la base de datos.
+        let config_restore = config_rc.clone();
+        let config_path_restore = config_path.to_path_buf();
+        let window_restore = parent.upcast_ref::<gtk4::Window>().clone();
+        let translations_restore = translations.clone();
+        let data_status_restore = data_status.clone();
+        let folder_manager_restore = folder_manager.clone();
+        let metadata_spinner_restore = metadata_spinner.clone();
+        restore_button.connect_clicked(move |_| {
+            if folder_manager_restore.indexing.get() || metadata_spinner_restore.is_visible() {
+                let title = translations_restore.borrow().t("error.restore_busy.title");
+                let detail = translations_restore.borrow().t("error.restore_busy.detail");
+                show_alert(&window_restore, &title, &detail);
+                return;
+            }
+
+            let dialog = gtk4::FileDialog::new();
+            dialog.set_title(&translations_restore.borrow().t("dialog.restore_db.title"));
+            let config = config_restore.clone();
+            let config_path = config_path_restore.clone();
+            let window = window_restore.clone();
+            let window_for_dialog = window.clone();
+            let translations = translations_restore.clone();
+            let status = data_status_restore.clone();
+            let folder_manager = folder_manager_restore.clone();
+            dialog.open(
+                Some(&window_for_dialog),
+                None::<&gio::Cancellable>,
+                move |result| match result {
+                    Ok(file) => {
+                        let Some(path) = file.path() else {
+                            return;
+                        };
+                        let message = translations.borrow().t("dialog.restore_db.confirm.title");
+                        let detail = translations.borrow().t("dialog.restore_db.confirm.detail");
+                        let cancel = translations.borrow().t("button.cancel");
+                        let restore = translations.borrow().t("dialog.restore_db.confirm.restore");
+                        let confirm = gtk4::AlertDialog::builder()
+                            .modal(true)
+                            .message(&message)
+                            .detail(&detail)
+                            .buttons([cancel.as_str(), restore.as_str()])
+                            .cancel_button(0)
+                            .default_button(0)
+                            .build();
+
+                        let config = config.clone();
+                        let config_path = config_path.clone();
+                        let translations = translations.clone();
+                        let status = status.clone();
+                        let folder_manager = folder_manager.clone();
+                        let window_for_choose = window.clone();
+                        let window_for_alert = window.clone();
+                        confirm.choose(
+                            Some(&window_for_choose),
+                            None::<&gio::Cancellable>,
+                            move |response| {
+                                if !matches!(response, Ok(1)) {
+                                    return;
+                                }
+                                let config = crate::config::Config {
+                                    path: config_path.clone(),
+                                    inner: config.borrow().clone(),
+                                };
+                                match config.restore_db_from(&path) {
+                                    Ok(()) => {
+                                        status.set_label(
+                                            &translations.borrow().t("status.restore_done"),
+                                        );
+                                        status.set_visible(true);
+                                        // La base de datos cambió: recargar la
+                                        // biblioteca desde el disco.
+                                        let callback =
+                                            folder_manager.on_library_changed.borrow().clone();
+                                        if let Some(callback) = callback {
+                                            callback();
+                                        }
+                                    }
+                                    Err(error) => {
+                                        eprintln!(
+                                            "No se pudo restaurar la copia de seguridad: {}",
+                                            error
+                                        );
+                                        let title = translations.borrow().t("error.restore.title");
+                                        show_alert(&window_for_alert, &title, &error.to_string());
+                                    }
+                                }
+                            },
+                        );
+                    }
+                    Err(error) => {
+                        if !error.matches(gio::IOErrorEnum::Cancelled) {
+                            eprintln!("No se pudo elegir el backup a restaurar: {}", error);
+                        }
+                    }
+                },
+            );
+        });
+
         // Reindexar todas las carpetas configuradas.
         let manager_reindex = folder_manager.clone();
         reindex_button.connect_clicked(move |_| {
@@ -1158,6 +1364,11 @@ impl SettingsView {
             metadata_button,
             metadata_spinner,
             metadata_status,
+            data_title,
+            data_label,
+            backup_button,
+            restore_button,
+            data_status,
             config: config_rc,
             folder_manager,
             on_save: None,
@@ -1207,6 +1418,10 @@ impl SettingsView {
             .set_label(&t("settings.metadata.description"));
         self.metadata_button
             .set_label(&t("button.refresh_metadata"));
+        self.data_title.set_label(&t("settings.data.title"));
+        self.data_label.set_label(&t("settings.data.description"));
+        self.backup_button.set_label(&t("button.backup_db"));
+        self.restore_button.set_label(&t("button.restore_db"));
         self.cancel_button.set_label(&t("button.cancel"));
         self.save_button.set_label(&t("button.save"));
         self.about_title.set_label(&t("settings.about.title"));
