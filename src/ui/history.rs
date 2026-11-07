@@ -361,7 +361,7 @@ fn build_history_card_widget() -> Box {
     card.set_margin_end(0);
 
     let poster_stack = Box::new(Orientation::Vertical, 0);
-    poster_stack.set_halign(gtk4::Align::Start);
+    poster_stack.set_halign(gtk4::Align::Center);
     poster_stack.set_valign(gtk4::Align::Start);
     poster_stack.set_size_request(150, 220);
     card.append(&poster_stack);
