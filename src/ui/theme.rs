@@ -277,8 +277,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.card, c.text_primary, c.border, radius::MEDIUM, transition::FAST,
             ));
         css.push_str(&format!(
-            "button:hover {{ background-color: {}; border-color: {}; }}\n",
-            c.surface, c.border_hover,
+            "button:hover {{ border-color: {}; }}\n",
+            c.border_hover,
         ));
         css.push_str(&format!(
             "button:active {{ background-color: {}; border-color: {}; color: {}; }}\n",
@@ -289,8 +289,7 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.text_secondary,
             ));
         css.push_str(&format!(
-            "button.flat:hover {{ background-color: {}; color: {}; border-radius: {}; }}\n",
-            c.surface,
+            "button.flat:hover {{ color: {}; border-radius: {}; }}\n",
             c.text_primary,
             radius::SMALL,
         ));
@@ -299,10 +298,7 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
             "button.primary {{ background-color: {}; color: {}; border: none; }}\n",
             c.btn_primary_bg, c.btn_primary_text,
         ));
-        css.push_str(&format!(
-            "button.primary:hover {{ background-color: {}; }}\n",
-            c.accent_hover,
-        ));
+        css.push_str("button.primary:hover { }\n");
         css.push_str(&format!(
             "button.primary:active {{ background-color: {}; }}\n",
             c.accent_active,
@@ -310,7 +306,7 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
         css.push_str(
             "button.danger { background-color: #dc2626; color: #ffffff; border: none; }\n",
         );
-        css.push_str("button.danger:hover { background-color: #b91c1c; }\n");
+        css.push_str("button.danger:hover { }\n");
         css.push_str("scrolledwindow { background-color: transparent; }\n");
         css.push_str("viewport { background-color: transparent; }\n");
         css.push_str("flowbox { background-color: transparent; }\n");
@@ -389,8 +385,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.card, c.border, c.text_secondary,
             ));
         css.push_str(&format!(
-            ".filter-chip:hover {{ border-color: {}; color: {}; background-color: {}; }}\n",
-            c.border_hover, c.text_primary, c.surface,
+            ".filter-chip:hover {{ border-color: {}; color: {}; }}\n",
+            c.border_hover, c.text_primary,
         ));
 
         /* Píldora "Continuar viendo" */
@@ -399,8 +395,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.accent, c.accent, c.btn_primary_text,
             ));
         css.push_str(&format!(
-            ".continue-button:hover {{ background-color: {}; border-color: {}; }}\n",
-            c.accent_hover, c.accent,
+            ".continue-button:hover {{ border-color: {}; }}\n",
+            c.accent,
         ));
 
         /* Botones de modo de vista (Grid/Lista) */
@@ -409,8 +405,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.card, c.border, c.text_secondary, radius::SMALL,
             ));
         css.push_str(&format!(
-            ".view-mode-button:hover {{ border-color: {}; color: {}; background-color: {}; }}\n",
-            c.border_hover, c.text_primary, c.surface,
+            ".view-mode-button:hover {{ border-color: {}; color: {}; }}\n",
+            c.border_hover, c.text_primary,
         ));
 
         /* Selector de orden de la galería */
@@ -422,8 +418,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.text_secondary, radius::SMALL,
             ));
         css.push_str(&format!(
-            ".nav-button:hover {{ background-color: {}; color: {}; }}\n",
-            c.surface, c.text_primary,
+            ".nav-button:hover {{ color: {}; }}\n",
+            c.text_primary,
         ));
         css.push_str(&format!(
             ".nav-button.active {{ background-color: {}; color: {}; }}\n",
@@ -466,9 +462,9 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.card, c.border, radius::LARGE, transition::NORMAL,
             ));
         css.push_str(&format!(
-                ".media-card:hover {{ background-color: {}; border-color: {}; transform: scale(1.03); }}\n",
-                c.surface, c.border_hover,
-            ));
+            ".media-card:hover {{ border-color: {}; transform: scale(1.03); }}\n",
+            c.border_hover,
+        ));
         /* Anular el fondo de acento que GTK4 aplica por defecto al ítem
          * seleccionado de un GtkGridView/GtkListView. */
         css.push_str(&format!(
@@ -558,9 +554,9 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.card, c.border, radius::MEDIUM, transition::FAST,
             ));
         css.push_str(&format!(
-                ".episode-card:hover {{ background-color: {}; border-color: {}; transform: scale(1.02); }}\n",
-                c.surface, c.border_hover,
-            ));
+            ".episode-card:hover {{ border-color: {}; transform: scale(1.02); }}\n",
+            c.border_hover,
+        ));
         css.push_str(&format!(
             ".episode-card:selected {{ background-color: {}; border-color: {}; }}\n",
             c.surface, c.accent,
@@ -649,9 +645,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
             c.btn_secondary_text,
         ));
         css.push_str(&format!(
-            ".flat-button:hover {{ color: {}; background-color: {}; border-radius: {}; }}\n",
+            ".flat-button:hover {{ color: {}; border-radius: {}; }}\n",
             c.text_primary,
-            c.surface,
             radius::SMALL,
         ));
 
