@@ -4,14 +4,30 @@
 //! año, temporada/episodio y fecha de progreso.
 //! El cambio de idioma se aplica en caliente (sin reiniciar la aplicación).
 
+use crate::core::progress::{compute_playback_progress, format_remaining};
 use crate::db::{MediaRepository, close_db, open_db};
 use crate::ui::i18n::TranslationsRef;
 use crate::ui::media_list::bind_history_card;
 use gtk4::prelude::*;
-use gtk4::{Box, Button, FlowBox, GestureClick, Label, Orientation, ScrolledWindow};
+use gtk4::{Box, Button, FlowBox, GestureClick, Label, Orientation, ProgressBar, ScrolledWindow};
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+
+/// Petición de apertura de una entrada del historial.
+#[derive(Debug, Clone)]
+pub struct HistoryOpenRequest {
+    /// Medio al que pertenece la entrada (serie, anime o película).
+    pub media_id: i64,
+    /// Ruta del archivo reproducido, si se conoce.
+    pub file_path: Option<String>,
+    /// `true` si el clic fue sobre el nombre de la serie/película: solo se
+    /// abre la vista de detalles, sin reproducir automáticamente.
+    pub details_only: bool,
+}
+
+/// Callback de clic en una tarjeta del historial.
+type HistoryClickCallback = Rc<dyn Fn(HistoryOpenRequest)>;
 
 /// Vista de historial de reproducción.
 pub struct HistoryView {
@@ -34,7 +50,7 @@ pub struct HistoryView {
     /// Referencia a las traducciones (para recargar al cambiar idioma).
     translations: TranslationsRef,
     /// Callback de clic en tarjeta (para recargar al cambiar idioma).
-    on_card_click: Option<Rc<dyn Fn(i64)>>,
+    on_card_click: Option<HistoryClickCallback>,
 }
 
 impl HistoryView {
@@ -138,7 +154,7 @@ impl HistoryView {
         &mut self,
         db_path: &str,
         this: crate::ui::main_window::MainWindowRef,
-        on_card_click: impl Fn(i64) + 'static + Clone,
+        on_card_click: impl Fn(HistoryOpenRequest) + 'static + Clone,
     ) {
         self.db_path = Some(db_path.to_string());
         self.this = Some(this);
@@ -221,7 +237,7 @@ impl HistoryView {
 
         for entry in history.iter() {
             let card = build_history_card_widget();
-            bind_history_card(
+            let title_label = bind_history_card(
                 &card,
                 entry,
                 &translations,
@@ -242,29 +258,90 @@ impl HistoryView {
                 let ep_label = Label::new(Some(&ep_label_text));
                 ep_label.set_halign(gtk4::Align::Start);
                 ep_label.set_xalign(0.0);
+                ep_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+                ep_label.set_max_width_chars(28);
                 card.append(&ep_label);
             }
 
             // Fecha y progreso de reproducción.
-            let progress = if entry.duration > 0.0 {
-                let pct = (entry.position / entry.duration * 100.0) as u32;
-                format!("{}%", pct)
+            let completed = entry.completed_at.is_some();
+            let playback_progress =
+                compute_playback_progress(entry.position, entry.duration, completed);
+
+            // Texto breve para la tarjeta: porcentaje o «Visto». El tiempo
+            // restante se reserva para el tooltip para no ensanchar la tarjeta.
+            let progress_label = if playback_progress.completed {
+                t(&translations, "history.watched")
             } else {
-                "—".to_string()
+                format!("{}%", playback_progress.percent)
             };
-            let date_label = Label::new(Some(&format!("{} · {}", entry.played_at, progress)));
+            let tooltip_label = if let Some(remaining) = playback_progress.remaining_seconds {
+                format!(
+                    "{} · {}",
+                    progress_label,
+                    t(&translations, "history.remaining_format").replacen(
+                        "{}",
+                        &format_remaining(remaining),
+                        1
+                    )
+                )
+            } else {
+                progress_label.clone()
+            };
+
+            let date_label = Label::new(Some(&format!("{} · {}", entry.played_at, progress_label)));
             date_label.set_halign(gtk4::Align::Start);
             date_label.set_xalign(0.0);
+            // Evitar que un texto largo ensanche la tarjeta del historial.
+            date_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+            date_label.set_max_width_chars(28);
             card.append(&date_label);
 
-            // Clic en la tarjeta.
+            // Barra de progreso visual, fina y sin expansión horizontal para
+            // que el FlowBox no estire la tarjeta.
+            let progress_bar = ProgressBar::new();
+            progress_bar.set_fraction(playback_progress.fraction);
+            progress_bar.set_show_text(false);
+            progress_bar.set_size_request(-1, 6);
+            progress_bar.set_tooltip_text(Some(&tooltip_label));
+            if playback_progress.completed {
+                progress_bar.add_css_class("history-progress-completed");
+            } else {
+                progress_bar.add_css_class("history-progress");
+            }
+            card.append(&progress_bar);
+
+            // Clic en la tarjeta: abre los detalles y reanuda la reproducción.
             let click = GestureClick::new();
             let media_id = entry.media_id;
+            let file_path = entry.file_path.clone();
             let on_click = on_card_click.clone();
             click.connect_pressed(move |_, _, _, _| {
-                on_click(media_id);
+                on_click(HistoryOpenRequest {
+                    media_id,
+                    file_path: file_path.clone(),
+                    details_only: false,
+                });
             });
             card.add_controller(click);
+
+            // Clic sobre el nombre de la serie/película: solo abre la vista de
+            // detalles, sin reproducir. Se reclama la secuencia para que GTK
+            // deniegue el gesto de la tarjeta (widget padre en la propagación)
+            // y no se abra también la reproducción.
+            let title_click = GestureClick::new();
+            let media_id = entry.media_id;
+            let file_path = entry.file_path.clone();
+            let on_click = on_card_click.clone();
+            title_click.connect_pressed(move |gesture, _, _, _| {
+                gesture.set_state(gtk4::EventSequenceState::Claimed);
+                on_click(HistoryOpenRequest {
+                    media_id,
+                    file_path: file_path.clone(),
+                    details_only: true,
+                });
+            });
+            title_label.add_controller(title_click);
 
             self.list.append(&card);
         }

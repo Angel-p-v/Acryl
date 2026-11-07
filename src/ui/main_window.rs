@@ -4,7 +4,7 @@ use crate::core::language::{LanguageIdentity, identity_from_track_key};
 use crate::core::metadata::{ImageOption, RefreshMetadataResult};
 use crate::db::media_repo::{ListMediaOptions, MediaRepository};
 use crate::db::{FileRepository, close_db, open_db};
-use crate::ui::history::HistoryView;
+use crate::ui::history::{HistoryOpenRequest, HistoryView};
 use crate::ui::i18n::{Translations, TranslationsRef, language_label, load_translations};
 use crate::ui::media_details::{MediaDetails, SeasonSelection};
 use crate::ui::media_list::MediaList;
@@ -525,10 +525,25 @@ impl MainWindow {
             let db_path = w.db_path.clone();
             let this_clone = this.clone();
             w.history_view
-                .init(&db_path, this_clone.clone(), move |media_id| {
+                .init(&db_path, this_clone.clone(), move |request| {
                     let w = this_clone.borrow();
-                    w.push_current_view();
-                    w.show_details(media_id, None);
+                    let Some(file_path) = w.open_history_entry(request) else {
+                        return;
+                    };
+                    drop(w);
+
+                    // La reproducción se lanza en el siguiente ciclo para que
+                    // la vista de detalles termine de montarse antes de que
+                    // mpv abra su ventana.
+                    let this_play = this_clone.clone();
+                    glib::timeout_add_local(Duration::from_millis(200), move || {
+                        let w = this_play.borrow();
+                        if let Err(error) = w.play_episode(&file_path) {
+                            eprintln!("No se pudo reanudar '{}': {}", file_path, error);
+                            w.show_error(&w.t("error.play_episode"), &error.to_string());
+                        }
+                        glib::ControlFlow::Break
+                    });
                 });
         }
 
@@ -1608,6 +1623,20 @@ impl MainWindow {
         }
     }
 
+    /// Abre una entrada del historial y devuelve el archivo que debe
+    /// reanudarse, si procede.
+    ///
+    /// Un clic sobre el nombre de la serie/película (`details_only`) solo
+    /// navega a los detalles. En el resto de la tarjeta se devuelve la ruta
+    /// para que el llamador lance la reproducción desde la posición guardada.
+    fn open_history_entry(&self, request: HistoryOpenRequest) -> Option<String> {
+        self.push_current_view();
+        if !self.show_details(request.media_id, None) || request.details_only {
+            return None;
+        }
+        request.file_path
+    }
+
     /// Abre los detalles recordando la pantalla desde la que se navega.
     fn navigate_to_details(&self, media_id: i64) {
         self.push_current_view();
@@ -2173,6 +2202,12 @@ impl MainWindow {
         season: Option<crate::ui::media_details::SeasonSelection>,
     ) -> bool {
         self.show_details(media_id, season)
+    }
+
+    /// Método público para tests E2E: simula la apertura de una entrada del
+    /// historial y devuelve el archivo que se reanudaría (sin reproducirlo).
+    pub fn open_history_entry_for_test(&self, request: HistoryOpenRequest) -> Option<String> {
+        self.open_history_entry(request)
     }
 
     /// Método público para tests E2E: devuelve la traducción de una clave.

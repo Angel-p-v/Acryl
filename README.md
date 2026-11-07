@@ -283,7 +283,15 @@ episodio por coincidir su número.
   subtítulo externo, no solo por su índice. Si una pista guardada deja de
   existir, Acryl no selecciona otra pista parecida por error.
 - El historial de reproducción mantiene una sola entrada pendiente por archivo:
-  al reanudar se actualizan la posición y la fecha, sin crear duplicados.
+  al reanudar se actualizan la posición y la fecha, sin crear duplicados. Cada
+  tarjeta muestra una barra de progreso con el porcentaje visto (y el tiempo
+  restante en el tooltip), y pasa a estado «Visto» al completar una película o
+  episodio. El avance se guarda periódicamente mientras se reproduce, así no se
+  pierde si mpv se cierra abruptamente.
+- Al pulsar una tarjeta del historial se abre la ficha del medio y se reanuda
+  automáticamente el episodio o la película desde la posición guardada. Si se
+  pulsa únicamente sobre el nombre de la serie o película (que se resalta al
+  pasar el cursor), solo se abre su ficha sin iniciar la reproducción.
 
 ### Estructura de carpetas e indexado
 

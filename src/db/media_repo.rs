@@ -1175,7 +1175,8 @@ impl<'a> MediaRepository<'a> {
              )
              SELECT ph.id, ph.media_id, m.title, m.type, m.year, m.poster_path,
                     mf.season, mf.episode, mf.title,
-                    ph.played_at, ph.position, ph.duration
+                    ph.played_at, ph.position, ph.duration, ph.completed_at,
+                    ph.file_path
              FROM ranked ph
              JOIN media m ON m.id = ph.media_id
              LEFT JOIN media_files mf ON mf.file_path = ph.file_path
@@ -1198,6 +1199,8 @@ impl<'a> MediaRepository<'a> {
                     played_at: row.get(9)?,
                     position: row.get(10)?,
                     duration: row.get(11)?,
+                    completed_at: row.get(12)?,
+                    file_path: row.get(13)?,
                 })
             })?
             .filter_map(Result::ok)
@@ -1230,6 +1233,12 @@ pub struct PlaybackHistoryEntry {
     pub played_at: String,
     pub position: f64,
     pub duration: f64,
+    /// Momento en que se marcó la reproducción como completada. `None` si
+    /// sigue pendiente (última posición activa).
+    pub completed_at: Option<String>,
+    /// Ruta del archivo reproducido (episodio o película). Puede ser `None`
+    /// en entradas antiguas que no guardaban la ruta.
+    pub file_path: Option<String>,
 }
 
 /// Datos para insertar un stream de audio o subtítulo de un archivo.

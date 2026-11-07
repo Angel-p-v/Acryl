@@ -15,7 +15,7 @@ use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Identificador incremental para que dos reproductores (o dos tests en
 /// paralelo) no compartan el mismo socket IPC.
@@ -767,6 +767,11 @@ pub fn play_with_resume_with_mode(
         let mut last_position = start_position;
         let mut last_duration = 0.0;
 
+        // Conexión reutilizada para guardar el progreso periódicamente
+        // durante la reproducción. Si no se puede abrir, solo se guarda al
+        // finalizar mpv.
+        let mut conn = open_db(&db_path_owned).ok();
+
         // Darle tiempo a mpv para crear el socket IPC antes del primer intento.
         std::thread::sleep(Duration::from_millis(300));
 
@@ -774,6 +779,11 @@ pub fn play_with_resume_with_mode(
         // Reintenta la conexión varias veces al inicio (race condition con la
         // creación del socket) y deja de intentar cuando mpv ya no responde.
         let mut connect_failures = 0usize;
+        // Intervalo entre guardados periódicos del progreso en la BD.
+        const SAVE_INTERVAL_SECS: u64 = 10;
+        let mut last_save = Instant::now();
+        let mut saved_position = last_position;
+        let mut saved_duration = last_duration;
         loop {
             // Si mpv ya terminó, salir del bucle.
             if child.try_wait().is_ok_and(|s| s.is_some()) {
@@ -835,8 +845,34 @@ pub fn play_with_resume_with_mode(
                 }
             }
 
+            // Guardado periódico del progreso: se escribe en la BD cuando
+            // han pasado `SAVE_INTERVAL_SECS` o la posición/duración cambió
+            // lo suficiente. Así no se pierde el avance si mpv se cierra de
+            // forma abrupta.
+            let now = Instant::now();
+            let position_changed = (last_position - saved_position).abs() > 1.0;
+            let duration_changed = (last_duration - saved_duration).abs() > 0.5;
+            let time_to_save = now.duration_since(last_save).as_secs() >= SAVE_INTERVAL_SECS;
+            if (position_changed || duration_changed || time_to_save)
+                && let Some(ref mut c) = conn
+            {
+                let mut repo = MediaRepository::new(c);
+                let _ = repo.update_playback_position(
+                    media_id,
+                    &file_path_owned,
+                    last_position,
+                    last_duration,
+                );
+                saved_position = last_position;
+                saved_duration = last_duration;
+                last_save = now;
+            }
+
             std::thread::sleep(Duration::from_secs(1));
         }
+
+        // Cerrar la conexión periódica antes del guardado final.
+        drop(conn);
 
         // Esperar a que el proceso mpv termine realmente.
         let _ = child.wait();

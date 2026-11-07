@@ -10,6 +10,7 @@ mantiene este archivo a partir de los commits convencionales.
 
 ### Features
 
+* **history:** mostrar el progreso real de visionado (barra y porcentaje) en cada tarjeta del historial, guardado periódicamente durante la reproducción para no perder el avance si mpv se cierra abruptamente, y estado «Visto» al completar una película o episodio. Al pulsar una tarjeta se abre la ficha y se reanuda el episodio o la película desde la posición guardada; pulsar solo sobre el nombre (que se resalta al pasar el cursor) abre la ficha sin reproducir.
 * **ui:** añadir el diálogo «Acerca de» con créditos del autor, copyright, licencia MIT, enlaces al repositorio, incidencias y soporte, e información de depuración con las versiones de Acryl, GTK, Libadwaita y el sistema.
 * **settings:** mostrar una sección «Acerca de» con encabezado, descripción y botón con icono, traducida al cambiar de idioma en caliente.
 

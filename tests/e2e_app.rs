@@ -17,6 +17,7 @@ use acryl::config::{AppConfig, Config, DefaultTracks};
 use acryl::db::connection::open_db;
 use acryl::db::file_repo::{FileRepository, MediaFileInput};
 use acryl::db::media_repo::{ListMediaOptions, MediaInput, MediaRepository};
+use acryl::ui::history::HistoryOpenRequest;
 use acryl::ui::main_window::MainWindow;
 use gtk4::Application;
 use gtk4::glib::object::ObjectExt;
@@ -466,6 +467,72 @@ fn navegacion_a_detalles_medio_inexistente_devuelve_falso() {
     assert!(
         resultado.unwrap_or(true),
         "no debe navegar a un medio inexistente"
+    );
+
+    drop(window);
+    drop(app);
+}
+
+#[test]
+fn clic_en_el_historial_distingue_titulo_de_tarjeta() {
+    if !gtk_can_run() {
+        return;
+    }
+
+    let _guard = EnvGuard::new(&[ACRYL_CONFIG_ENV]);
+    let (config, _config_dir, _data_dir) = temp_config();
+
+    let media_id = {
+        let mut conn = abrir_bd(&config);
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "movie".to_string(),
+            title: "Película del historial".to_string(),
+            sort_title: "pelicula del historial".to_string(),
+            year: Some(2024),
+            folder_path: "/media/pelicula-historial".to_string(),
+            parent_id: None,
+        })
+        .expect("insertar medio")
+        .id
+    };
+
+    let app = Application::builder()
+        .application_id("com.angelpv.acryl.e2e.history-click")
+        .build();
+
+    let window = match run_gtk_or_skip(|| MainWindow::new(&app, config)) {
+        Some(w) => w,
+        None => return,
+    };
+
+    let file_path = "/media/pelicula-historial/video.mkv".to_string();
+
+    // Clic sobre el nombre: navega a los detalles pero no reanuda.
+    let request = HistoryOpenRequest {
+        media_id,
+        file_path: Some(file_path.clone()),
+        details_only: true,
+    };
+    let reanudar = run_gtk_or_skip(|| window.borrow().open_history_entry_for_test(request));
+    assert_eq!(
+        reanudar.unwrap_or(None),
+        None,
+        "el clic en el título solo debe abrir los detalles"
+    );
+
+    // Clic sobre la tarjeta: navega a los detalles y devuelve el archivo que
+    // debe reanudarse desde la posición guardada.
+    let request = HistoryOpenRequest {
+        media_id,
+        file_path: Some(file_path.clone()),
+        details_only: false,
+    };
+    let reanudar = run_gtk_or_skip(|| window.borrow().open_history_entry_for_test(request));
+    assert_eq!(
+        reanudar.unwrap_or(None),
+        Some(file_path),
+        "el clic en la tarjeta debe reanudar la reproducción"
     );
 
     drop(window);

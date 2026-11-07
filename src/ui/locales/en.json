@@ -20,6 +20,8 @@
   "history.clear_confirm.detail": "All playback records will be deleted. This action cannot be undone.",
   "history.clear_confirm.delete": "Clear",
   "history.cleared": "History cleared",
+  "history.watched": "Watched",
+  "history.remaining_format": "remaining {}",
 
   "button.categories": "Categories",
   "button.history": "History",
