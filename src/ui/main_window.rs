@@ -705,6 +705,7 @@ impl MainWindow {
                     *window.current_favorite_filter.borrow_mut() = new_value;
                 }
                 Self::load_media(&this_fav);
+                this_fav.borrow().show_list();
             });
 
         // Filtro de visto/no visto: activa/desactiva el filtro de is_watched.
@@ -725,6 +726,7 @@ impl MainWindow {
                     *window.current_watched_filter.borrow_mut() = new_value;
                 }
                 Self::load_media(&this_wat);
+                this_wat.borrow().show_list();
             });
 
         // Nivel 2: píldora "Continuar viendo".
@@ -825,6 +827,7 @@ impl MainWindow {
                 return;
             }
             Self::load_media(&this_sort);
+            this_sort.borrow().show_list();
         });
 
         // Logo: acceso directo al inicio desde cualquier vista. Limpia la
@@ -991,6 +994,7 @@ impl MainWindow {
                 // Recargar medios después de guardar ajustes (pueden haber
                 // cambiado las carpetas).
                 Self::load_media(&this_clone);
+                this_clone.borrow().show_list();
                 Self::start_metadata_sync(&this_clone, db_path_for_reload.clone());
                 // Volver a la vista de origen después de guardar.
                 let w = this_clone.borrow();
@@ -1133,6 +1137,7 @@ impl MainWindow {
                 // favorito el medio debe desaparecer de la lista.
                 if favorite_filter_active {
                     Self::load_media(&this_clone);
+                    this_clone.borrow().show_list();
                 }
             });
 
