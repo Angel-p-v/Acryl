@@ -4,7 +4,7 @@
 use acryl::core::player::{
     PlayerWindowMode, build_mpv_launch_args_for_playback, resolve_track_preference,
 };
-use acryl::db::connection::open_db;
+use acryl::db::connection::{close_db, open_db, vacuum_database};
 use acryl::db::file_repo::{FileRepository, MediaFileInput, TrackPreference, TrackSelection};
 use acryl::db::media_repo::{
     ListMediaOptions, MediaInput, MediaMetadataInput, MediaRepository, MediaStream,
@@ -532,6 +532,39 @@ fn list_ordena_por_rating() {
     };
     let ratings: Vec<i32> = by_rating.iter().map(|m| m.rating).collect();
     assert_eq!(ratings, vec![5, 3, 1, 0]);
+}
+
+#[test]
+fn vacuum_database_no_rompe_la_bd() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "movie".to_string(),
+            title: "Pelicula para vacuum".to_string(),
+            sort_title: "pelicula para vacuum".to_string(),
+            year: Some(2024),
+            folder_path: "/media/vacuum".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert");
+    }
+    close_db(conn);
+
+    // Ejecutar vacuum no debe fallar.
+    vacuum_database(db_path.to_str().unwrap()).expect("vacuum");
+
+    // La BD debe seguir funcionando después del vacuum.
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir tras vacuum");
+    let mut repo = MediaRepository::new(&mut conn);
+    let medias = repo
+        .list(ListMediaOptions::default())
+        .expect("listar tras vacuum");
+    assert_eq!(medias.len(), 1);
+    assert_eq!(medias[0].title, "Pelicula para vacuum");
+    close_db(conn);
 }
 
 #[test]

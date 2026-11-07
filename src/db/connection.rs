@@ -15,11 +15,33 @@ pub fn open_db(db_path: &str) -> RusqliteResult<Connection> {
 
     run_migrations(&mut conn, MIGRATIONS, db_path)?;
 
+    // Verificar integridad de la base de datos al abrirla. Si la copia de
+    // seguridad o el archivo están corruptos, fallar rápido en lugar de
+    // seguir trabajando con datos posiblemente dañados.
+    let check: String = conn.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+    if check != "ok" {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+            Some(format!("base de datos corrupta: {}", check)),
+        ));
+    }
+
     Ok(conn)
+}
+
+/// Ejecuta mantenimiento de la base de datos: `VACUUM` para recuperar espacio
+/// y `ANALYZE` para actualizar estadísticas del planificador de consultas.
+/// `VACUUM` requiere que no haya transacciones activas, por lo que se ejecuta
+/// en una conexión dedicada y se cierra inmediatamente.
+pub fn vacuum_database(db_path: &str) -> RusqliteResult<()> {
+    let conn = Connection::open(db_path)?;
+    conn.execute_batch("VACUUM; ANALYZE;")?;
+    Ok(())
 }
 
 pub fn close_db(conn: Connection) {
     let _ = conn.execute_batch("PRAGMA optimize");
+    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
     let _ = conn.close();
 }
 
