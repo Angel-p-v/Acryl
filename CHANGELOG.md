@@ -17,6 +17,11 @@ mantiene este archivo a partir de los commits convencionales.
 * **ui:** conectar el selector de orden de la biblioteca con las opciones Título, Año y Tipo, ordenando la galería desde la capa SQLite.
 * **settings:** añadir sección «Datos» con copia de seguridad y restauración de la base de datos (checkpoint WAL, validación `quick_check` y limpieza de sidecars `-wal`/`-shm`).
 * **settings:** añadir selector de tema oscuro/claro, aplicado al guardar los ajustes y al iniciar la aplicación, con `AdwStyleManager` para diálogos y popovers.
+* **player:** reproducir automáticamente el siguiente episodio no visto al terminar uno, tras una cuenta atrás de 5 segundos (activable en la configuración).
+* **ui:** añadir atajos de teclado globales: `Ctrl+F` para enfocar búsqueda, `Ctrl+,` para abrir Ajustes, `Esc` para limpiar filtros y `/` para búsqueda.
+* **ui:** watcher de carpetas con `notify` para reindexar automáticamente al detectar archivos de vídeo nuevos o modificados.
+* **ui:** valoración con estrellas (1-5) en la ficha de detalles, persistida con `set_rating`, con capacidad de ordenar la galería por calificación.
+* **db:** mantenimiento de base de datos: `PRAGMA integrity_check` al abrir, `wal_checkpoint(TRUNCATE)` al cerrar y función `vacuum_database` para recuperar espacio.
 
 ### Bug Fixes
 
@@ -38,6 +43,7 @@ mantiene este archivo a partir de los commits convencionales.
 * **ui:** añadir pruebas E2E y de integración que verifican el marcado de temporadas y películas como vistas y su persistencia en SQLite.
 * **ui:** añadir pruebas de persistencia de favoritos y de ordenación por año y tipo.
 * **config:** añadir pruebas de copia de seguridad (incluido WAL) y restauración, y de serialización del tema.
+* **ui:** añadir pruebas de calificación (`set_rating_guarda_la_calificacion`, `list_ordena_por_rating`) y de mantenimiento de BD (`vacuum_database_no_rompe_la_bd`).
 
 ### Documentation
 
