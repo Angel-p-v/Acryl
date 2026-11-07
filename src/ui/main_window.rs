@@ -1881,8 +1881,14 @@ impl MainWindow {
     }
 
     /// Muestra la biblioteca (o la página vacía si no hay medios ni filtro).
+    /// Se considera "filtrado" si hay activo cualquier filtro: categoría,
+    /// favoritos o visto/no visto. Así, si un filtro combinado devuelve 0
+    /// resultados, al retirar uno de ellos la página no se queda atascada
+    /// en "empty" aunque media_count sea 0 temporalmente.
     fn show_list(&self) {
-        let filtered = self.current_category.borrow().is_some();
+        let filtered = self.current_category.borrow().is_some()
+            || self.current_favorite_filter.borrow().is_some()
+            || self.current_watched_filter.borrow().is_some();
         if self.media_count == 0 && !filtered {
             self.stack.set_visible_child_name("empty");
         } else {
