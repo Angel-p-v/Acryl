@@ -600,6 +600,7 @@ impl MainWindow {
         glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
             if this_for_dl.borrow().media_list.check_downloads() {
                 Self::load_media(&this_for_dl);
+                this_for_dl.borrow().show_list();
             }
             glib::ControlFlow::Continue
         });
@@ -612,6 +613,7 @@ impl MainWindow {
 
         // Cargar medios iniciales (SQLite local, rápido).
         Self::load_media(&this);
+        this.borrow().show_list();
 
         // Botón "Historial": navega a la página de historial y carga las reproducciones.
         let this_hist = this.clone();
@@ -773,6 +775,7 @@ impl MainWindow {
                         *window.current_favorite_filter.borrow_mut() = new_value;
                     }
                     Self::load_media(&this_key);
+                    this_key.borrow().show_list();
                     gtk4::glib::Propagation::Stop
                 }
                 "v" | "V" => {
@@ -789,6 +792,7 @@ impl MainWindow {
                         *window.current_watched_filter.borrow_mut() = new_value;
                     }
                     Self::load_media(&this_key);
+                    this_key.borrow().show_list();
                     gtk4::glib::Propagation::Stop
                 }
                 "Escape" => {
@@ -798,6 +802,7 @@ impl MainWindow {
                     *window.current_category.borrow_mut() = None;
                     drop(window);
                     Self::load_media(&this_key);
+                    this_key.borrow().show_list();
                     gtk4::glib::Propagation::Stop
                 }
                 "slash" => {
@@ -1590,7 +1595,9 @@ impl MainWindow {
 
         let visible = w.stack.visible_child_name().map(|name| name.to_string());
         if matches!(visible.as_deref(), Some("list") | Some("empty")) {
-            let filtered = w.current_category.borrow().is_some();
+            let filtered = w.current_category.borrow().is_some()
+                || w.current_favorite_filter.borrow().is_some()
+                || w.current_watched_filter.borrow().is_some();
             let total_shown = w.media_offset;
             if total_shown == 0 && !filtered {
                 w.stack.set_visible_child_name("empty");
@@ -1905,9 +1912,13 @@ impl MainWindow {
         let had_filter = {
             let w = this.borrow();
             w.search_entry.set_text("");
-            let had_filter = w.current_category.borrow().is_some();
+            let had_filter = w.current_category.borrow().is_some()
+                || w.current_favorite_filter.borrow().is_some()
+                || w.current_watched_filter.borrow().is_some();
             w.current_category.replace(None);
             w.current_category_name.replace(None);
+            w.current_favorite_filter.replace(None);
+            w.current_watched_filter.replace(None);
             w.history.borrow_mut().clear();
             w.update_filter_bar();
             had_filter
@@ -1937,7 +1948,9 @@ impl MainWindow {
         w.media_count = count;
         w.media_list.set_media(all_media);
 
-        let filtered = w.current_category.borrow().is_some();
+        let filtered = w.current_category.borrow().is_some()
+            || w.current_favorite_filter.borrow().is_some()
+            || w.current_watched_filter.borrow().is_some();
         if is_empty && !filtered {
             w.stack.set_visible_child_name("empty");
         } else {
