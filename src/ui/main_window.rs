@@ -2557,17 +2557,15 @@ impl MainWindow {
 /// Traduce el estado real de la ventana de Acryl al modo que debe usar mpv.
 ///
 /// Pantalla completa y maximizado son estados distintos: solo el primero debe
-/// abrir mpv en pantalla completa. Una ventana normal no añade ninguna opción
-/// para respetar el tamaño configurado por el usuario en mpv.
-fn player_window_mode(window: &AdwApplicationWindow) -> crate::core::player::PlayerWindowMode {
+/// Siempre abre mpv en pantalla completa.
+///
+/// Anteriormente se derivaba del estado real de la ventana de Acryl, pero eso
+/// hacía que los episodios se abrieran en ventana normal cuando Acryl no
+/// estuviera maximizado ni en pantalla completa. Ahora se fuerza siempre
+/// `--fullscreen` para que los episodios se vean a pantalla completa.
+fn player_window_mode(_window: &AdwApplicationWindow) -> crate::core::player::PlayerWindowMode {
     use crate::core::player::PlayerWindowMode;
-    if window.is_fullscreen() {
-        PlayerWindowMode::Fullscreen
-    } else if window.is_maximized() {
-        PlayerWindowMode::Maximized
-    } else {
-        PlayerWindowMode::Normal
-    }
+    PlayerWindowMode::Fullscreen
 }
 
 /// Reafirma el estado de ventana previo a la reproducción.

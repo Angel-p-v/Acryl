@@ -1241,8 +1241,8 @@ impl SettingsView {
                     // fuera del catch_unwind (que es FnOnce y permite mover).
                     let window_for_panic = window.clone();
                     let translations_for_panic = translations.clone();
-                    let catch_result = std::panic::catch_unwind(
-                        std::panic::AssertUnwindSafe(move || match result {
+                    let catch_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                        move || match result {
                             Ok(file) => {
                                 let Some(path) = file.path() else {
                                     return;
@@ -1265,26 +1265,21 @@ impl SettingsView {
                                             "No se pudo guardar la copia de seguridad: {}",
                                             error
                                         );
-                                        let title =
-                                            translations.borrow().t("error.backup.title");
+                                        let title = translations.borrow().t("error.backup.title");
                                         show_alert(&window, &title, &error.to_string());
                                     }
                                 }
                             }
                             Err(error) => {
                                 if !error.matches(gio::IOErrorEnum::Cancelled) {
-                                    eprintln!(
-                                        "No se pudo elegir el destino del backup: {}",
-                                        error
-                                    );
+                                    eprintln!("No se pudo elegir el destino del backup: {}", error);
                                 }
                             }
-                        }),
-                    );
+                        },
+                    ));
                     if let Err(_panic) = catch_result {
                         eprintln!("Pánico inesperado en backup.");
-                        let title =
-                            translations_for_panic.borrow().t("error.backup.title");
+                        let title = translations_for_panic.borrow().t("error.backup.title");
                         show_alert(
                             &window_for_panic,
                             &title,
