@@ -49,10 +49,15 @@ pub struct AppConfig {
     #[serde(default)]
     pub media_folders: Vec<String>,
     pub language: String,
-    pub auto_sync_metadata: bool,
     pub default_player: String,
     #[serde(default)]
     pub default_tracks: DefaultTracks,
+    /// Modo de tema: "dark" (por defecto) o "light".
+    #[serde(default)]
+    pub theme: String,
+    /// Reproducir automáticamente el siguiente episodio al terminar uno.
+    #[serde(default = "default_auto_play_next_episode")]
+    pub auto_play_next_episode: bool,
     /// Umbral de completado de una reproducción, en segundos.
     ///
     /// Una reproducción se marca como completada (y el archivo como visto) cuando
@@ -72,17 +77,24 @@ impl Default for AppConfig {
                 .to_string(),
             media_folders: Vec::new(),
             language: "es".to_string(),
-            auto_sync_metadata: false,
             default_player: "mpv".to_string(),
             default_tracks: DefaultTracks::default(),
+            theme: "dark".to_string(),
+            auto_play_next_episode: default_auto_play_next_episode(),
             playback_completion_threshold_seconds: default_completion_threshold_seconds(),
         }
     }
 }
 
-/// Umbral de completado por defecto: 300 segundos (5 minutos).
+/// Umbral de completado por defecto: 180 segundos (3 minutos) para
+/// episodios/anime. Las películas usan 600 segundos (10 minutos) fijos.
 fn default_completion_threshold_seconds() -> u64 {
-    300
+    180
+}
+
+/// Reproducción automática del siguiente episodio activada por defecto.
+fn default_auto_play_next_episode() -> bool {
+    true
 }
 
 pub struct Config {
@@ -144,23 +156,66 @@ impl Config {
     }
 
     /// Copia el archivo de base de datos SQLite a `path` (backup).
+    ///
+    /// La base de datos usa WAL, así que antes de copiar se fuerza un
+    /// checkpoint para que el archivo principal contenga todos los datos
+    /// confirmados. Sin este paso, la copia podría omitir transacciones que
+    /// todavía viven en el archivo `-wal`.
     pub fn backup_db_to(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        let db_path = Path::new(&self.inner.db_path);
+        if !db_path.exists() {
+            return Err(format!("base de datos no encontrada: {}", db_path.display()).into());
+        }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::copy(&self.inner.db_path, path)?;
+        {
+            let conn = rusqlite::Connection::open(db_path)?;
+            conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        }
+        fs::copy(db_path, path)?;
         Ok(())
     }
 
     /// Restaura el archivo de base de datos SQLite desde `path`.
     ///
-    /// Cierra la conexión actual (si la hay) y sobrescribe el archivo de BD
-    /// con el backup. El llamador debe volver a abrir la BD después.
+    /// Valida la copia antes de sobrescribir la base activa y elimina los
+    /// archivos `-wal`/`-shm` de la base actual para que SQLite no mezcle
+    /// cambios antiguos con los datos restaurados. El llamador debe volver a
+    /// abrir la BD después.
     pub fn restore_db_from(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         if !path.exists() {
             return Err(format!("archivo de backup no encontrado: {}", path.display()).into());
         }
-        fs::copy(path, &self.inner.db_path)?;
+
+        // Validar que la copia es una base SQLite legible antes de reemplazar
+        // la biblioteca del usuario.
+        {
+            let conn = rusqlite::Connection::open_with_flags(
+                path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )?;
+            let check: String = conn.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+            if check != "ok" {
+                return Err(format!("copia de seguridad no válida: {}", check).into());
+            }
+        }
+
+        let db_path = Path::new(&self.inner.db_path);
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        for suffix in ["-wal", "-shm"] {
+            let mut sidecar = db_path.as_os_str().to_os_string();
+            sidecar.push(suffix);
+            let sidecar = PathBuf::from(sidecar);
+            if sidecar.exists() {
+                fs::remove_file(sidecar)?;
+            }
+        }
+
+        fs::copy(path, db_path)?;
         Ok(())
     }
 
@@ -201,8 +256,15 @@ mod tests {
         let data_dir = TempDir::new().expect("data dir");
         let config_path = config_dir.path().join("config.yaml");
         let db_path = data_dir.path().join("acryl.db");
-        // Crear archivo de BD vacío para que backup/restore funcionen.
-        std::fs::write(&db_path, b"fake-db").unwrap();
+        // Crear una base SQLite real para que backup/restore puedan validarla.
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE prueba (id INTEGER PRIMARY KEY, valor TEXT);
+                 INSERT INTO prueba (valor) VALUES ('original');",
+            )
+            .unwrap();
+        }
 
         let config = Config {
             path: config_path.clone(),
@@ -210,10 +272,11 @@ mod tests {
                 db_path: db_path.to_string_lossy().to_string(),
                 media_folders: vec!["/tmp/foo".to_string()],
                 language: "es".to_string(),
-                auto_sync_metadata: false,
                 default_player: "mpv".to_string(),
                 default_tracks: DefaultTracks::default(),
-                playback_completion_threshold_seconds: 300,
+                theme: "dark".to_string(),
+                playback_completion_threshold_seconds: 180,
+                auto_play_next_episode: true,
             },
         };
         (config, config_dir, data_dir)
@@ -246,7 +309,6 @@ db_path: /tmp/imported.db
 media_folders:
   - /tmp/bar
 language: en
-auto_sync_metadata: true
 default_player: mpv
 default_tracks: {}
 playback_completion_threshold_seconds: 600
@@ -274,7 +336,6 @@ db_path: /tmp/x.db
 media_folders:
   - /tmp/no-existe-xyz-12345
 language: es
-auto_sync_metadata: false
 default_player: mpv
 default_tracks: {}
 "#;
@@ -287,13 +348,47 @@ default_tracks: {}
 
     #[test]
     fn backup_db_to_copia_archivo_bd() {
-        let (config, config_dir, data_dir) = test_config_with_tmp();
+        let (config, config_dir, _data_dir) = test_config_with_tmp();
         let backup_path = config_dir.path().join("backup.db");
         config.backup_db_to(&backup_path).expect("backup db");
         assert!(backup_path.exists());
-        let original = fs::read(data_dir.path().join("acryl.db")).expect("leer original");
-        let copia = fs::read(&backup_path).expect("leer backup");
-        assert_eq!(original, copia);
+
+        let copia = rusqlite::Connection::open(&backup_path).expect("abrir backup");
+        let valor: String = copia
+            .query_row("SELECT valor FROM prueba WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .expect("leer valor del backup");
+        assert_eq!(valor, "original");
+        drop(config);
+        drop(config_dir);
+    }
+
+    #[test]
+    fn backup_db_to_incluye_datos_pendientes_en_wal() {
+        let (config, config_dir, data_dir) = test_config_with_tmp();
+        // Desactivar el checkpoint automático para que la fila quede en el
+        // archivo -wal hasta que el backup fuerce el checkpoint.
+        let conn = rusqlite::Connection::open(data_dir.path().join("acryl.db"))
+            .expect("abrir BD para WAL");
+        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;")
+            .expect("configurar WAL");
+        conn.execute("INSERT INTO prueba (valor) VALUES ('en-wal')", [])
+            .expect("insertar fila en WAL");
+
+        let backup_path = config_dir.path().join("backup-wal.db");
+        config.backup_db_to(&backup_path).expect("backup con WAL");
+        drop(conn);
+
+        let copia = rusqlite::Connection::open(&backup_path).expect("abrir backup WAL");
+        let count: i64 = copia
+            .query_row(
+                "SELECT COUNT(*) FROM prueba WHERE valor = 'en-wal'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("contar fila en WAL");
+        assert_eq!(count, 1, "el backup debe incluir los datos del WAL");
         drop(config);
         drop(config_dir);
         drop(data_dir);
@@ -305,12 +400,23 @@ default_tracks: {}
         let backup_path = config_dir.path().join("backup.db");
         config.backup_db_to(&backup_path).expect("backup db");
 
-        // Modificar el archivo original.
-        fs::write(data_dir.path().join("acryl.db"), b"modified-content").unwrap();
+        // Modificar la base activa.
+        {
+            let conn = rusqlite::Connection::open(data_dir.path().join("acryl.db"))
+                .expect("abrir BD activa");
+            conn.execute("UPDATE prueba SET valor = 'modificado' WHERE id = 1", [])
+                .expect("modificar BD activa");
+        }
 
         config.restore_db_from(&backup_path).expect("restaurar db");
-        let restaurada = fs::read(data_dir.path().join("acryl.db")).expect("leer restaurada");
-        assert_eq!(restaurada, b"fake-db");
+        let restaurada = rusqlite::Connection::open(data_dir.path().join("acryl.db"))
+            .expect("abrir BD restaurada");
+        let valor: String = restaurada
+            .query_row("SELECT valor FROM prueba WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .expect("leer valor restaurado");
+        assert_eq!(valor, "original");
         drop(config);
         drop(config_dir);
         drop(data_dir);
@@ -322,5 +428,31 @@ default_tracks: {}
         let resultado = config.restore_db_from(Path::new("/tmp/no-existe-backup-xyz.db"));
         assert!(resultado.is_err(), "debe rechazar backup inexistente");
         drop(config);
+    }
+
+    #[test]
+    fn restore_db_from_rechaza_archivo_corrupto() {
+        let (config, config_dir, _data_dir) = test_config_with_tmp();
+        let corrupto = config_dir.path().join("corrupto.db");
+        fs::write(&corrupto, b"esto no es sqlite").unwrap();
+        let resultado = config.restore_db_from(&corrupto);
+        assert!(resultado.is_err(), "debe rechazar una copia corrupta");
+        drop(config);
+        drop(config_dir);
+    }
+
+    #[test]
+    fn app_config_theme_se_guarda_y_carga() {
+        // El tema por defecto es oscuro.
+        assert_eq!(AppConfig::default().theme, "dark");
+
+        // Un tema claro se serializa y deserializa correctamente.
+        let claro = AppConfig {
+            theme: "light".to_string(),
+            ..Default::default()
+        };
+        let yaml = serde_yaml::to_string(&claro).expect("serializar tema");
+        let de_serializado: AppConfig = serde_yaml::from_str(&yaml).expect("deserializar tema");
+        assert_eq!(de_serializado.theme, "light");
     }
 }

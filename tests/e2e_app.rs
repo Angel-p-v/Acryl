@@ -74,10 +74,11 @@ fn temp_config() -> (Config, TempDir, TempDir) {
         db_path: db_path.to_string_lossy().to_string(),
         media_folders: Vec::new(),
         language: "es".to_string(),
-        auto_sync_metadata: false,
         default_player: "mpv".to_string(),
         default_tracks: DefaultTracks::default(),
-        playback_completion_threshold_seconds: 300,
+        theme: "dark".to_string(),
+        playback_completion_threshold_seconds: 180,
+        auto_play_next_episode: true,
     };
 
     let config = Config {
@@ -785,6 +786,84 @@ fn marcar_temporada_y_pelicula_como_vistas_persiste() {
         assert!(
             !movie.is_watched,
             "el segundo clic debe guardar el estado no visto"
+        );
+    }
+
+    drop(window);
+    drop(app);
+}
+
+#[test]
+fn marcar_pelicula_como_favorita_persiste() {
+    if !gtk_can_run() {
+        return;
+    }
+
+    let _guard = EnvGuard::new(&[ACRYL_CONFIG_ENV]);
+    let (config, _config_dir, _data_dir) = temp_config();
+    let db_path = config.inner.db_path.clone();
+
+    let movie_id = {
+        let mut conn = open_db(&db_path).expect("abrir BD temporal");
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "movie".to_string(),
+            title: "Película favorita".to_string(),
+            sort_title: "pelicula favorita".to_string(),
+            year: Some(2024),
+            folder_path: "/media/pelicula-favorita".to_string(),
+            parent_id: None,
+        })
+        .expect("insertar película")
+        .id
+    };
+
+    let app = Application::builder()
+        .application_id("com.angelpv.acryl.e2e.favorite")
+        .build();
+    let window = run_gtk_or_skip(|| MainWindow::new(&app, config));
+    let window = match window {
+        Some(w) => w,
+        None => return,
+    };
+
+    assert!(
+        run_gtk_or_skip(|| window.borrow().show_details_for_test(movie_id, None)).unwrap_or(false),
+        "debe abrir la vista de detalles de la película"
+    );
+
+    let favorite_button = run_gtk_or_skip(|| window.borrow().favorite_button_for_test())
+        .expect("debe existir el botón de favorito");
+    run_gtk_or_skip(|| favorite_button.emit_by_name::<()>("clicked", &[]));
+
+    {
+        let mut conn = open_db(&db_path).expect("abrir BD temporal");
+        let mut repo = MediaRepository::new(&mut conn);
+        let movie = repo
+            .find_by_id(movie_id)
+            .expect("buscar película")
+            .expect("la película existe");
+        assert!(
+            movie.is_favorite,
+            "la película debe quedar marcada como favorita"
+        );
+    }
+
+    // Volver a pulsar el botón debe quitarla de favoritos.
+    let favorite_button = run_gtk_or_skip(|| window.borrow().favorite_button_for_test())
+        .expect("debe existir el botón de favorito");
+    run_gtk_or_skip(|| favorite_button.emit_by_name::<()>("clicked", &[]));
+
+    {
+        let mut conn = open_db(&db_path).expect("abrir BD temporal");
+        let mut repo = MediaRepository::new(&mut conn);
+        let movie = repo
+            .find_by_id(movie_id)
+            .expect("buscar película")
+            .expect("la película existe");
+        assert!(
+            !movie.is_favorite,
+            "el segundo clic debe quitar la película de favoritos"
         );
     }
 

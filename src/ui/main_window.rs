@@ -1,6 +1,7 @@
 //! Ventana principal de Acryl con GTK4 / Libadwaita.
 
 use crate::core::language::{LanguageIdentity, identity_from_track_key};
+use crate::core::library_watcher::FolderWatcher;
 use crate::core::metadata::{ImageOption, RefreshMetadataResult};
 use crate::db::media_repo::{ListMediaOptions, MediaRepository};
 use crate::db::{FileRepository, close_db, open_db};
@@ -12,14 +13,15 @@ use crate::ui::poster_selector::{ImageChoice, PosterSelector};
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
 use gtk4::{
-    Box, Button, CenterBox, FlowBox, Label, Orientation, Revealer, ScrolledWindow, SearchEntry,
-    Spinner, Stack, gio, glib,
+    Box, Button, CenterBox, DropDown, FlowBox, Label, Orientation, Revealer, ScrolledWindow,
+    SearchEntry, Spinner, Stack, gio, glib,
 };
 use libadwaita::prelude::*;
 use libadwaita::{ApplicationWindow as AdwApplicationWindow, StatusPage, Toast, ToastOverlay};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::mpsc::{self, TryRecvError};
+use std::thread;
 use std::time::Duration;
 
 /// Vista recordada en la pila de navegación. Permite que «Volver» y la salida
@@ -112,9 +114,11 @@ pub struct MainWindow {
     /// Botones de modo de vista (Grid/Lista).
     view_grid_button: Button,
     view_list_button: Button,
-    /// Etiqueta de ordenamiento (placeholder visual).
-    #[allow(dead_code)]
-    sort_label: Label,
+    /// Selector de orden de la galería (título, año o tipo).
+    sort_combo: DropDown,
+    /// Evita recargar la galería mientras se reconstruyen las opciones del
+    /// selector de orden (por ejemplo, al cambiar de idioma).
+    suppress_sort_change: Rc<Cell<bool>>,
     /// Campo de búsqueda prominente en el centro de la barra superior.
     search_entry: SearchEntry,
     /// Spinner de sincronización de metadatos.
@@ -145,10 +149,30 @@ pub type MainWindowRef = Rc<RefCell<MainWindow>>;
 
 impl MainWindow {
     pub fn new(app: &gtk4::Application, config: crate::Config) -> MainWindowRef {
-        crate::ui::theme::install_theme_css(crate::ui::theme::ThemeMode::Dark);
+        crate::ui::theme::set_theme_mode(crate::ui::theme::ThemeMode::from_config(
+            &config.inner().theme,
+        ));
 
         let db_path = config.inner().db_path.clone();
         let config_path = config.path().to_path_buf();
+
+        // Vigilador de carpetas: reindexa automáticamente al detectar archivos de
+        // vídeo nuevos o modificados en cada carpeta configurada. Cada carpeta se
+        // vigila en un hilo secundario independiente que vive mientras la
+        // aplicación esté abierta.
+        for folder in config.inner().media_folders.clone() {
+            let db_path_watch = db_path.clone();
+            thread::spawn(move || {
+                let watcher = match FolderWatcher::new(&folder, &db_path_watch, 2) {
+                    Ok(w) => w,
+                    Err(e) => {
+                        eprintln!("No se pudo crear vigilador para {}: {}", folder, e);
+                        return;
+                    }
+                };
+                let _ = watcher.run();
+            });
+        }
 
         let language = config.inner().language.clone();
         let translations = load_translations(&language)
@@ -295,10 +319,18 @@ impl MainWindow {
         view_list_button.set_valign(gtk4::Align::Center);
         top_bar_level2.append(&view_list_button);
 
-        // Etiqueta de ordenamiento (placeholder visual).
-        let sort_label = Label::new(Some(&t("topbar.sort_title")));
-        sort_label.set_valign(gtk4::Align::Center);
-        top_bar_level2.append(&sort_label);
+        // Selector de orden de la galería.
+        let sort_options = [
+            t("topbar.sort_title"),
+            t("topbar.sort_year"),
+            t("topbar.sort_type"),
+        ];
+        let sort_option_refs: Vec<&str> = sort_options.iter().map(String::as_str).collect();
+        let sort_combo = DropDown::from_strings(&sort_option_refs);
+        sort_combo.add_css_class("sort-dropdown");
+        sort_combo.set_valign(gtk4::Align::Center);
+        sort_combo.set_tooltip_text(Some(&t("tooltip.sort")));
+        top_bar_level2.append(&sort_combo);
 
         content.append(&top_bar_level2);
 
@@ -474,6 +506,8 @@ impl MainWindow {
 
         stack.set_visible_child_name("list");
 
+        let suppress_sort_change = Rc::new(Cell::new(false));
+
         let this = Rc::new(RefCell::new(Self {
             window,
             stack,
@@ -506,7 +540,8 @@ impl MainWindow {
             continue_button,
             view_grid_button,
             view_list_button,
-            sort_label,
+            sort_combo,
+            suppress_sort_change: suppress_sort_change.clone(),
             search_entry,
             sync_spinner,
             settings_menu_button,
@@ -537,9 +572,9 @@ impl MainWindow {
                     // mpv abra su ventana.
                     let this_play = this_clone.clone();
                     glib::timeout_add_local(Duration::from_millis(200), move || {
-                        let w = this_play.borrow();
-                        if let Err(error) = w.play_episode(&file_path) {
+                        if let Err(error) = Self::play_episode(&this_play, &file_path) {
                             eprintln!("No se pudo reanudar '{}': {}", file_path, error);
+                            let w = this_play.borrow();
                             w.show_error(&w.t("error.play_episode"), &error.to_string());
                         }
                         glib::ControlFlow::Break
@@ -565,6 +600,7 @@ impl MainWindow {
         glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
             if this_for_dl.borrow().media_list.check_downloads() {
                 Self::load_media(&this_for_dl);
+                this_for_dl.borrow().show_list();
             }
             glib::ControlFlow::Continue
         });
@@ -577,6 +613,7 @@ impl MainWindow {
 
         // Cargar medios iniciales (SQLite local, rápido).
         Self::load_media(&this);
+        this.borrow().show_list();
 
         // Botón "Historial": navega a la página de historial y carga las reproducciones.
         let this_hist = this.clone();
@@ -670,6 +707,7 @@ impl MainWindow {
                     *window.current_favorite_filter.borrow_mut() = new_value;
                 }
                 Self::load_media(&this_fav);
+                this_fav.borrow().show_list();
             });
 
         // Filtro de visto/no visto: activa/desactiva el filtro de is_watched.
@@ -690,6 +728,7 @@ impl MainWindow {
                     *window.current_watched_filter.borrow_mut() = new_value;
                 }
                 Self::load_media(&this_wat);
+                this_wat.borrow().show_list();
             });
 
         // Nivel 2: píldora "Continuar viendo".
@@ -704,7 +743,22 @@ impl MainWindow {
         // Atajos de teclado globales.
         let this_key = this.clone();
         let key_controller = gtk4::EventControllerKey::new();
-        key_controller.connect_key_pressed(move |_, keyval, _keycode, _modifier| {
+        key_controller.connect_key_pressed(move |_, keyval, _keycode, modifier| {
+            // Atajos con Ctrl.
+            if modifier.contains(gtk4::gdk::ModifierType::CONTROL_MASK) {
+                let name = keyval.name().unwrap_or_default();
+                if name == "f" || name == "F" {
+                    this_key.borrow().search_entry.grab_focus();
+                    return gtk4::glib::Propagation::Stop;
+                }
+                if name == "comma" {
+                    let w = this_key.borrow();
+                    w.push_current_view();
+                    w.stack.set_visible_child_name("settings");
+                    drop(w);
+                    return gtk4::glib::Propagation::Stop;
+                }
+            }
             let name = keyval.name().unwrap_or_default();
             match name.as_str() {
                 "f" | "F" => {
@@ -721,6 +775,7 @@ impl MainWindow {
                         *window.current_favorite_filter.borrow_mut() = new_value;
                     }
                     Self::load_media(&this_key);
+                    this_key.borrow().show_list();
                     gtk4::glib::Propagation::Stop
                 }
                 "v" | "V" => {
@@ -737,6 +792,7 @@ impl MainWindow {
                         *window.current_watched_filter.borrow_mut() = new_value;
                     }
                     Self::load_media(&this_key);
+                    this_key.borrow().show_list();
                     gtk4::glib::Propagation::Stop
                 }
                 "Escape" => {
@@ -746,6 +802,7 @@ impl MainWindow {
                     *window.current_category.borrow_mut() = None;
                     drop(window);
                     Self::load_media(&this_key);
+                    this_key.borrow().show_list();
                     gtk4::glib::Propagation::Stop
                 }
                 "slash" => {
@@ -765,6 +822,17 @@ impl MainWindow {
         let this_list = this.clone();
         this.borrow().view_list_button.connect_clicked(move |_| {
             let _ = this_list;
+        });
+
+        // Nivel 2: al cambiar el orden, recargar la galería desde el principio.
+        let this_sort = this.clone();
+        let suppress_sort = suppress_sort_change.clone();
+        this.borrow().sort_combo.connect_selected_notify(move |_| {
+            if suppress_sort.get() {
+                return;
+            }
+            Self::load_media(&this_sort);
+            this_sort.borrow().show_list();
         });
 
         // Logo: acceso directo al inicio desde cualquier vista. Limpia la
@@ -893,10 +961,14 @@ impl MainWindow {
                 Self::update_library_status(&w);
             });
 
-        // Callback: la indexación terminó -> recargar la galería.
+        // Callback: la indexación terminó -> recargar la galería y asegurar
+        // de que el Stack se muestre en la página correcta (list o empty).
+        // Si no se llama a show_list(), el Stack puede quedar atascado en
+        // "empty" aunque load_media() haya cargado los medios en media_list.
         let this_clone = this.clone();
         this.borrow_mut().settings_view.on_library_changed(move || {
             Self::load_media(&this_clone);
+            this_clone.borrow().show_list();
             let this = this_clone.clone();
             glib::timeout_add_local(Duration::from_millis(500), move || {
                 let w = this.borrow();
@@ -927,6 +999,7 @@ impl MainWindow {
                 // Recargar medios después de guardar ajustes (pueden haber
                 // cambiado las carpetas).
                 Self::load_media(&this_clone);
+                this_clone.borrow().show_list();
                 Self::start_metadata_sync(&this_clone, db_path_for_reload.clone());
                 // Volver a la vista de origen después de guardar.
                 let w = this_clone.borrow();
@@ -964,9 +1037,9 @@ impl MainWindow {
             .media_details
             .borrow_mut()
             .on_play_episode(move |file_path| {
-                let w = this_clone.borrow();
-                if let Err(error) = w.play_episode(&file_path) {
+                if let Err(error) = Self::play_episode(&this_clone, &file_path) {
                     eprintln!("No se pudo reproducir '{}': {}", file_path, error);
+                    let w = this_clone.borrow();
                     w.show_error(&w.t("error.play_episode"), &error.to_string());
                 }
             });
@@ -1012,6 +1085,111 @@ impl MainWindow {
                     w2.media_details
                         .borrow_mut()
                         .set_media_with_season(&media, season);
+                }
+            });
+
+        // Callback: marcar/desmarcar el medio como favorito.
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_toggle_favorite(move |new_state| {
+                let (media_id, season, favorite_filter_active) = {
+                    let w = this_clone.borrow();
+                    (
+                        w.media_details.borrow().media_id(),
+                        w.media_details.borrow().season_selection(),
+                        w.current_favorite_filter.borrow().is_some(),
+                    )
+                };
+                let db_path = this_clone.borrow().db_path.clone();
+                let mut conn = match open_db(&db_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Error abriendo BD para toggle favorite: {}", e);
+                        return;
+                    }
+                };
+                let mut repo = MediaRepository::new(&mut conn);
+                if let Err(e) = repo.set_favorite(media_id, new_state) {
+                    eprintln!("Error actualizando favorito: {}", e);
+                }
+                close_db(conn);
+
+                // Refrescar la ficha con el estado persistido.
+                let media = {
+                    let mut conn = match open_db(&db_path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Error abriendo BD para refrescar favorite: {}", e);
+                            return;
+                        }
+                    };
+                    let mut repo = MediaRepository::new(&mut conn);
+                    let m = repo.find_by_id(media_id).ok().flatten();
+                    close_db(conn);
+                    m
+                };
+                if let Some(media) = media {
+                    this_clone
+                        .borrow()
+                        .media_details
+                        .borrow_mut()
+                        .set_media_with_season(&media, season);
+                }
+
+                // Si la galería está filtrada por favoritos, al quitar el
+                // favorito el medio debe desaparecer de la lista.
+                if favorite_filter_active {
+                    Self::load_media(&this_clone);
+                    this_clone.borrow().show_list();
+                }
+            });
+
+        // Callback: calificar el medio con estrellas (1-5).
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_set_rating(move |rating| {
+                let media_id = {
+                    let w = this_clone.borrow();
+                    w.media_details.borrow().media_id()
+                };
+                let db_path = this_clone.borrow().db_path.clone();
+                let mut conn = match open_db(&db_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Error abriendo BD para calificar: {}", e);
+                        return;
+                    }
+                };
+                let mut repo = MediaRepository::new(&mut conn);
+                if let Err(e) = repo.set_rating(media_id, rating) {
+                    eprintln!("Error guardando calificación: {}", e);
+                }
+                close_db(conn);
+
+                // Refrescar la ficha con la calificación guardada.
+                let media = {
+                    let mut conn = match open_db(&db_path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Error abriendo BD para refrescar calificación: {}", e);
+                            return;
+                        }
+                    };
+                    let mut repo = MediaRepository::new(&mut conn);
+                    let m = repo.find_by_id(media_id).ok().flatten();
+                    close_db(conn);
+                    m
+                };
+                if let Some(media) = media {
+                    this_clone
+                        .borrow()
+                        .media_details
+                        .borrow_mut()
+                        .set_media_with_season(&media, None);
                 }
             });
 
@@ -1080,7 +1258,7 @@ impl MainWindow {
                 let (tx, rx) = mpsc::channel::<Vec<ImageOption>>();
 
                 // Consultar las APIs en un hilo secundario (solo datos Send).
-                std::thread::spawn(move || {
+                thread::spawn(move || {
                     let rt = match tokio::runtime::Runtime::new() {
                         Ok(rt) => rt,
                         Err(_) => return,
@@ -1149,7 +1327,7 @@ impl MainWindow {
 
                                 // Descargar y persistir en segundo plano para no bloquear
                                 // el hilo principal de GTK.
-                                std::thread::spawn(move || {
+                                thread::spawn(move || {
                                     let mut outcome = ImageUpdateOutcome::default();
                                     let runtime = match tokio::runtime::Runtime::new() {
                                         Ok(rt) => rt,
@@ -1364,13 +1542,19 @@ impl MainWindow {
     /// reemplaza el contenido de la galería; si es mayor, lo añade al final
     /// (paginación infinita).
     fn load_media_page(this: &MainWindowRef, offset: i64) {
-        let (db_path, category_id, favorite, watched) = {
+        let (db_path, category_id, favorite, watched, order_by) = {
             let w = this.borrow();
+            let order_by = match w.sort_combo.selected() {
+                1 => Some("year".to_string()),
+                2 => Some("type".to_string()),
+                _ => None,
+            };
             (
                 w.db_path.clone(),
                 *w.current_category.borrow(),
                 *w.current_favorite_filter.borrow(),
                 *w.current_watched_filter.borrow(),
+                order_by,
             )
         };
 
@@ -1387,7 +1571,7 @@ impl MainWindow {
                 r#type: None,
                 limit: Some(100),
                 offset: Some(offset),
-                order_by: None,
+                order_by,
                 favorite,
                 watched,
             };
@@ -1411,7 +1595,9 @@ impl MainWindow {
 
         let visible = w.stack.visible_child_name().map(|name| name.to_string());
         if matches!(visible.as_deref(), Some("list") | Some("empty")) {
-            let filtered = w.current_category.borrow().is_some();
+            let filtered = w.current_category.borrow().is_some()
+                || w.current_favorite_filter.borrow().is_some()
+                || w.current_watched_filter.borrow().is_some();
             let total_shown = w.media_offset;
             if total_shown == 0 && !filtered {
                 w.stack.set_visible_child_name("empty");
@@ -1499,6 +1685,23 @@ impl MainWindow {
             .set_label(&self.t("topbar.continue_watching"));
         self.view_grid_button.set_label(&self.t("topbar.view_grid"));
         self.view_list_button.set_label(&self.t("topbar.view_list"));
+
+        // Actualizar las opciones del selector de orden conservando la
+        // selección actual del usuario.
+        let selected_order = self.sort_combo.selected();
+        let order_options = [
+            self.t("topbar.sort_title"),
+            self.t("topbar.sort_year"),
+            self.t("topbar.sort_type"),
+        ];
+        let order_option_refs: Vec<&str> = order_options.iter().map(String::as_str).collect();
+        let order_model = gtk4::StringList::new(&order_option_refs);
+        self.suppress_sort_change.set(true);
+        self.sort_combo.set_model(Some(&order_model));
+        self.sort_combo.set_selected(selected_order.min(2));
+        self.suppress_sort_change.set(false);
+        self.sort_combo
+            .set_tooltip_text(Some(&self.t("tooltip.sort")));
 
         // Página vacía
         self.empty_page.set_title(&self.t("empty.title"));
@@ -1685,8 +1888,14 @@ impl MainWindow {
     }
 
     /// Muestra la biblioteca (o la página vacía si no hay medios ni filtro).
+    /// Se considera "filtrado" si hay activo cualquier filtro: categoría,
+    /// favoritos o visto/no visto. Así, si un filtro combinado devuelve 0
+    /// resultados, al retirar uno de ellos la página no se queda atascada
+    /// en "empty" aunque media_count sea 0 temporalmente.
     fn show_list(&self) {
-        let filtered = self.current_category.borrow().is_some();
+        let filtered = self.current_category.borrow().is_some()
+            || self.current_favorite_filter.borrow().is_some()
+            || self.current_watched_filter.borrow().is_some();
         if self.media_count == 0 && !filtered {
             self.stack.set_visible_child_name("empty");
         } else {
@@ -1703,9 +1912,13 @@ impl MainWindow {
         let had_filter = {
             let w = this.borrow();
             w.search_entry.set_text("");
-            let had_filter = w.current_category.borrow().is_some();
+            let had_filter = w.current_category.borrow().is_some()
+                || w.current_favorite_filter.borrow().is_some()
+                || w.current_watched_filter.borrow().is_some();
             w.current_category.replace(None);
             w.current_category_name.replace(None);
+            w.current_favorite_filter.replace(None);
+            w.current_watched_filter.replace(None);
             w.history.borrow_mut().clear();
             w.update_filter_bar();
             had_filter
@@ -1735,7 +1948,9 @@ impl MainWindow {
         w.media_count = count;
         w.media_list.set_media(all_media);
 
-        let filtered = w.current_category.borrow().is_some();
+        let filtered = w.current_category.borrow().is_some()
+            || w.current_favorite_filter.borrow().is_some()
+            || w.current_watched_filter.borrow().is_some();
         if is_empty && !filtered {
             w.stack.set_visible_child_name("empty");
         } else {
@@ -1879,32 +2094,33 @@ impl MainWindow {
         drop(w);
     }
 
-    fn play_episode(&self, file_path: &str) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
+    /// Reproduce un archivo de vídeo en mpv. Cuando la reproducción termina,
+    /// si `auto_play_next_episode` está activado y el medio es una serie o
+    /// anime, busca y reproduce el siguiente episodio no visto tras una breve
+    /// cuenta atrás.
+    fn play_episode(
+        this: &MainWindowRef,
+        file_path: &str,
+    ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
+        let w = this.borrow();
         let media_id = {
-            let mut conn = open_db(&self.db_path)?;
+            let mut conn = open_db(&w.db_path)?;
             let mut repo = MediaRepository::new(&mut conn);
             let media_id = repo.find_media_id_by_file(file_path)?;
             close_db(conn);
             media_id
         };
-
-        // El modo de mpv se deriva del estado real de Acryl: una ventana
-        // maximizada no es pantalla completa. Forzar --fullscreen en ese caso
-        // hacía que Hyprland reubicara y encogiera la ventana de Acryl.
-        let window_mode = player_window_mode(&self.window);
-
-        // Las pistas predeterminadas del usuario tienen prioridad sobre
-        // cualquier preferencia guardada por archivo.
-        let default_tracks = {
-            let config = self.config.borrow();
-            config.default_tracks.clone()
-        };
-
-        let completion_threshold = Some(self.config.borrow().playback_completion_threshold_seconds);
+        let window_mode = player_window_mode(&w.window);
+        let default_tracks = w.config.borrow().default_tracks.clone();
+        let completion_threshold = Some(w.config.borrow().playback_completion_threshold_seconds);
+        let auto_play_next = w.config.borrow().auto_play_next_episode;
+        let db_path = w.db_path.clone();
+        let window = w.window.clone();
+        drop(w);
 
         let playback_start = match media_id {
             Some(media_id) => crate::core::player::play_with_resume_with_mode(
-                &self.db_path,
+                &db_path,
                 media_id,
                 file_path,
                 window_mode,
@@ -1912,7 +2128,7 @@ impl MainWindow {
                 completion_threshold,
             )?,
             None => crate::core::player::play_external_with_mode(
-                &self.db_path,
+                &db_path,
                 None,
                 file_path,
                 window_mode,
@@ -1925,12 +2141,24 @@ impl MainWindow {
                 // Al cerrar mpv se reafirma el estado original para deshacer
                 // cualquier reubicación que el compositor haya aplicado mientras
                 // estaba abierto.
-                let window = self.window.clone();
+                let window_for_restore = window.clone();
+                let this_for_next = this.clone();
+                let media_id_for_next = media_id;
                 glib::timeout_add_local(Duration::from_millis(250), move || {
                     if !session.finished() {
                         return glib::ControlFlow::Continue;
                     }
-                    restore_window_mode(&window, window_mode);
+                    restore_window_mode(&window_for_restore, window_mode);
+
+                    // Siguiente episodio automático: solo si la reproducción
+                    // se completó (faltaban menos del umbral para terminar),
+                    // no si el usuario cerró mpv antes.
+                    if auto_play_next
+                        && session.completed()
+                        && let Some(media_id) = media_id_for_next
+                    {
+                        Self::schedule_next_episode(&this_for_next, media_id, db_path.clone());
+                    }
                     glib::ControlFlow::Break
                 });
                 Ok(())
@@ -1940,13 +2168,84 @@ impl MainWindow {
                 default_tracks: fallback_defaults,
                 missing_audio,
                 missing_subtitle,
-            } => self.show_default_track_fallback_dialog(
-                fallback_path,
-                fallback_defaults,
-                missing_audio,
-                missing_subtitle,
-            ),
+            } => {
+                let w = this.borrow();
+                w.show_default_track_fallback_dialog(
+                    fallback_path,
+                    fallback_defaults,
+                    missing_audio,
+                    missing_subtitle,
+                )
+            }
         }
+    }
+
+    /// Busca el siguiente episodio no visto de la serie/anime de `media_id` y
+    /// lo programa para reproducirse tras una cuenta atrás de 5 segundos,
+    /// mostrando un toast informativo.
+    fn schedule_next_episode(this: &MainWindowRef, media_id: i64, db_path: String) {
+        let w = this.borrow();
+        let (is_serie, serie_id) = match w.find_media_for_next(media_id) {
+            Some((is_serie, sid)) => (is_serie, sid),
+            None => return,
+        };
+        drop(w);
+
+        if !is_serie {
+            return;
+        }
+
+        let next_path = {
+            let mut conn = match open_db(&db_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error abriendo BD para siguiente episodio: {}", e);
+                    return;
+                }
+            };
+            let mut repo = MediaRepository::new(&mut conn);
+            let next = repo.get_next_episode_to_watch(serie_id).ok().flatten();
+            close_db(conn);
+            match next {
+                Some((_file_id, path, _label)) => path,
+                None => return,
+            }
+        };
+
+        // Mostrar toast informativo (ya estamos en el hilo principal de GTK).
+        let w_toast = this.borrow();
+        w_toast.show_toast(&w_toast.t("toast.next_episode"));
+
+        let this_for_play = this.clone();
+        let next_path_owned = next_path.clone();
+        glib::timeout_add_local(Duration::from_secs(5), move || {
+            if let Err(e) = Self::play_episode(&this_for_play, &next_path_owned) {
+                eprintln!("No se pudo reproducir el siguiente episodio: {}", e);
+            }
+            glib::ControlFlow::Break
+        });
+    }
+
+    /// Determina si `media_id` es una serie/anime y devuelve su ID de serie
+    /// para buscar el siguiente episodio. Para un episodio, devuelve el
+    /// `parent_id`; para una serie/anime directamente, devuelve su propio ID.
+    /// Para películas, devuelve `None`.
+    fn find_media_for_next(&self, media_id: i64) -> Option<(bool, i64)> {
+        let mut conn = open_db(&self.db_path).ok()?;
+        let mut repo = MediaRepository::new(&mut conn);
+        let media = repo.find_by_id(media_id).ok().flatten()?;
+        close_db(conn);
+        let (is_serie, serie_id) = if let Some(parent_id) = media.parent_id {
+            // Es un episodio: usar el padre como serie.
+            (true, parent_id)
+        } else if media.r#type != "movie" {
+            // Es una serie/anime directamente.
+            (true, media_id)
+        } else {
+            // Es una película: no hay siguiente episodio.
+            return None;
+        };
+        Some((is_serie, serie_id))
     }
 
     /// Muestra el diálogo de fallback cuando las pistas predeterminadas del
@@ -2036,7 +2335,7 @@ impl MainWindow {
         this.borrow().metadata_sync_running.set(true);
 
         let (sender, receiver) = mpsc::channel();
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             let result = crate::core::metadata::MetadataService::sync_missing_metadata(&db_path);
             let _ = sender.send(result);
         });
@@ -2122,7 +2421,7 @@ impl MainWindow {
         }
 
         let (sender, receiver) = mpsc::channel();
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             let result = crate::core::metadata::MetadataService::refresh_all_metadata(&db_path);
             let _ = sender.send(result);
         });
@@ -2250,6 +2549,11 @@ impl MainWindow {
     /// Método público para tests E2E: botón de visto/no visto del medio.
     pub fn watched_button_for_test(&self) -> Button {
         self.media_details.borrow().watched_button_for_test()
+    }
+
+    /// Método público para tests E2E: botón de favorito del medio.
+    pub fn favorite_button_for_test(&self) -> Button {
+        self.media_details.borrow().favorite_button_for_test()
     }
 
     pub fn widget(&self) -> &AdwApplicationWindow {

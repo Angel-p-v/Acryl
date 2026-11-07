@@ -423,6 +423,9 @@ impl<'a> MediaRepository<'a> {
         let order_clause = match options.order_by.as_deref().unwrap_or("title") {
             "added" => "ORDER BY created_at DESC",
             "recent" => "ORDER BY updated_at DESC",
+            "year" => "ORDER BY year IS NULL, year DESC, sort_title ASC",
+            "type" => "ORDER BY type ASC, sort_title ASC",
+            "rating" => "ORDER BY rating DESC, sort_title ASC",
             _ => "ORDER BY sort_title ASC",
         };
         sql.push(' ');
@@ -556,6 +559,18 @@ impl<'a> MediaRepository<'a> {
             |row| row.get(0),
         )?;
         Ok(value)
+    }
+
+    /// Marca un medio como favorito o no favorito con el estado exacto indicado.
+    ///
+    /// A diferencia de `toggle_favorite`, no invierte el valor actual: la base
+    /// de datos siempre coincide con el estado que muestra la interfaz.
+    pub fn set_favorite(&mut self, id: i64, favorite: bool) -> RusqliteResult<()> {
+        self.conn.execute(
+            "UPDATE media SET is_favorite = ?2, updated_at = datetime('now') WHERE id = ?1",
+            params![id, i64::from(favorite)],
+        )?;
+        Ok(())
     }
 
     /// Marca un medio como visto/no visto con el estado exacto indicado.
@@ -799,6 +814,9 @@ impl<'a> MediaRepository<'a> {
         let order_clause = match options.order_by.as_deref().unwrap_or("title") {
             "added" => "ORDER BY m.created_at DESC",
             "recent" => "ORDER BY m.updated_at DESC",
+            "year" => "ORDER BY m.year IS NULL, m.year DESC, m.sort_title ASC",
+            "type" => "ORDER BY m.type ASC, m.sort_title ASC",
+            "rating" => "ORDER BY m.rating DESC, m.sort_title ASC",
             _ => "ORDER BY m.sort_title ASC",
         };
         sql.push(' ');

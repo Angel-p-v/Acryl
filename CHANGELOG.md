@@ -13,6 +13,15 @@ mantiene este archivo a partir de los commits convencionales.
 * **history:** mostrar el progreso real de visionado (barra y porcentaje) en cada tarjeta del historial, guardado periódicamente durante la reproducción para no perder el avance si mpv se cierra abruptamente, y estado «Visto» al completar una película o episodio. Al pulsar una tarjeta se abre la ficha y se reanuda el episodio o la película desde la posición guardada; pulsar solo sobre el nombre (que se resalta al pasar el cursor) abre la ficha sin reproducir.
 * **ui:** añadir el diálogo «Acerca de» con créditos del autor, copyright, licencia MIT, enlaces al repositorio, incidencias y soporte, e información de depuración con las versiones de Acryl, GTK, Libadwaita y el sistema.
 * **settings:** mostrar una sección «Acerca de» con encabezado, descripción y botón con icono, traducida al cambiar de idioma en caliente.
+* **favorites:** añadir botón de favorito en la ficha de detalles que persiste el estado exacto con `set_favorite`, refrescando la galería cuando el filtro de favoritos está activo.
+* **ui:** conectar el selector de orden de la biblioteca con las opciones Título, Año y Tipo, ordenando la galería desde la capa SQLite.
+* **settings:** añadir sección «Datos» con copia de seguridad y restauración de la base de datos (checkpoint WAL, validación `quick_check` y limpieza de sidecars `-wal`/`-shm`).
+* **settings:** añadir selector de tema oscuro/claro, aplicado al guardar los ajustes y al iniciar la aplicación, con `AdwStyleManager` para diálogos y popovers.
+* **player:** siguiente episodio automático solo si la reproducción se completó (3 min antes del final para episodios/anime, 10 min para películas), con cuenta atrás de 5 segundos y toast informativo. Incluye toggle en Ajustes para activar/desactivar.
+* **ui:** añadir atajos de teclado globales: `Ctrl+F` para enfocar búsqueda, `Ctrl+,` para abrir Ajustes, `Esc` para limpiar filtros y `/` para búsqueda.
+* **ui:** watcher de carpetas con `notify` para reindexar automáticamente al detectar archivos de vídeo nuevos o modificados.
+* **ui:** valoración con estrellas (1-5) en la ficha de detalles, persistida con `set_rating`, con capacidad de ordenar la galería por calificación.
+* **db:** mantenimiento de base de datos: `PRAGMA integrity_check` al abrir, `wal_checkpoint(TRUNCATE)` al cerrar y función `vacuum_database` para recuperar espacio.
 
 ### Bug Fixes
 
@@ -25,12 +34,16 @@ mantiene este archivo a partir de los commits convencionales.
 * **ui:** ejecutar siempre las acciones de marcar temporada como vista/no vista, también cuando la opción elegida ya era la seleccionada en el desplegable.
 * **ui:** guardar el estado exacto de visto/no visto de películas y demás medios en lugar de invertir el valor previo de la base de datos, evitando que la interfaz y la BD queden desincronizadas.
 * **history:** mantener una única entrada activa por archivo, actualizar su progreso al reanudar y archivar los duplicados antiguos sin borrar el historial.
+* **config:** eliminar el campo `auto_sync_metadata` de `AppConfig` (no tenía implementación asociada; generaba una expectativa falsa en el YAML).
 
 ### Tests
 
 * **settings:** añadir pruebas unitarias para el filtrado de pistas y la normalización de rutas de carpeta.
 * **settings:** añadir `tests/settings_integration.rs` con escenarios de carpetas, pistas predeterminadas, selección tras callbacks y diálogo «Acerca de», ejecutado en CI con `xvfb-run`.
 * **ui:** añadir pruebas E2E y de integración que verifican el marcado de temporadas y películas como vistas y su persistencia en SQLite.
+* **ui:** añadir pruebas de persistencia de favoritos y de ordenación por año y tipo.
+* **config:** añadir pruebas de copia de seguridad (incluido WAL) y restauración, y de serialización del tema.
+* **ui:** añadir pruebas de calificación (`set_rating_guarda_la_calificacion`, `list_ordena_por_rating`) y de mantenimiento de BD (`vacuum_database_no_rompe_la_bd`).
 
 ### Documentation
 

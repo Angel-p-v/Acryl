@@ -4,7 +4,7 @@
 use acryl::core::player::{
     PlayerWindowMode, build_mpv_launch_args_for_playback, resolve_track_preference,
 };
-use acryl::db::connection::open_db;
+use acryl::db::connection::{close_db, open_db, vacuum_database};
 use acryl::db::file_repo::{FileRepository, MediaFileInput, TrackPreference, TrackSelection};
 use acryl::db::media_repo::{
     ListMediaOptions, MediaInput, MediaMetadataInput, MediaRepository, MediaStream,
@@ -390,6 +390,238 @@ fn toggle_favorite_y_watched() {
         repo.toggle_watched(media.id).expect("toggle watched")
     };
     assert!(wat);
+}
+
+#[test]
+fn list_ordena_por_anio_y_tipo() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        for (title, sort, year, media_type) in [
+            ("Antigua", "antigua", Some(1999), "movie"),
+            ("Reciente", "reciente", Some(2024), "series"),
+            ("Sin año", "sin anio", None, "anime"),
+        ] {
+            repo.upsert(&MediaInput {
+                r#type: media_type.to_string(),
+                title: title.to_string(),
+                sort_title: sort.to_string(),
+                year,
+                folder_path: format!("/media/{sort}"),
+                parent_id: None,
+            })
+            .expect("upsert");
+        }
+    }
+
+    let by_year = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.list(ListMediaOptions {
+            order_by: Some("year".to_string()),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .expect("listar por año")
+    };
+    let years: Vec<Option<i32>> = by_year.iter().map(|media| media.year).collect();
+    assert_eq!(years, vec![Some(2024), Some(1999), None]);
+
+    let by_type = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.list(ListMediaOptions {
+            order_by: Some("type".to_string()),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .expect("listar por tipo")
+    };
+    let types: Vec<&str> = by_type.iter().map(|media| media.r#type.as_str()).collect();
+    assert_eq!(types, vec!["anime", "movie", "series"]);
+}
+
+#[test]
+fn set_rating_guarda_la_calificacion() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let media = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "movie".to_string(),
+            title: "Pelicula para calificar".to_string(),
+            sort_title: "pelicula para calificar".to_string(),
+            year: Some(2024),
+            folder_path: "/media/pelicula".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert")
+    };
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_rating(media.id, 5).expect("calificar 5");
+    }
+    let rating = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.get_rating(media.id).expect("obtener rating")
+    };
+    assert_eq!(rating, 5);
+
+    // Volver a calificar a 5 no debe sumar, debe reemplazar.
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_rating(media.id, 5).expect("calificar 5 otra vez");
+    }
+    let rating = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.get_rating(media.id).expect("obtener rating")
+    };
+    assert_eq!(rating, 5);
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_rating(media.id, 3).expect("calificar 3");
+    }
+    let rating = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.get_rating(media.id).expect("obtener rating")
+    };
+    assert_eq!(rating, 3);
+}
+
+#[test]
+fn list_ordena_por_rating() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        for (title, _rating) in [("Baja", 1), ("Media", 3), ("Alta", 5), ("Sin calificar", 0)] {
+            repo.upsert(&MediaInput {
+                r#type: "movie".to_string(),
+                title: title.to_string(),
+                sort_title: title.to_string(),
+                year: Some(2024),
+                folder_path: format!("/media/{}", title.to_lowercase()),
+                parent_id: None,
+            })
+            .expect("upsert");
+        }
+        // Establecer calificaciones explícitas.
+        let ids: Vec<i64> = repo
+            .list(ListMediaOptions::default())
+            .expect("listar")
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        for (id, rating) in ids.into_iter().zip([1, 3, 5, 0]) {
+            repo.set_rating(id, rating).expect("calificar");
+        }
+    }
+
+    let by_rating = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.list(ListMediaOptions {
+            order_by: Some("rating".to_string()),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .expect("listar por rating")
+    };
+    let ratings: Vec<i32> = by_rating.iter().map(|m| m.rating).collect();
+    assert_eq!(ratings, vec![5, 3, 1, 0]);
+}
+
+#[test]
+fn vacuum_database_no_rompe_la_bd() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "movie".to_string(),
+            title: "Pelicula para vacuum".to_string(),
+            sort_title: "pelicula para vacuum".to_string(),
+            year: Some(2024),
+            folder_path: "/media/vacuum".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert");
+    }
+    close_db(conn);
+
+    // Ejecutar vacuum no debe fallar.
+    vacuum_database(db_path.to_str().unwrap()).expect("vacuum");
+
+    // La BD debe seguir funcionando después del vacuum.
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir tras vacuum");
+    let mut repo = MediaRepository::new(&mut conn);
+    let medias = repo
+        .list(ListMediaOptions::default())
+        .expect("listar tras vacuum");
+    assert_eq!(medias.len(), 1);
+    assert_eq!(medias[0].title, "Pelicula para vacuum");
+    close_db(conn);
+}
+
+#[test]
+fn set_favorite_guarda_el_estado_exacto() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let media = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "movie".to_string(),
+            title: "Favorita".to_string(),
+            sort_title: "favorita".to_string(),
+            year: None,
+            folder_path: "/media/favorita".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert")
+    };
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_favorite(media.id, true).expect("marcar favorito");
+    }
+    let favorita = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.find_by_id(media.id)
+            .expect("buscar favorita")
+            .expect("la favorita existe")
+    };
+    assert!(favorita.is_favorite);
+
+    // Volver a marcar como favorito no debe invertir el estado.
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_favorite(media.id, true)
+            .expect("mantener favorito");
+    }
+    let favorita = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.find_by_id(media.id)
+            .expect("buscar favorita")
+            .expect("la favorita existe")
+    };
+    assert!(favorita.is_favorite);
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_favorite(media.id, false).expect("quitar favorito");
+    }
+    let no_favorita = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.find_by_id(media.id)
+            .expect("buscar favorita")
+            .expect("la favorita existe")
+    };
+    assert!(!no_favorita.is_favorite);
 }
 
 #[test]

@@ -73,6 +73,17 @@ type SharedToggleSeasonWatchedCallback = Rc<RefCell<Option<ToggleSeasonWatchedCa
 type ToggleMediaWatchedCallback = Rc<dyn Fn(bool)>;
 type SharedToggleMediaWatchedCallback = Rc<RefCell<Option<ToggleMediaWatchedCallback>>>;
 
+/// Callback para marcar/desmarcar el medio como favorito. Recibe el nuevo
+/// estado deseado.
+type ToggleFavoriteCallback = Rc<dyn Fn(bool)>;
+type SharedToggleFavoriteCallback = Rc<RefCell<Option<ToggleFavoriteCallback>>>;
+
+/// Callback para calificar un medio. Recibe la puntuación (0 = sin calificar,
+/// Callback para calificar un medio. Recibe la puntuación (0 = sin calificar,
+/// 1-5 estrellas).
+type SetRatingCallback = Rc<dyn Fn(i32)>;
+type SharedSetRatingCallback = Rc<RefCell<Option<SetRatingCallback>>>;
+
 /// Componente de vista de detalles.
 pub struct MediaDetails {
     box_: Box,
@@ -87,8 +98,12 @@ pub struct MediaDetails {
     main_button_label: String,
     synopsis_label: Label,
     tracks_button: Button,
+    favorite_button: Button,
     watched_button: Button,
     media_watched: Rc<Cell<bool>>,
+    media_favorite: Rc<Cell<bool>>,
+    media_rating: Rc<Cell<i32>>,
+    rating_stars: Vec<Rc<Button>>,
     play_button: Button,
     back_button: Button,
     vote_label: Label,
@@ -105,6 +120,8 @@ pub struct MediaDetails {
     on_toggle_file_watched: SharedToggleFileWatchedCallback,
     on_toggle_season_watched: SharedToggleSeasonWatchedCallback,
     on_toggle_media_watched: SharedToggleMediaWatchedCallback,
+    on_toggle_favorite: SharedToggleFavoriteCallback,
+    on_set_rating: SharedSetRatingCallback,
     on_choose_images: Option<ChooseImagesCallback>,
     /// Botones del menú de temporada del render actual, para tests E2E.
     season_actions: Rc<RefCell<Option<(Button, Button)>>>,
@@ -154,11 +171,57 @@ impl MediaDetails {
         tracks_button.set_tooltip_text(Some(&t("tooltip.tracks")));
         buttons_box.append(&tracks_button);
 
+        let favorite_button = Button::with_label(&t("button.favorite_add"));
+        favorite_button.add_css_class("flat-button");
+        favorite_button.add_css_class("favorite-button");
+        favorite_button.set_valign(gtk4::Align::Center);
+        favorite_button.set_tooltip_text(Some(&t("tooltip.favorite_add")));
+        buttons_box.append(&favorite_button);
+
         let watched_button = Button::with_label(&t("button.mark_watched"));
         watched_button.add_css_class("flat-button");
         watched_button.set_valign(gtk4::Align::Center);
         watched_button.set_tooltip_text(Some(&t("tooltip.mark_watched")));
         buttons_box.append(&watched_button);
+
+        // Calificación con estrellas (1-5).
+        let rating_label = Label::new(Some(&t("tooltip.rating")));
+        rating_label.set_valign(gtk4::Align::Center);
+        buttons_box.append(&rating_label);
+
+        let rating_box = Box::new(Orientation::Horizontal, 4);
+        rating_box.set_valign(gtk4::Align::Center);
+        rating_box.add_css_class("rating-stars");
+        let on_set_rating: SharedSetRatingCallback = Rc::new(RefCell::new(None));
+        let media_rating = Rc::new(Cell::new(0));
+        let mut rating_stars: Vec<Rc<Button>> = Vec::new();
+        for i in 1..=5 {
+            let star = Rc::new(Button::with_label("☆"));
+            star.add_css_class("star-button");
+            star.set_valign(gtk4::Align::Center);
+            let rating_cell = media_rating.clone();
+            let on_set_rating_cb = on_set_rating.clone();
+            let stars_for_update = rating_stars.clone();
+            star.connect_clicked(move |_| {
+                let new_rating = i;
+                rating_cell.set(new_rating);
+                // Actualizar estado visual de las estrellas.
+                for (idx, s) in stars_for_update.iter().enumerate() {
+                    let label = if (idx as i32 + 1) <= new_rating {
+                        "★"
+                    } else {
+                        "☆"
+                    };
+                    s.set_label(label);
+                }
+                if let Some(cb) = on_set_rating_cb.borrow().clone() {
+                    cb(new_rating);
+                }
+            });
+            rating_box.append(star.as_ref());
+            rating_stars.push(star);
+        }
+        buttons_box.append(&rating_box);
 
         let play_button = Button::with_label(&t("button.play"));
         play_button.add_css_class("hero-action-btn");
@@ -215,7 +278,9 @@ impl MediaDetails {
         let on_toggle_season_watched: SharedToggleSeasonWatchedCallback =
             Rc::new(RefCell::new(None));
         let on_toggle_media_watched: SharedToggleMediaWatchedCallback = Rc::new(RefCell::new(None));
+        let on_toggle_favorite: SharedToggleFavoriteCallback = Rc::new(RefCell::new(None));
         let media_watched = Rc::new(Cell::new(false));
+        let media_favorite = Rc::new(Cell::new(false));
         let season_actions: Rc<RefCell<Option<(Button, Button)>>> = Rc::new(RefCell::new(None));
 
         // Botón de marcar medio completo como visto/no visto.
@@ -235,6 +300,35 @@ impl MediaDetails {
             };
             watched_button_cb.set_label(&label);
             if let Some(cb) = on_toggle_media_watched_cb.borrow().clone() {
+                cb(new_state);
+            }
+        });
+
+        // Botón de favorito: alterna el estado local y lo comunica a la ventana
+        // principal, que es quien persiste el cambio en la BD.
+        let favorite_button_cb = favorite_button.clone();
+        let media_favorite_cb = media_favorite.clone();
+        let on_toggle_favorite_cb = on_toggle_favorite.clone();
+        let favorite_add_label = t("button.favorite_add");
+        let favorite_remove_label = t("button.favorite_remove");
+        let favorite_add_tooltip = t("tooltip.favorite_add");
+        let favorite_remove_tooltip = t("tooltip.favorite_remove");
+        favorite_button.connect_clicked(move |_| {
+            let new_state = !media_favorite_cb.get();
+            media_favorite_cb.set(new_state);
+            let (label, tooltip) = if new_state {
+                (&favorite_remove_label, &favorite_remove_tooltip)
+            } else {
+                (&favorite_add_label, &favorite_add_tooltip)
+            };
+            favorite_button_cb.set_label(label);
+            favorite_button_cb.set_tooltip_text(Some(tooltip));
+            if new_state {
+                favorite_button_cb.add_css_class("favorite-active");
+            } else {
+                favorite_button_cb.remove_css_class("favorite-active");
+            }
+            if let Some(cb) = on_toggle_favorite_cb.borrow().clone() {
                 cb(new_state);
             }
         });
@@ -295,12 +389,16 @@ impl MediaDetails {
             main_button_label: t("button.play"),
             synopsis_label,
             tracks_button,
+            favorite_button,
             play_button,
             back_button,
             vote_label,
             choose_images_button,
             watched_button,
             media_watched,
+            media_favorite,
+            media_rating,
+            rating_stars,
             season_dropdown,
             season_dropdown_model,
             content_container,
@@ -313,6 +411,8 @@ impl MediaDetails {
             on_toggle_file_watched,
             on_toggle_season_watched,
             on_toggle_media_watched,
+            on_toggle_favorite,
+            on_set_rating,
             on_choose_images: None,
             season_actions,
             translations,
@@ -382,6 +482,37 @@ impl MediaDetails {
             self.t("button.mark_watched")
         };
         self.watched_button.set_label(&watched_label);
+
+        self.media_favorite.set(media.is_favorite);
+        let favorite_label = if media.is_favorite {
+            self.t("button.favorite_remove")
+        } else {
+            self.t("button.favorite_add")
+        };
+        self.favorite_button.set_label(&favorite_label);
+        let favorite_tooltip = if media.is_favorite {
+            self.t("tooltip.favorite_remove")
+        } else {
+            self.t("tooltip.favorite_add")
+        };
+        self.favorite_button
+            .set_tooltip_text(Some(&favorite_tooltip));
+        if media.is_favorite {
+            self.favorite_button.add_css_class("favorite-active");
+        } else {
+            self.favorite_button.remove_css_class("favorite-active");
+        }
+
+        // Actualizar estrellas de calificación.
+        self.media_rating.set(media.rating);
+        for (idx, star) in self.rating_stars.iter().enumerate() {
+            let label = if (idx as i32 + 1) <= media.rating {
+                "★"
+            } else {
+                "☆"
+            };
+            star.set_label(label);
+        }
 
         let back_label = match media.parent_id {
             Some(_) if media.r#type == "anime" => self.t("back.anime"),
@@ -586,6 +717,12 @@ impl MediaDetails {
         self.watched_button.clone()
     }
 
+    /// Método público para tests E2E: devuelve el botón de favorito del medio.
+    /// El test debe activarlo después de liberar cualquier préstamo.
+    pub fn favorite_button_for_test(&self) -> Button {
+        self.favorite_button.clone()
+    }
+
     pub fn widget(&self) -> &Box {
         &self.box_
     }
@@ -654,6 +791,22 @@ impl MediaDetails {
     {
         let cb: Rc<dyn Fn(bool)> = Rc::new(f);
         *self.on_toggle_media_watched.borrow_mut() = Some(cb);
+    }
+
+    pub fn on_toggle_favorite<F>(&mut self, f: F)
+    where
+        F: Fn(bool) + 'static,
+    {
+        let cb: Rc<dyn Fn(bool)> = Rc::new(f);
+        *self.on_toggle_favorite.borrow_mut() = Some(cb);
+    }
+
+    pub fn on_set_rating<F>(&mut self, f: F)
+    where
+        F: Fn(i32) + 'static,
+    {
+        let cb: Rc<dyn Fn(i32)> = Rc::new(f);
+        *self.on_set_rating.borrow_mut() = Some(cb);
     }
 
     pub fn on_choose_images<F>(&mut self, f: F)

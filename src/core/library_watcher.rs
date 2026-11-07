@@ -89,6 +89,11 @@ impl FolderWatcher {
             let event_ok = self.rx.recv_timeout(Duration::from_millis(200));
             let now = std::time::Instant::now();
 
+            // Si el canal se cerró (watcher dropeado), terminar el bucle.
+            if event_ok.is_err() {
+                break Ok(());
+            }
+
             if let Ok(Ok(event)) = event_ok
                 && is_video_event(&event)
             {

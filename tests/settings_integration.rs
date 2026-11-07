@@ -36,10 +36,11 @@ fn temp_config() -> (Config, TempDir, TempDir) {
         db_path: db_path.to_string_lossy().to_string(),
         media_folders: Vec::new(),
         language: "es".to_string(),
-        auto_sync_metadata: false,
         default_player: "mpv".to_string(),
         default_tracks: DefaultTracks::default(),
-        playback_completion_threshold_seconds: 300,
+        theme: "dark".to_string(),
+        playback_completion_threshold_seconds: 180,
+        auto_play_next_episode: true,
     };
 
     let config = Config {
