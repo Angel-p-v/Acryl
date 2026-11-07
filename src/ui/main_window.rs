@@ -1,6 +1,7 @@
 //! Ventana principal de Acryl con GTK4 / Libadwaita.
 
 use crate::core::language::{LanguageIdentity, identity_from_track_key};
+use crate::core::library_watcher::FolderWatcher;
 use crate::core::metadata::{ImageOption, RefreshMetadataResult};
 use crate::db::media_repo::{ListMediaOptions, MediaRepository};
 use crate::db::{FileRepository, close_db, open_db};
@@ -9,7 +10,6 @@ use crate::ui::i18n::{Translations, TranslationsRef, language_label, load_transl
 use crate::ui::media_details::{MediaDetails, SeasonSelection};
 use crate::ui::media_list::MediaList;
 use crate::ui::poster_selector::{ImageChoice, PosterSelector};
-use crate::core::library_watcher::FolderWatcher;
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
 use gtk4::{
@@ -1132,6 +1132,53 @@ impl MainWindow {
                 }
             });
 
+        // Callback: calificar el medio con estrellas (1-5).
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_set_rating(move |rating| {
+                let media_id = {
+                    let w = this_clone.borrow();
+                    w.media_details.borrow().media_id()
+                };
+                let db_path = this_clone.borrow().db_path.clone();
+                let mut conn = match open_db(&db_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Error abriendo BD para calificar: {}", e);
+                        return;
+                    }
+                };
+                let mut repo = MediaRepository::new(&mut conn);
+                if let Err(e) = repo.set_rating(media_id, rating) {
+                    eprintln!("Error guardando calificación: {}", e);
+                }
+                close_db(conn);
+
+                // Refrescar la ficha con la calificación guardada.
+                let media = {
+                    let mut conn = match open_db(&db_path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Error abriendo BD para refrescar calificación: {}", e);
+                            return;
+                        }
+                    };
+                    let mut repo = MediaRepository::new(&mut conn);
+                    let m = repo.find_by_id(media_id).ok().flatten();
+                    close_db(conn);
+                    m
+                };
+                if let Some(media) = media {
+                    this_clone
+                        .borrow()
+                        .media_details
+                        .borrow_mut()
+                        .set_media_with_season(&media, None);
+                }
+            });
+
         // Callback: abrir el selector de audio y subtítulos del archivo principal.
         let this_clone = this.clone();
         this.borrow_mut()
@@ -2037,8 +2084,7 @@ impl MainWindow {
         };
         let window_mode = player_window_mode(&w.window);
         let default_tracks = w.config.borrow().default_tracks.clone();
-        let completion_threshold =
-            Some(w.config.borrow().playback_completion_threshold_seconds);
+        let completion_threshold = Some(w.config.borrow().playback_completion_threshold_seconds);
         let auto_play_next = w.config.borrow().auto_play_next_episode;
         let db_path = w.db_path.clone();
         let window = w.window.clone();
@@ -2077,14 +2123,8 @@ impl MainWindow {
                     restore_window_mode(&window_for_restore, window_mode);
 
                     // Siguiente episodio automático.
-                    if auto_play_next
-                        && let Some(media_id) = media_id_for_next
-                    {
-                        Self::schedule_next_episode(
-                            &this_for_next,
-                            media_id,
-                            db_path.clone(),
-                        );
+                    if auto_play_next && let Some(media_id) = media_id_for_next {
+                        Self::schedule_next_episode(&this_for_next, media_id, db_path.clone());
                     }
                     glib::ControlFlow::Break
                 });
@@ -2110,11 +2150,7 @@ impl MainWindow {
     /// Busca el siguiente episodio no visto de la serie/anime de `media_id` y
     /// lo programa para reproducirse tras una cuenta atrás de 5 segundos,
     /// mostrando un toast informativo.
-    fn schedule_next_episode(
-        this: &MainWindowRef,
-        media_id: i64,
-        db_path: String,
-    ) {
+    fn schedule_next_episode(this: &MainWindowRef, media_id: i64, db_path: String) {
         let w = this.borrow();
         let (is_serie, serie_id) = match w.find_media_for_next(media_id) {
             Some((is_serie, sid)) => (is_serie, sid),
@@ -2151,10 +2187,7 @@ impl MainWindow {
         let next_path_owned = next_path.clone();
         glib::timeout_add_local(Duration::from_secs(5), move || {
             if let Err(e) = Self::play_episode(&this_for_play, &next_path_owned) {
-                eprintln!(
-                    "No se pudo reproducir el siguiente episodio: {}",
-                    e
-                );
+                eprintln!("No se pudo reproducir el siguiente episodio: {}", e);
             }
             glib::ControlFlow::Break
         });
@@ -2164,10 +2197,7 @@ impl MainWindow {
     /// para buscar el siguiente episodio. Para un episodio, devuelve el
     /// `parent_id`; para una serie/anime directamente, devuelve su propio ID.
     /// Para películas, devuelve `None`.
-    fn find_media_for_next(
-        &self,
-        media_id: i64,
-    ) -> Option<(bool, i64)> {
+    fn find_media_for_next(&self, media_id: i64) -> Option<(bool, i64)> {
         let mut conn = open_db(&self.db_path).ok()?;
         let mut repo = MediaRepository::new(&mut conn);
         let media = repo.find_by_id(media_id).ok().flatten()?;

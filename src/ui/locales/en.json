@@ -144,6 +144,7 @@
   "tooltip.favorite_remove": "Remove from favorites",
   "tooltip.mark_watched": "Mark episode as watched",
   "tooltip.mark_unwatched": "Mark episode as unwatched",
+  "tooltip.rating": "Rating (1-5 stars)",
 
   "track.title": "Audio and subtitle tracks",
   "track.heading": "Audio and subtitle tracks",

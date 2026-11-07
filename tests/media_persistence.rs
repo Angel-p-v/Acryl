@@ -442,6 +442,99 @@ fn list_ordena_por_anio_y_tipo() {
 }
 
 #[test]
+fn set_rating_guarda_la_calificacion() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    let media = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "movie".to_string(),
+            title: "Pelicula para calificar".to_string(),
+            sort_title: "pelicula para calificar".to_string(),
+            year: Some(2024),
+            folder_path: "/media/pelicula".to_string(),
+            parent_id: None,
+        })
+        .expect("upsert")
+    };
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_rating(media.id, 5).expect("calificar 5");
+    }
+    let rating = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.get_rating(media.id).expect("obtener rating")
+    };
+    assert_eq!(rating, 5);
+
+    // Volver a calificar a 5 no debe sumar, debe reemplazar.
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_rating(media.id, 5).expect("calificar 5 otra vez");
+    }
+    let rating = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.get_rating(media.id).expect("obtener rating")
+    };
+    assert_eq!(rating, 5);
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.set_rating(media.id, 3).expect("calificar 3");
+    }
+    let rating = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.get_rating(media.id).expect("obtener rating")
+    };
+    assert_eq!(rating, 3);
+}
+
+#[test]
+fn list_ordena_por_rating() {
+    let (db_path, _dir) = temp_db();
+    let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");
+
+    {
+        let mut repo = MediaRepository::new(&mut conn);
+        for (title, _rating) in [("Baja", 1), ("Media", 3), ("Alta", 5), ("Sin calificar", 0)] {
+            repo.upsert(&MediaInput {
+                r#type: "movie".to_string(),
+                title: title.to_string(),
+                sort_title: title.to_string(),
+                year: Some(2024),
+                folder_path: format!("/media/{}", title.to_lowercase()),
+                parent_id: None,
+            })
+            .expect("upsert");
+        }
+        // Establecer calificaciones explícitas.
+        let ids: Vec<i64> = repo
+            .list(ListMediaOptions::default())
+            .expect("listar")
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        for (id, rating) in ids.into_iter().zip([1, 3, 5, 0]) {
+            repo.set_rating(id, rating).expect("calificar");
+        }
+    }
+
+    let by_rating = {
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.list(ListMediaOptions {
+            order_by: Some("rating".to_string()),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .expect("listar por rating")
+    };
+    let ratings: Vec<i32> = by_rating.iter().map(|m| m.rating).collect();
+    assert_eq!(ratings, vec![5, 3, 1, 0]);
+}
+
+#[test]
 fn set_favorite_guarda_el_estado_exacto() {
     let (db_path, _dir) = temp_db();
     let mut conn = open_db(db_path.to_str().unwrap()).expect("abrir BD");

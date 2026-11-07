@@ -78,6 +78,12 @@ type SharedToggleMediaWatchedCallback = Rc<RefCell<Option<ToggleMediaWatchedCall
 type ToggleFavoriteCallback = Rc<dyn Fn(bool)>;
 type SharedToggleFavoriteCallback = Rc<RefCell<Option<ToggleFavoriteCallback>>>;
 
+/// Callback para calificar un medio. Recibe la puntuación (0 = sin calificar,
+/// Callback para calificar un medio. Recibe la puntuación (0 = sin calificar,
+/// 1-5 estrellas).
+type SetRatingCallback = Rc<dyn Fn(i32)>;
+type SharedSetRatingCallback = Rc<RefCell<Option<SetRatingCallback>>>;
+
 /// Componente de vista de detalles.
 pub struct MediaDetails {
     box_: Box,
@@ -96,6 +102,8 @@ pub struct MediaDetails {
     watched_button: Button,
     media_watched: Rc<Cell<bool>>,
     media_favorite: Rc<Cell<bool>>,
+    media_rating: Rc<Cell<i32>>,
+    rating_stars: Vec<Rc<Button>>,
     play_button: Button,
     back_button: Button,
     vote_label: Label,
@@ -113,6 +121,7 @@ pub struct MediaDetails {
     on_toggle_season_watched: SharedToggleSeasonWatchedCallback,
     on_toggle_media_watched: SharedToggleMediaWatchedCallback,
     on_toggle_favorite: SharedToggleFavoriteCallback,
+    on_set_rating: SharedSetRatingCallback,
     on_choose_images: Option<ChooseImagesCallback>,
     /// Botones del menú de temporada del render actual, para tests E2E.
     season_actions: Rc<RefCell<Option<(Button, Button)>>>,
@@ -174,6 +183,45 @@ impl MediaDetails {
         watched_button.set_valign(gtk4::Align::Center);
         watched_button.set_tooltip_text(Some(&t("tooltip.mark_watched")));
         buttons_box.append(&watched_button);
+
+        // Calificación con estrellas (1-5).
+        let rating_label = Label::new(Some(&t("tooltip.rating")));
+        rating_label.set_valign(gtk4::Align::Center);
+        buttons_box.append(&rating_label);
+
+        let rating_box = Box::new(Orientation::Horizontal, 4);
+        rating_box.set_valign(gtk4::Align::Center);
+        rating_box.add_css_class("rating-stars");
+        let on_set_rating: SharedSetRatingCallback = Rc::new(RefCell::new(None));
+        let media_rating = Rc::new(Cell::new(0));
+        let mut rating_stars: Vec<Rc<Button>> = Vec::new();
+        for i in 1..=5 {
+            let star = Rc::new(Button::with_label("☆"));
+            star.add_css_class("star-button");
+            star.set_valign(gtk4::Align::Center);
+            let rating_cell = media_rating.clone();
+            let on_set_rating_cb = on_set_rating.clone();
+            let stars_for_update = rating_stars.clone();
+            star.connect_clicked(move |_| {
+                let new_rating = i;
+                rating_cell.set(new_rating);
+                // Actualizar estado visual de las estrellas.
+                for (idx, s) in stars_for_update.iter().enumerate() {
+                    let label = if (idx as i32 + 1) <= new_rating {
+                        "★"
+                    } else {
+                        "☆"
+                    };
+                    s.set_label(label);
+                }
+                if let Some(cb) = on_set_rating_cb.borrow().clone() {
+                    cb(new_rating);
+                }
+            });
+            rating_box.append(star.as_ref());
+            rating_stars.push(star);
+        }
+        buttons_box.append(&rating_box);
 
         let play_button = Button::with_label(&t("button.play"));
         play_button.add_css_class("hero-action-btn");
@@ -349,6 +397,8 @@ impl MediaDetails {
             watched_button,
             media_watched,
             media_favorite,
+            media_rating,
+            rating_stars,
             season_dropdown,
             season_dropdown_model,
             content_container,
@@ -362,6 +412,7 @@ impl MediaDetails {
             on_toggle_season_watched,
             on_toggle_media_watched,
             on_toggle_favorite,
+            on_set_rating,
             on_choose_images: None,
             season_actions,
             translations,
@@ -450,6 +501,17 @@ impl MediaDetails {
             self.favorite_button.add_css_class("favorite-active");
         } else {
             self.favorite_button.remove_css_class("favorite-active");
+        }
+
+        // Actualizar estrellas de calificación.
+        self.media_rating.set(media.rating);
+        for (idx, star) in self.rating_stars.iter().enumerate() {
+            let label = if (idx as i32 + 1) <= media.rating {
+                "★"
+            } else {
+                "☆"
+            };
+            star.set_label(label);
         }
 
         let back_label = match media.parent_id {
@@ -737,6 +799,14 @@ impl MediaDetails {
     {
         let cb: Rc<dyn Fn(bool)> = Rc::new(f);
         *self.on_toggle_favorite.borrow_mut() = Some(cb);
+    }
+
+    pub fn on_set_rating<F>(&mut self, f: F)
+    where
+        F: Fn(i32) + 'static,
+    {
+        let cb: Rc<dyn Fn(i32)> = Rc::new(f);
+        *self.on_set_rating.borrow_mut() = Some(cb);
     }
 
     pub fn on_choose_images<F>(&mut self, f: F)

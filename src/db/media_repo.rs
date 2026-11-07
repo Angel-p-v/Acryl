@@ -425,6 +425,7 @@ impl<'a> MediaRepository<'a> {
             "recent" => "ORDER BY updated_at DESC",
             "year" => "ORDER BY year IS NULL, year DESC, sort_title ASC",
             "type" => "ORDER BY type ASC, sort_title ASC",
+            "rating" => "ORDER BY rating DESC, sort_title ASC",
             _ => "ORDER BY sort_title ASC",
         };
         sql.push(' ');
@@ -815,6 +816,7 @@ impl<'a> MediaRepository<'a> {
             "recent" => "ORDER BY m.updated_at DESC",
             "year" => "ORDER BY m.year IS NULL, m.year DESC, m.sort_title ASC",
             "type" => "ORDER BY m.type ASC, m.sort_title ASC",
+            "rating" => "ORDER BY m.rating DESC, m.sort_title ASC",
             _ => "ORDER BY m.sort_title ASC",
         };
         sql.push(' ');

@@ -144,6 +144,7 @@
   "tooltip.favorite_remove": "Quitar de favoritos",
   "tooltip.mark_watched": "Marcar episodio como visto",
   "tooltip.mark_unwatched": "Marcar episodio como no visto",
+  "tooltip.rating": "Calificación (1-5 estrellas)",
 
   "track.title": "Pistas de audio y subtítulos",
   "track.heading": "Pistas de audio y subtítulos",
