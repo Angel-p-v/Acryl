@@ -1230,41 +1230,66 @@ impl SettingsView {
             let config = config_backup.clone();
             let config_path = config_path_backup.clone();
             let window = window_backup.clone();
-            let window_cb = window.clone();
+            let window_for_dialog = window.clone();
             let translations = translations_backup.clone();
             let status = data_status_backup.clone();
             dialog.save(
-                Some(&window),
+                Some(&window_for_dialog),
                 None::<&gio::Cancellable>,
-                move |result| match result {
-                    Ok(file) => {
-                        let Some(path) = file.path() else {
-                            return;
-                        };
-                        let config = crate::config::Config {
-                            path: config_path.clone(),
-                            inner: config.borrow().clone(),
-                        };
-                        match config.backup_db_to(&path) {
-                            Ok(()) => {
-                                let message = translations
-                                    .borrow()
-                                    .t("status.backup_done_format")
-                                    .replacen("{}", &path.display().to_string(), 1);
-                                status.set_label(&message);
-                                status.set_visible(true);
+                move |result| {
+                    // Clonar valores para poder usarlos en el manejo de pánico
+                    // fuera del catch_unwind (que es FnOnce y permite mover).
+                    let window_for_panic = window.clone();
+                    let translations_for_panic = translations.clone();
+                    let catch_result = std::panic::catch_unwind(
+                        std::panic::AssertUnwindSafe(move || match result {
+                            Ok(file) => {
+                                let Some(path) = file.path() else {
+                                    return;
+                                };
+                                let config = crate::config::Config {
+                                    path: config_path.clone(),
+                                    inner: config.borrow().clone(),
+                                };
+                                match config.backup_db_to(&path) {
+                                    Ok(()) => {
+                                        let message = translations
+                                            .borrow()
+                                            .t("status.backup_done_format")
+                                            .replacen("{}", &path.display().to_string(), 1);
+                                        status.set_label(&message);
+                                        status.set_visible(true);
+                                    }
+                                    Err(error) => {
+                                        eprintln!(
+                                            "No se pudo guardar la copia de seguridad: {}",
+                                            error
+                                        );
+                                        let title =
+                                            translations.borrow().t("error.backup.title");
+                                        show_alert(&window, &title, &error.to_string());
+                                    }
+                                }
                             }
                             Err(error) => {
-                                eprintln!("No se pudo guardar la copia de seguridad: {}", error);
-                                let title = translations.borrow().t("error.backup.title");
-                                show_alert(&window_cb, &title, &error.to_string());
+                                if !error.matches(gio::IOErrorEnum::Cancelled) {
+                                    eprintln!(
+                                        "No se pudo elegir el destino del backup: {}",
+                                        error
+                                    );
+                                }
                             }
-                        }
-                    }
-                    Err(error) => {
-                        if !error.matches(gio::IOErrorEnum::Cancelled) {
-                            eprintln!("No se pudo elegir el destino del backup: {}", error);
-                        }
+                        }),
+                    );
+                    if let Err(_panic) = catch_result {
+                        eprintln!("Pánico inesperado en backup.");
+                        let title =
+                            translations_for_panic.borrow().t("error.backup.title");
+                        show_alert(
+                            &window_for_panic,
+                            &title,
+                            "Error interno inesperado al guardar la copia de seguridad.",
+                        );
                     }
                 },
             );
@@ -1295,75 +1320,115 @@ impl SettingsView {
             let translations = translations_restore.clone();
             let status = data_status_restore.clone();
             let folder_manager = folder_manager_restore.clone();
+            // Clonar valores necesarios para el manejo de pánico fuera del
+            // catch_unwind.
+            let translations_for_panic = translations.clone();
+            let window_for_panic = window_for_dialog.clone();
             dialog.open(
                 Some(&window_for_dialog),
                 None::<&gio::Cancellable>,
-                move |result| match result {
-                    Ok(file) => {
-                        let Some(path) = file.path() else {
-                            return;
-                        };
-                        let message = translations.borrow().t("dialog.restore_db.confirm.title");
-                        let detail = translations.borrow().t("dialog.restore_db.confirm.detail");
-                        let cancel = translations.borrow().t("button.cancel");
-                        let restore = translations.borrow().t("dialog.restore_db.confirm.restore");
-                        let confirm = gtk4::AlertDialog::builder()
-                            .modal(true)
-                            .message(&message)
-                            .detail(&detail)
-                            .buttons([cancel.as_str(), restore.as_str()])
-                            .cancel_button(0)
-                            .default_button(0)
-                            .build();
-
-                        let config = config.clone();
-                        let config_path = config_path.clone();
-                        let translations = translations.clone();
-                        let status = status.clone();
-                        let folder_manager = folder_manager.clone();
-                        let window_for_choose = window.clone();
-                        let window_for_alert = window.clone();
-                        confirm.choose(
-                            Some(&window_for_choose),
-                            None::<&gio::Cancellable>,
-                            move |response| {
-                                if !matches!(response, Ok(1)) {
+                move |result| {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                        match result {
+                            Ok(file) => {
+                                let Some(path) = file.path() else {
                                     return;
-                                }
-                                let config = crate::config::Config {
-                                    path: config_path.clone(),
-                                    inner: config.borrow().clone(),
                                 };
-                                match config.restore_db_from(&path) {
-                                    Ok(()) => {
-                                        status.set_label(
-                                            &translations.borrow().t("status.restore_done"),
-                                        );
-                                        status.set_visible(true);
-                                        // La base de datos cambió: recargar la
-                                        // biblioteca desde el disco.
-                                        let callback =
-                                            folder_manager.on_library_changed.borrow().clone();
-                                        if let Some(callback) = callback {
-                                            callback();
+                                let message =
+                                    translations.borrow().t("dialog.restore_db.confirm.title");
+                                let detail =
+                                    translations.borrow().t("dialog.restore_db.confirm.detail");
+                                let cancel = translations.borrow().t("button.cancel");
+                                let restore =
+                                    translations.borrow().t("dialog.restore_db.confirm.restore");
+                                let confirm = gtk4::AlertDialog::builder()
+                                    .modal(true)
+                                    .message(&message)
+                                    .detail(&detail)
+                                    .buttons([cancel.as_str(), restore.as_str()])
+                                    .cancel_button(0)
+                                    .default_button(0)
+                                    .build();
+
+                                let config = config.clone();
+                                let config_path = config_path.clone();
+                                let translations = translations.clone();
+                                let status = status.clone();
+                                let folder_manager = folder_manager.clone();
+                                let window_for_choose = window.clone();
+                                let window_for_alert = window.clone();
+                                confirm.choose(
+                                    Some(&window_for_choose),
+                                    None::<&gio::Cancellable>,
+                                    move |response| {
+                                        if !matches!(response, Ok(1)) {
+                                            return;
                                         }
-                                    }
-                                    Err(error) => {
-                                        eprintln!(
-                                            "No se pudo restaurar la copia de seguridad: {}",
-                                            error
-                                        );
-                                        let title = translations.borrow().t("error.restore.title");
-                                        show_alert(&window_for_alert, &title, &error.to_string());
-                                    }
+                                        let config = crate::config::Config {
+                                            path: config_path.clone(),
+                                            inner: config.borrow().clone(),
+                                        };
+                                        match config.restore_db_from(&path) {
+                                            Ok(()) => {
+                                                status.set_label(
+                                                    &translations
+                                                        .borrow()
+                                                        .t("status.restore_done"),
+                                                );
+                                                status.set_visible(true);
+                                                // La base de datos cambió:
+                                                // recargar la biblioteca desde
+                                                // el disco.
+                                                let callback =
+                                                    folder_manager
+                                                        .on_library_changed
+                                                        .borrow()
+                                                        .clone();
+                                                if let Some(callback) = callback {
+                                                    callback();
+                                                }
+                                            }
+                                            Err(error) => {
+                                                eprintln!(
+                                                    "No se pudo restaurar la copia de seguridad: {}",
+                                                    error
+                                                );
+                                                let title =
+                                                    translations
+                                                        .borrow()
+                                                        .t("error.restore.title");
+                                                show_alert(
+                                                    &window_for_alert,
+                                                    &title,
+                                                    &error.to_string(),
+                                                );
+                                            }
+                                        }
+                                    },
+                                );
+                            }
+                            Err(error) => {
+                                if !error.matches(gio::IOErrorEnum::Cancelled) {
+                                    eprintln!(
+                                        "No se pudo elegir el backup a restaurar: {}",
+                                        error
+                                    );
                                 }
-                            },
-                        );
-                    }
-                    Err(error) => {
-                        if !error.matches(gio::IOErrorEnum::Cancelled) {
-                            eprintln!("No se pudo elegir el backup a restaurar: {}", error);
+                            }
                         }
+                    }));
+                    if let Err(panic) = result {
+                        eprintln!(
+                            "Pánico inesperado en el callback de restaurar backup: {:?}",
+                            panic
+                        );
+                        let title =
+                            translations_for_panic.borrow().t("error.restore.title");
+                        show_alert(
+                            &window_for_panic,
+                            &title,
+                            "Error interno inesperado al restaurar la copia de seguridad.",
+                        );
                     }
                 },
             );

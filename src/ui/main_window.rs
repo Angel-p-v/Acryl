@@ -883,6 +883,7 @@ impl MainWindow {
                 let query = entry.text().to_string();
                 if query.is_empty() {
                     Self::load_media(&this_clone);
+                    this_clone.borrow().show_list();
                 } else {
                     Self::filter_media_by_text(&this_clone, &query);
                 }
@@ -1593,19 +1594,12 @@ impl MainWindow {
             w.media_list.append_media(&media);
         }
 
-        let visible = w.stack.visible_child_name().map(|name| name.to_string());
-        if matches!(visible.as_deref(), Some("list") | Some("empty")) {
-            let filtered = w.current_category.borrow().is_some()
-                || w.current_favorite_filter.borrow().is_some()
-                || w.current_watched_filter.borrow().is_some();
-            let total_shown = w.media_offset;
-            if total_shown == 0 && !filtered {
-                w.stack.set_visible_child_name("empty");
-            } else {
-                w.stack.set_visible_child_name("list");
-            }
-        }
-
+        // Nota: no cambiamos el Stack aquí. `show_list()` es la única
+        // responsable de decidir si mostrar "list" o "empty", y se llama
+        // después de cada `load_media()`. Tener la lógica aquí y en
+        // `show_list()` causaba inconsistencias: al quitar un filtro de
+        // categoría (sin favoritos ni visto activos), el Stack se quedaba
+        // atascado en "empty" aunque hubiera medios cargados.
         w.update_filter_bar();
         Self::update_library_status(&w);
     }
@@ -1944,21 +1938,15 @@ impl MainWindow {
 
         let mut w = this.borrow_mut();
         let count = all_media.len();
-        let is_empty = all_media.is_empty();
         w.media_count = count;
         w.media_list.set_media(all_media);
 
-        let filtered = w.current_category.borrow().is_some()
-            || w.current_favorite_filter.borrow().is_some()
-            || w.current_watched_filter.borrow().is_some();
-        if is_empty && !filtered {
-            w.stack.set_visible_child_name("empty");
-        } else {
-            w.stack.set_visible_child_name("list");
-        }
-
+        // `show_list()` se encarga de decidir si mostrar "list" o "empty".
+        // No cambiamos el Stack aquí para evitar inconsistencias al quitar
+        // filtros de categoría sin favoritos ni visto activos.
         w.update_filter_bar();
         Self::update_library_status(&w);
+        w.show_list();
     }
 
     /// Busca medios por texto en la base de datos (título contiene el query).
@@ -2482,6 +2470,11 @@ impl MainWindow {
 
         if visible.as_deref() == Some("details") && media_id > 0 {
             this.borrow().show_details(media_id, season);
+        } else {
+            // Si no volvemos a detalles, asegurar que la lista se muestre
+            // correctamente (evita quedar atascado en "empty" tras quitar
+            // filtros de categoría sin favoritos ni visto activos).
+            this.borrow().show_list();
         }
     }
 
