@@ -112,8 +112,9 @@ impl HistoryView {
         // Rejilla de tarjetas.
         let list = FlowBox::new();
         list.add_css_class("history-grid");
-        list.set_hexpand(true);
+        list.set_hexpand(false);
         list.set_valign(gtk4::Align::Start);
+        list.set_halign(gtk4::Align::Start);
         list.set_homogeneous(false);
         list.set_selection_mode(gtk4::SelectionMode::None);
         list.set_row_spacing(12);
