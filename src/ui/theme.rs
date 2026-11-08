@@ -255,6 +255,21 @@ pub fn install_theme_css(mode: ThemeMode) {
     install_theme_css_inner(&c, mode);
 }
 
+/// Reglas que anulan el realce de fondo que GTK/libadwaita pinta al pasar el
+/// ratón por los hijos de `GtkGridView` y `GtkFlowBox`.
+///
+/// libadwaita define `gridview > child.activatable:hover` con más
+/// especificidad que las reglas de las tarjetas, así que sin esta anulación
+/// aparece un halo translúcido más claro alrededor de cada tarjeta.
+fn hover_child_reset_css() -> &'static str {
+    "gridview > child:hover,\n\
+     gridview > child.activatable:hover,\n\
+     gridview > child:selected:hover,\n\
+     gridview > child.activatable:selected:hover { background-color: transparent; background-image: none; }\n\
+     flowboxchild:hover,\n\
+     flowbox > flowboxchild:hover { background-color: transparent; background-image: none; }\n"
+}
+
 fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let provider = CssProvider::new();
@@ -276,9 +291,13 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 "button {{ background-color: {}; color: {}; border: 1px solid {}; border-radius: {}; padding: 8px 16px; font-weight: 600; min-height: 36px; transition: all {}; }}\n",
                 c.card, c.text_primary, c.border, radius::MEDIUM, transition::FAST,
             ));
+        /* GTK/libadwaita define `button:hover` con más especificidad que
+         * `button`, así que si aquí no se declara el fondo, el tema pinta su
+         * propio realce al pasar el ratón. Se fija el fondo normal para que
+         * el hover solo cambie el borde. */
         css.push_str(&format!(
-            "button:hover {{ border-color: {}; }}\n",
-            c.border_hover,
+            "button:hover {{ background-color: {}; background-image: none; border-color: {}; }}\n",
+            c.card, c.border_hover,
         ));
         css.push_str(&format!(
             "button:active {{ background-color: {}; border-color: {}; color: {}; }}\n",
@@ -289,7 +308,7 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.text_secondary,
             ));
         css.push_str(&format!(
-            "button.flat:hover {{ color: {}; border-radius: {}; }}\n",
+            "button.flat:hover {{ background-color: transparent; background-image: none; color: {}; border-radius: {}; }}\n",
             c.text_primary,
             radius::SMALL,
         ));
@@ -298,7 +317,10 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
             "button.primary {{ background-color: {}; color: {}; border: none; }}\n",
             c.btn_primary_bg, c.btn_primary_text,
         ));
-        css.push_str("button.primary:hover { }\n");
+        css.push_str(&format!(
+            "button.primary:hover {{ background-color: {}; background-image: none; }}\n",
+            c.btn_primary_bg,
+        ));
         css.push_str(&format!(
             "button.primary:active {{ background-color: {}; }}\n",
             c.accent_active,
@@ -306,7 +328,9 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
         css.push_str(
             "button.danger { background-color: #dc2626; color: #ffffff; border: none; }\n",
         );
-        css.push_str("button.danger:hover { }\n");
+        css.push_str(
+            "button.danger:hover { background-color: #dc2626; background-image: none; }\n",
+        );
         css.push_str("scrolledwindow { background-color: transparent; }\n");
         css.push_str("viewport { background-color: transparent; }\n");
         css.push_str("flowbox { background-color: transparent; }\n");
@@ -322,7 +346,7 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
         ));
         css.push_str(&format!(
             ".history-grid .media-card:hover {{ background-color: {}; }}\n",
-            c.surface,
+            c.card,
         ));
 
         /* Título del historial: al pasar el cursor se resalta para indicar
@@ -370,7 +394,7 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 ".logo-button { background-color: transparent; border: none; padding: 4px 8px; min-height: 0; }\n",
             );
         css.push_str(
-                ".logo-button:hover { background-color: transparent; border: none; transform: none; }\n",
+                ".logo-button:hover { background-color: transparent; background-image: none; border: none; transform: none; }\n",
             );
 
         /* Barra secundaria (nivel 2). */
@@ -385,8 +409,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.card, c.border, c.text_secondary,
             ));
         css.push_str(&format!(
-            ".filter-chip:hover {{ border-color: {}; color: {}; }}\n",
-            c.border_hover, c.text_primary,
+            ".filter-chip:hover {{ background-color: {}; border-color: {}; color: {}; }}\n",
+            c.card, c.border_hover, c.text_primary,
         ));
 
         /* Píldora "Continuar viendo" */
@@ -395,8 +419,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.accent, c.accent, c.btn_primary_text,
             ));
         css.push_str(&format!(
-            ".continue-button:hover {{ border-color: {}; }}\n",
-            c.accent,
+            ".continue-button:hover {{ background-color: {}; border-color: {}; }}\n",
+            c.accent, c.accent,
         ));
 
         /* Botones de modo de vista (Grid/Lista) */
@@ -405,8 +429,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.card, c.border, c.text_secondary, radius::SMALL,
             ));
         css.push_str(&format!(
-            ".view-mode-button:hover {{ border-color: {}; color: {}; }}\n",
-            c.border_hover, c.text_primary,
+            ".view-mode-button:hover {{ background-color: {}; border-color: {}; color: {}; }}\n",
+            c.card, c.border_hover, c.text_primary,
         ));
 
         /* Selector de orden de la galería */
@@ -418,7 +442,7 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.text_secondary, radius::SMALL,
             ));
         css.push_str(&format!(
-            ".nav-button:hover {{ color: {}; }}\n",
+            ".nav-button:hover {{ background-color: transparent; color: {}; }}\n",
             c.text_primary,
         ));
         css.push_str(&format!(
@@ -448,8 +472,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.card, c.border, c.text_secondary,
             ));
         css.push_str(&format!(
-            ".category-chip:hover {{ border-color: {}; color: {}; }}\n",
-            c.border_hover, c.text_primary,
+            ".category-chip:hover {{ background-color: {}; border-color: {}; color: {}; }}\n",
+            c.card, c.border_hover, c.text_primary,
         ));
         css.push_str(&format!(
             ".category-chip.active {{ background-color: {}; border-color: {}; color: {}; }}\n",
@@ -462,8 +486,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.card, c.border, radius::LARGE, transition::NORMAL,
             ));
         css.push_str(&format!(
-            ".media-card:hover {{ border-color: {}; transform: scale(1.03); }}\n",
-            c.border_hover,
+            ".media-card:hover {{ background-color: {}; background-image: none; border-color: {}; transform: scale(1.03); }}\n",
+            c.card, c.border_hover,
         ));
         /* Anular el fondo de acento que GTK4 aplica por defecto al ítem
          * seleccionado de un GtkGridView/GtkListView. */
@@ -471,6 +495,12 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
             ".media-card:selected {{ background-color: {}; border-color: {}; }}\n",
             c.card, c.border,
         ));
+        /* GTK/libadwaita pinta un realce translúcido en el hijo del
+         * GtkGridView al pasar el ratón (`gridview > child.activatable:hover`).
+         * Como la tarjeta deja márgenes dentro de ese hijo, el realce se ve
+         * como un halo más claro alrededor. Se anula explícitamente con la
+         * misma especificidad que la regla del tema. */
+        css.push_str(hover_child_reset_css());
 
         /* Póster de medio */
         css.push_str(&format!(
@@ -509,8 +539,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.accent, c.btn_primary_text, radius::SMALL,
             ));
         css.push_str(&format!(
-            ".episode-play-btn:hover {{ background-color: {}; }}\n",
-            c.accent_hover,
+            ".episode-play-btn:hover {{ background-color: {}; background-image: none; }}\n",
+            c.accent,
         ));
 
         /* Botón de marcar episodio como visto/no visto */
@@ -519,7 +549,7 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.text_secondary, c.border, radius::SMALL,
             ));
         css.push_str(&format!(
-            ".episode-watched-btn:hover {{ color: {}; border-color: {}; }}\n",
+            ".episode-watched-btn:hover {{ background-color: transparent; color: {}; border-color: {}; }}\n",
             c.text_primary, c.border_hover,
         ));
         css.push_str(&format!(
@@ -554,8 +584,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.card, c.border, radius::MEDIUM, transition::FAST,
             ));
         css.push_str(&format!(
-            ".episode-card:hover {{ border-color: {}; transform: scale(1.02); }}\n",
-            c.border_hover,
+            ".episode-card:hover {{ background-color: {}; border-color: {}; transform: scale(1.02); }}\n",
+            c.card, c.border_hover,
         ));
         css.push_str(&format!(
             ".episode-card:selected {{ background-color: {}; border-color: {}; }}\n",
@@ -602,16 +632,16 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
             c.btn_primary_bg, c.btn_primary_text,
         ));
         css.push_str(&format!(
-            ".hero-action-btn.primary:hover {{ background-color: {}; }}\n",
-            c.accent_hover,
+            ".hero-action-btn.primary:hover {{ background-color: {}; background-image: none; }}\n",
+            c.btn_primary_bg,
         ));
         css.push_str(&format!(
             ".hero-action-btn.secondary {{ background-color: {}; color: {}; border: 1px solid {}; }}\n",
             c.surface, c.text_secondary, c.border,
         ));
         css.push_str(&format!(
-            ".hero-action-btn.secondary:hover {{ border-color: {}; background-color: {}; }}\n",
-            c.border_hover, c.card,
+            ".hero-action-btn.secondary:hover {{ border-color: {}; background-color: {}; background-image: none; }}\n",
+            c.border_hover, c.surface,
         ));
 
         /* Dropdown de temporada */
@@ -645,7 +675,7 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
             c.btn_secondary_text,
         ));
         css.push_str(&format!(
-            ".flat-button:hover {{ color: {}; border-radius: {}; }}\n",
+            ".flat-button:hover {{ background-color: transparent; background-image: none; color: {}; border-radius: {}; }}\n",
             c.text_primary,
             radius::SMALL,
         ));
@@ -700,5 +730,17 @@ mod tests {
         // Cualquier valor distinto de "light" se interpreta como oscuro.
         assert_eq!(ThemeMode::from_config("otro"), ThemeMode::Dark);
         assert_eq!(ThemeMode::from_config(""), ThemeMode::Dark);
+    }
+
+    #[test]
+    fn hover_child_reset_css_neutraliza_el_realce_del_tema() {
+        let css = hover_child_reset_css();
+        // Debe cubrir los selectores exactos de libadwaita para GtkGridView.
+        assert!(css.contains("gridview > child.activatable:hover"));
+        assert!(css.contains("gridview > child.activatable:selected:hover"));
+        // Y también los hijos de GtkFlowBox (historial y episodios).
+        assert!(css.contains("flowboxchild:hover"));
+        // La neutralización debe fijar el fondo transparente.
+        assert!(css.contains("background-color: transparent"));
     }
 }
