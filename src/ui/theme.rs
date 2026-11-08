@@ -270,6 +270,21 @@ fn hover_child_reset_css() -> &'static str {
      flowbox > flowboxchild:hover { background-color: transparent; background-image: none; }\n"
 }
 
+/// Anillo interior blanco que marca el hover en los botones de acento sin
+/// alterar su fondo.
+const HOVER_RING_ON_ACCENT: &str = "inset 0 0 0 2px rgba(255, 255, 255, 0.55)";
+
+/// Hover de los botones planos: conserva el fondo transparente y dibuja un
+/// anillo interior con el color de acento como señal de interactividad.
+fn flat_button_hover_css(c: &ThemeColors) -> String {
+    format!(
+        ".flat-button:hover {{ background-color: transparent; background-image: none; color: {}; border-radius: {}; box-shadow: inset 0 0 0 1px {}; }}\n",
+        c.text_primary,
+        radius::SMALL,
+        c.border_hover,
+    )
+}
+
 fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let provider = CssProvider::new();
@@ -294,9 +309,10 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
         /* GTK/libadwaita define `button:hover` con más especificidad que
          * `button`, así que si aquí no se declara el fondo, el tema pinta su
          * propio realce al pasar el ratón. Se fija el fondo normal para que
-         * el hover solo cambie el borde. */
+         * el hover solo cambie el borde. Los botones de acento y destructivos
+         * se excluyen para conservar su fondo propio. */
         css.push_str(&format!(
-            "button:hover {{ background-color: {}; background-image: none; border-color: {}; }}\n",
+            "button:not(.suggested-action):not(.destructive-action):hover {{ background-color: {}; background-image: none; border-color: {}; }}\n",
             c.card, c.border_hover,
         ));
         css.push_str(&format!(
@@ -308,9 +324,10 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.text_secondary,
             ));
         css.push_str(&format!(
-            "button.flat:hover {{ background-color: transparent; background-image: none; color: {}; border-radius: {}; }}\n",
+            "button.flat:hover {{ background-color: transparent; background-image: none; color: {}; border-radius: {}; box-shadow: inset 0 0 0 1px {}; }}\n",
             c.text_primary,
             radius::SMALL,
+            c.border_hover,
         ));
         css.push_str(&format!("button.flat:active {{ color: {}; }}\n", c.accent,));
         css.push_str(&format!(
@@ -331,6 +348,12 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
         css.push_str(
             "button.danger:hover { background-color: #dc2626; background-image: none; }\n",
         );
+        /* Los botones de acento de libadwaita (p. ej. Guardar) conservan su
+         * fondo al pasar el ratón; el anillo interior marca el hover. */
+        css.push_str(&format!(
+            "button.suggested-action:hover {{ box-shadow: {}; }}\n",
+            HOVER_RING_ON_ACCENT,
+        ));
         css.push_str("scrolledwindow { background-color: transparent; }\n");
         css.push_str("viewport { background-color: transparent; }\n");
         css.push_str("flowbox { background-color: transparent; }\n");
@@ -442,8 +465,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.text_secondary, radius::SMALL,
             ));
         css.push_str(&format!(
-            ".nav-button:hover {{ background-color: transparent; color: {}; }}\n",
-            c.text_primary,
+            ".nav-button:hover {{ background-color: transparent; color: {}; box-shadow: inset 0 0 0 1px {}; }}\n",
+            c.text_primary, c.border_hover,
         ));
         css.push_str(&format!(
             ".nav-button.active {{ background-color: {}; color: {}; }}\n",
@@ -538,9 +561,11 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 ".episode-play-btn {{ background-color: {}; color: {}; border: none; border-radius: {}; font-weight: 700; min-width: 72px; min-height: 30px; }}\n",
                 c.accent, c.btn_primary_text, radius::SMALL,
             ));
+        /* El fondo se mantiene para no reintroducir el realce; el anillo
+         * interior es la señal de que el botón es interactivo. */
         css.push_str(&format!(
-            ".episode-play-btn:hover {{ background-color: {}; background-image: none; }}\n",
-            c.accent,
+            ".episode-play-btn:hover {{ background-color: {}; background-image: none; box-shadow: {}; }}\n",
+            c.accent, HOVER_RING_ON_ACCENT,
         ));
 
         /* Botón de marcar episodio como visto/no visto */
@@ -632,8 +657,8 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
             c.btn_primary_bg, c.btn_primary_text,
         ));
         css.push_str(&format!(
-            ".hero-action-btn.primary:hover {{ background-color: {}; background-image: none; }}\n",
-            c.btn_primary_bg,
+            ".hero-action-btn.primary:hover {{ background-color: {}; background-image: none; box-shadow: {}; }}\n",
+            c.btn_primary_bg, HOVER_RING_ON_ACCENT,
         ));
         css.push_str(&format!(
             ".hero-action-btn.secondary {{ background-color: {}; color: {}; border: 1px solid {}; }}\n",
@@ -674,11 +699,7 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
             ".flat-button {{ background-color: transparent; border: none; color: {}; font-size: 0.9em; padding: 6px 12px; }}\n",
             c.btn_secondary_text,
         ));
-        css.push_str(&format!(
-            ".flat-button:hover {{ background-color: transparent; background-image: none; color: {}; border-radius: {}; }}\n",
-            c.text_primary,
-            radius::SMALL,
-        ));
+        css.push_str(&flat_button_hover_css(c));
 
         /* Rejilla de episodios */
         css.push_str(".episode-grid { margin-top: 8px; }\n");
