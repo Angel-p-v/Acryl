@@ -182,7 +182,7 @@ pub fn install_poster_css() {
              .play-button {{ background-color: {}; color: {}; border-radius: {}; font-weight: 700; min-width: 120px; min-height: 44px; }}\n\
              .play-button:hover {{ background-color: {}; }}\n\
              .flat-button {{ background-color: transparent; border: none; color: {}; font-size: 0.9em; padding: 6px 12px; }}\n\
-             .flat-button:hover {{ color: {}; background-color: {}; border-radius: {}; }}\n\
+             .flat-button:hover {{ color: {}; background-color: {}; border-radius: {}; box-shadow: inset 0 0 0 1px {}; }}\n\
              .details-header {{ background-color: {}; border-radius: {}; padding: 0; margin-bottom: 24px; }}\n\
              .synopsis-text {{ color: {}; line-height: 1.6; }}\n\
              .media-type {{ font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: {}; font-weight: 700; }}\n\
@@ -194,12 +194,12 @@ pub fn install_poster_css() {
              .episode-title {{ font-weight: 600; font-size: 0.82em; color: {}; }}\n\
              .episode-number {{ font-size: 0.75em; color: {}; margin-bottom: 4px; }}\n\
              .episode-play-btn {{ background-color: {}; color: {}; border: none; border-radius: {}; font-weight: 700; min-width: 72px; min-height: 30px; }}\n\
-             .episode-play-btn:hover {{ background-color: {}; }}\n\
+             .episode-play-btn:hover {{ background-color: {}; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.55); }}\n\
              .season-grid-section {{ margin-top: 28px; }}\n\
              .season-grid-title {{ font-weight: 700; font-size: 1.2em; color: {}; margin-bottom: 12px; margin-left: 6px; }}\n\
              .hero-action-btn {{ min-height: 40px; padding: 0 16px; font-weight: 700; border-radius: {}; }}\n\
              .hero-action-btn.primary {{ background-color: {}; color: {}; border: none; }}\n\
-             .hero-action-btn.primary:hover {{ background-color: {}; }}\n\
+             .hero-action-btn.primary:hover {{ background-color: {}; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.55); }}\n\
              .hero-action-btn.secondary {{ background-color: {}; color: {}; border: 1px solid {}; }}\n\
              .hero-action-btn.secondary:hover {{ border-color: {}; background-color: {}; }}\n\
              .season-dropdown {{ min-width: 180px; }}\n\
@@ -210,7 +210,7 @@ pub fn install_poster_css() {
         c.border,
         theme::radius::LARGE,
         theme::transition::NORMAL,
-        c.surface,
+        c.card,
         c.border_hover,
         c.surface,
         c.accent,
@@ -225,7 +225,7 @@ pub fn install_poster_css() {
         c.border,
         theme::radius::MEDIUM,
         theme::transition::FAST,
-        c.surface,
+        c.card,
         c.border_hover,
         c.surface,
         c.accent,
@@ -233,11 +233,12 @@ pub fn install_poster_css() {
         c.accent,
         c.btn_primary_text,
         theme::radius::SMALL,
-        c.accent_hover,
+        c.accent,
         c.text_secondary,
         c.text_primary,
-        c.surface,
+        "transparent",
         theme::radius::SMALL,
+        c.border_hover,
         c.surface,
         theme::radius::LARGE,
         c.text_secondary,
@@ -246,7 +247,7 @@ pub fn install_poster_css() {
         c.border,
         theme::radius::MEDIUM,
         theme::transition::FAST,
-        c.surface,
+        c.card,
         c.border_hover,
         c.surface,
         c.accent,
@@ -256,17 +257,17 @@ pub fn install_poster_css() {
         c.accent,
         c.btn_primary_text,
         theme::radius::SMALL,
-        c.accent_hover,
+        c.accent,
         c.text_primary,
         theme::radius::SMALL,
         c.accent,
         c.btn_primary_text,
-        c.accent_hover,
+        c.accent,
         c.surface,
         c.text_primary,
         c.border,
         c.border_hover,
-        c.card,
+        c.surface,
         c.text_muted,
         c.accent,
         c.surface,
