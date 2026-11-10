@@ -13,7 +13,7 @@ use crate::ui::poster_selector::{ImageChoice, PosterSelector};
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
 use gtk4::{
-    Box, Button, CenterBox, DropDown, FlowBox, Label, Orientation, Revealer, ScrolledWindow,
+    Box, Button, CenterBox, DropDown, FlowBox, Label, Orientation, Revealer, Scale, ScrolledWindow,
     SearchEntry, Spinner, Stack, gio, glib,
 };
 use libadwaita::prelude::*;
@@ -143,6 +143,11 @@ pub struct MainWindow {
     current_watched_filter: Rc<RefCell<Option<bool>>>,
     /// Vista de historial de reproducción.
     history_view: HistoryView,
+    /// Barra de control de la reproducción activa (pausa, saltos y volumen).
+    playback_bar: Box,
+    play_pause_button: Button,
+    /// Sesión de mpv activa, compartida con el temporizador que detecta su fin.
+    active_playback: Rc<RefCell<Option<crate::core::player::PlaybackSession>>>,
 }
 
 pub type MainWindowRef = Rc<RefCell<MainWindow>>;
@@ -341,6 +346,95 @@ impl MainWindow {
         // top_bar_level2 va fuera del revealer para que siempre sea accesible
         // cuando hay filtros, pero la barra principal puede ocultarse.
         content.append(&top_bar_revealer);
+
+        // --- Barra de control de la reproducción activa ---
+        // Se muestra mientras haya una sesión de mpv abierta y permite
+        // pausar, retroceder/avanzar 10 s y cambiar el volumen sin cambiar de
+        // ventana. Los comandos viajan por el socket IPC de la sesión.
+        let active_playback: Rc<RefCell<Option<crate::core::player::PlaybackSession>>> =
+            Rc::new(RefCell::new(None));
+
+        let playback_bar = Box::new(Orientation::Horizontal, 8);
+        playback_bar.add_css_class("playback-bar");
+        playback_bar.set_halign(gtk4::Align::Fill);
+        playback_bar.set_valign(gtk4::Align::Center);
+        playback_bar.set_margin_start(24);
+        playback_bar.set_margin_end(24);
+        playback_bar.set_margin_top(6);
+        playback_bar.set_margin_bottom(6);
+        playback_bar.set_visible(false);
+
+        let play_pause_button = Button::with_label("⏸");
+        play_pause_button.add_css_class("flat-button");
+        play_pause_button.set_valign(gtk4::Align::Center);
+        play_pause_button.set_tooltip_text(Some(&t("tooltip.playback_pause")));
+        playback_bar.append(&play_pause_button);
+
+        let seek_back_button = Button::with_label("⏪ 10 s");
+        seek_back_button.add_css_class("flat-button");
+        seek_back_button.set_valign(gtk4::Align::Center);
+        seek_back_button.set_tooltip_text(Some(&t("tooltip.playback_back")));
+        playback_bar.append(&seek_back_button);
+
+        let seek_forward_button = Button::with_label("10 s ⏩");
+        seek_forward_button.add_css_class("flat-button");
+        seek_forward_button.set_valign(gtk4::Align::Center);
+        seek_forward_button.set_tooltip_text(Some(&t("tooltip.playback_forward")));
+        playback_bar.append(&seek_forward_button);
+
+        let volume_label = Label::new(Some("🔊"));
+        volume_label.set_valign(gtk4::Align::Center);
+        playback_bar.append(&volume_label);
+
+        let volume_scale = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
+        volume_scale.set_value(100.0);
+        volume_scale.set_draw_value(false);
+        volume_scale.set_size_request(140, -1);
+        volume_scale.set_valign(gtk4::Align::Center);
+        volume_scale.set_tooltip_text(Some(&t("tooltip.playback_volume")));
+        playback_bar.append(&volume_scale);
+
+        content.append(&playback_bar);
+
+        let active_playback_toggle = active_playback.clone();
+        let play_pause_for_click = play_pause_button.clone();
+        play_pause_button.connect_clicked(move |_| {
+            let session = active_playback_toggle.borrow();
+            let Some(session) = session.as_ref() else {
+                return;
+            };
+            match session.toggle_pause() {
+                Ok(paused) => play_pause_for_click.set_label(if paused { "▶" } else { "⏸" }),
+                Err(error) => eprintln!("No se pudo cambiar la pausa de mpv: {}", error),
+            }
+        });
+
+        let active_playback_back = active_playback.clone();
+        seek_back_button.connect_clicked(move |_| {
+            if let Some(session) = active_playback_back.borrow().as_ref()
+                && let Err(error) = session.seek_relative(-10.0)
+            {
+                eprintln!("No se pudo retroceder en mpv: {}", error);
+            }
+        });
+
+        let active_playback_forward = active_playback.clone();
+        seek_forward_button.connect_clicked(move |_| {
+            if let Some(session) = active_playback_forward.borrow().as_ref()
+                && let Err(error) = session.seek_relative(10.0)
+            {
+                eprintln!("No se pudo avanzar en mpv: {}", error);
+            }
+        });
+
+        let active_playback_volume = active_playback.clone();
+        volume_scale.connect_value_changed(move |scale| {
+            if let Some(session) = active_playback_volume.borrow().as_ref()
+                && let Err(error) = session.set_volume(scale.value())
+            {
+                eprintln!("No se pudo ajustar el volumen de mpv: {}", error);
+            }
+        });
 
         let stack = Stack::new();
         stack.set_hexpand(true);
@@ -552,6 +646,9 @@ impl MainWindow {
             current_favorite_filter: Rc::new(RefCell::new(None)),
             current_watched_filter: Rc::new(RefCell::new(None)),
             history_view,
+            playback_bar,
+            play_pause_button,
+            active_playback,
         }));
 
         // Inicializar el contexto del historial para poder recargar al cambiar idioma.
@@ -2100,6 +2197,16 @@ impl MainWindow {
         this: &MainWindowRef,
         file_path: &str,
     ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
+        // Si ya había una reproducción activa, cerrarla antes de abrir otra
+        // para que los controles apunten siempre a la sesión correcta.
+        {
+            let w = this.borrow();
+            if let Some(previous) = w.active_playback.borrow_mut().take() {
+                let _ = previous.stop();
+                w.playback_bar.set_visible(false);
+            }
+        }
+
         let w = this.borrow();
         let media_id = {
             let mut conn = open_db(&w.db_path)?;
@@ -2136,15 +2243,40 @@ impl MainWindow {
 
         match playback_start {
             crate::core::player::PlaybackStart::Started(session) => {
+                let session_rc = {
+                    let w = this.borrow();
+                    *w.active_playback.borrow_mut() = Some(session);
+                    w.playback_bar.set_visible(true);
+                    w.play_pause_button.set_label("⏸");
+                    w.active_playback.clone()
+                };
+
                 // Al cerrar mpv se reafirma el estado original para deshacer
                 // cualquier reubicación que el compositor haya aplicado mientras
                 // estaba abierto.
                 let window_for_restore = window.clone();
                 let this_for_next = this.clone();
+                let this_for_ui = this.clone();
                 let media_id_for_next = media_id;
                 glib::timeout_add_local(Duration::from_millis(250), move || {
-                    if !session.finished() {
+                    let finished = session_rc
+                        .borrow()
+                        .as_ref()
+                        .map(|session| session.finished())
+                        .unwrap_or(true);
+                    if !finished {
                         return glib::ControlFlow::Continue;
+                    }
+                    let completed = session_rc
+                        .borrow()
+                        .as_ref()
+                        .map(|session| session.completed())
+                        .unwrap_or(false);
+                    *session_rc.borrow_mut() = None;
+                    {
+                        let w = this_for_ui.borrow();
+                        w.playback_bar.set_visible(false);
+                        w.play_pause_button.set_label("⏸");
                     }
                     restore_window_mode(&window_for_restore, window_mode);
 
@@ -2152,7 +2284,7 @@ impl MainWindow {
                     // se completó (faltaban menos del umbral para terminar),
                     // no si el usuario cerró mpv antes.
                     if auto_play_next
-                        && session.completed()
+                        && completed
                         && let Some(media_id) = media_id_for_next
                     {
                         Self::schedule_next_episode(&this_for_next, media_id, db_path.clone());

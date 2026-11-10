@@ -161,6 +161,10 @@
   "tooltip.mark_watched": "Marcar episodio como visto",
   "tooltip.mark_unwatched": "Marcar episodio como no visto",
   "tooltip.rating": "Calificación (1-5 estrellas)",
+  "tooltip.playback_pause": "Pausar o reanudar la reproducción",
+  "tooltip.playback_back": "Retroceder 10 segundos",
+  "tooltip.playback_forward": "Avanzar 10 segundos",
+  "tooltip.playback_volume": "Volumen de mpv",
 
   "track.title": "Pistas de audio y subtítulos",
   "track.heading": "Pistas de audio y subtítulos",

@@ -161,6 +161,10 @@
   "tooltip.mark_watched": "Mark episode as watched",
   "tooltip.mark_unwatched": "Mark episode as unwatched",
   "tooltip.rating": "Rating (1-5 stars)",
+  "tooltip.playback_pause": "Pause or resume playback",
+  "tooltip.playback_back": "Go back 10 seconds",
+  "tooltip.playback_forward": "Go forward 10 seconds",
+  "tooltip.playback_volume": "mpv volume",
 
   "track.title": "Audio and subtitle tracks",
   "track.heading": "Audio and subtitle tracks",
