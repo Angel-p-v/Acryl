@@ -8,5 +8,5 @@ pub mod migrations;
 pub use connection::{close_db, open_db};
 pub use file_repo::{FileRepository, MediaFile, MediaFileInput, TrackPreference, TrackSelection};
 pub use media_repo::{
-    Category, Media, MediaDetails, MediaInput, MediaRepository, PlaybackHistoryEntry,
+    Category, Collection, Media, MediaDetails, MediaInput, MediaRepository, PlaybackHistoryEntry,
 };

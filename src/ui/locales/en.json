@@ -24,6 +24,7 @@
   "history.remaining_format": "remaining {}",
 
   "button.categories": "Categories",
+  "button.collections": "Collections",
   "button.history": "History",
   "button.all_categories": "All categories",
   "button.clear_category": "Show all",
@@ -74,6 +75,16 @@
   "categories.empty": "No categories yet. They will be extracted from metadata when syncing.",
   "categories.chip_format": "{} ({})",
   "categories.filter_format": "Filtering by: {}",
+  "collections.filter_format": "Collection: {}",
+  "collections.title": "Collections",
+  "collections.new_placeholder": "New collection name",
+  "collections.create": "Create",
+  "collections.empty": "No collections yet. Create one above.",
+  "collections.close": "Close",
+  "collections.delete": "Delete collection",
+  "collections.delete_confirm.title": "Delete the collection?",
+  "collections.delete_confirm.detail": "The collection will be deleted, but the media stays in your library.",
+  "collections.delete_confirm.delete": "Delete",
 
   "search.placeholder": "Search by title...",
   "search.results": "{} results",
@@ -157,6 +168,7 @@
 
   "tooltip.home": "Go to home",
   "tooltip.tracks": "Choose audio and subtitle tracks",
+  "tooltip.collections": "Add to or remove from collections",
   "tooltip.choose_images": "Choose a different poster or banner, or remove the current one",
   "tooltip.redetect": "Run ffprobe again to read all tracks of the file",
   "tooltip.favorite_add": "Mark as favorite",

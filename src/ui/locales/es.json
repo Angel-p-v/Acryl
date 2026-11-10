@@ -24,6 +24,7 @@
   "history.remaining_format": "quedan {}",
 
   "button.categories": "Categorías",
+  "button.collections": "Colecciones",
   "button.history": "Historial",
   "button.all_categories": "Todas las categorías",
   "button.clear_category": "Ver todo",
@@ -74,6 +75,16 @@
   "categories.empty": "Aún no hay categorías. Se extraerán de los metadatos al sincronizar.",
   "categories.chip_format": "{} ({})",
   "categories.filter_format": "Filtrando por: {}",
+  "collections.filter_format": "Colección: {}",
+  "collections.title": "Colecciones",
+  "collections.new_placeholder": "Nombre de la nueva colección",
+  "collections.create": "Crear",
+  "collections.empty": "Aún no hay colecciones. Crea una arriba.",
+  "collections.close": "Cerrar",
+  "collections.delete": "Eliminar colección",
+  "collections.delete_confirm.title": "¿Eliminar la colección?",
+  "collections.delete_confirm.detail": "Se eliminará la colección, pero los medios seguirán en la biblioteca.",
+  "collections.delete_confirm.delete": "Eliminar",
 
   "search.placeholder": "Buscar por título...",
   "search.results": "{} resultados",
@@ -157,6 +168,7 @@
 
   "tooltip.home": "Ir al inicio",
   "tooltip.tracks": "Elegir pista de audio y subtítulos",
+  "tooltip.collections": "Añadir o quitar de colecciones",
   "tooltip.choose_images": "Elegir un póster o banner diferente, o eliminar el actual",
   "tooltip.redetect": "Ejecuta ffprobe de nuevo para leer todas las pistas del archivo",
   "tooltip.favorite_add": "Marcar como favorito",

@@ -283,6 +283,26 @@ ALTER TABLE media ADD COLUMN in_watchlist INTEGER NOT NULL DEFAULT 0
   CHECK (in_watchlist IN (0, 1));
 "#;
 
+/// Colecciones creadas por el usuario para agrupar medios con un criterio
+/// propio, independiente de las categorías obtenidas de los metadatos.
+const COLLECTIONS_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS collections (
+  id         INTEGER PRIMARY KEY,
+  name       TEXT    NOT NULL UNIQUE,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS media_collections (
+  collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  media_id      INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+  added_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (collection_id, media_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_collections_media
+  ON media_collections(media_id);
+"#;
+
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -368,5 +388,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 17,
         name: "media-watchlist",
         sql: MEDIA_WATCHLIST_SQL,
+    },
+    Migration {
+        version: 18,
+        name: "user-collections",
+        sql: COLLECTIONS_SQL,
     },
 ];

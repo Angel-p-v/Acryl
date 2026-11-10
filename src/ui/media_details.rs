@@ -102,6 +102,7 @@ pub struct MediaDetails {
     main_button_label: String,
     synopsis_label: Label,
     tracks_button: Button,
+    collections_button: Button,
     favorite_button: Button,
     watchlist_button: Button,
     watched_button: Button,
@@ -121,6 +122,7 @@ pub struct MediaDetails {
     selected_season: Rc<RefCell<Option<SeasonSelection>>>,
     suppress_season_change: Rc<Cell<bool>>,
     on_back: Option<Rc<dyn Fn()>>,
+    on_manage_collections: Option<Rc<dyn Fn()>>,
     on_play_episode: SharedPlayEpisodeCallback,
     on_edit_tracks: SharedEditTracksCallback,
     on_toggle_file_watched: SharedToggleFileWatchedCallback,
@@ -177,6 +179,11 @@ impl MediaDetails {
         tracks_button.add_css_class("flat-button");
         tracks_button.set_tooltip_text(Some(&t("tooltip.tracks")));
         buttons_box.append(&tracks_button);
+
+        let collections_button = Button::with_label(&t("button.collections"));
+        collections_button.add_css_class("flat-button");
+        collections_button.set_tooltip_text(Some(&t("tooltip.collections")));
+        buttons_box.append(&collections_button);
 
         let favorite_button = Button::with_label(&t("button.favorite_add"));
         favorite_button.add_css_class("flat-button");
@@ -434,6 +441,7 @@ impl MediaDetails {
             main_button_label: t("button.play"),
             synopsis_label,
             tracks_button,
+            collections_button,
             favorite_button,
             watchlist_button,
             play_button,
@@ -453,6 +461,7 @@ impl MediaDetails {
             selected_season,
             suppress_season_change,
             on_back: None,
+            on_manage_collections: None,
             on_play_episode,
             on_edit_tracks,
             on_toggle_file_watched,
@@ -840,6 +849,19 @@ impl MediaDetails {
             }
         });
         *self.on_edit_tracks.borrow_mut() = Some(cb);
+    }
+
+    /// Registra el callback que abre el diálogo de colecciones del medio.
+    pub fn on_manage_collections<F>(&mut self, f: F)
+    where
+        F: Fn() + 'static,
+    {
+        let cb: Rc<dyn Fn()> = Rc::new(f);
+        let cb_clone = cb.clone();
+        self.collections_button.connect_clicked(move |_| {
+            cb_clone();
+        });
+        self.on_manage_collections = Some(cb);
     }
 
     pub fn on_toggle_file_watched<F>(&mut self, f: F)
