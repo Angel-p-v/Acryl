@@ -2394,7 +2394,7 @@ impl MainWindow {
         dialog.set_child(Some(&content));
 
         let refresh_slot: CollectionsRefresh = Rc::new(RefCell::new(None));
-        let refresh_impl = refresh_slot.clone();
+        let refresh_weak = Rc::downgrade(&refresh_slot);
         let list_for_refresh = list.clone();
         let dialog_for_refresh = dialog.clone();
         let this_for_refresh = this.clone();
@@ -2504,7 +2504,7 @@ impl MainWindow {
                         &translations_for_refresh.borrow().t("collections.delete"),
                     ));
                     let db_path = db_path_for_refresh.clone();
-                    let refresh_inner = refresh_impl.clone();
+                    let refresh_inner = refresh_weak.clone();
                     let dialog_confirm = dialog_for_refresh.clone();
                     let translations_confirm = translations_for_refresh.clone();
                     let collection_id = collection.id;
@@ -2551,7 +2551,9 @@ impl MainWindow {
                                     eprintln!("Error borrando colección: {}", error);
                                 }
                                 close_db(conn);
-                                if let Some(refresh) = refresh_inner.borrow().as_ref() {
+                                if let Some(slot) = refresh_inner.upgrade()
+                                    && let Some(refresh) = slot.borrow().as_ref()
+                                {
                                     refresh();
                                 }
                             },

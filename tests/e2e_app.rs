@@ -797,7 +797,7 @@ fn marcar_temporada_y_pelicula_como_vistas_persiste() {
 }
 
 #[test]
-fn anadir_pelicula_a_mi_lista_persiste_y_es_independiente_de_visto() {
+fn watchlist_pelicula_persiste_y_es_independiente_de_visto() {
     if !gtk_can_run() {
         return;
     }
