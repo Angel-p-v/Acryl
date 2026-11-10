@@ -109,6 +109,8 @@ pub struct MainWindow {
     filter_favorite_button: Button,
     /// Botón para activar/desactivar filtro de visto/no visto.
     filter_watched_button: Button,
+    /// Botón para activar/desactivar el filtro de "Mi lista".
+    filter_watchlist_button: Button,
     /// Píldora "▶ Continuar S01E04 - Black Torch".
     continue_button: Button,
     /// Botones de modo de vista (Grid/Lista).
@@ -141,6 +143,8 @@ pub struct MainWindow {
     current_favorite_filter: Rc<RefCell<Option<bool>>>,
     /// Filtro de visto/no visto activo (None = sin filtro).
     current_watched_filter: Rc<RefCell<Option<bool>>>,
+    /// Filtro de "Mi lista" activo (None = sin filtro).
+    current_watchlist_filter: Rc<RefCell<Option<bool>>>,
     /// Vista de historial de reproducción.
     history_view: HistoryView,
     /// Barra de control de la reproducción activa (pausa, saltos y volumen).
@@ -472,6 +476,11 @@ impl MainWindow {
         filter_watched_button.set_valign(gtk4::Align::Center);
         filter_bar.append(&filter_watched_button);
 
+        let filter_watchlist_button = Button::with_label(&t("button.filter_watchlist"));
+        filter_watchlist_button.add_css_class("flat-button");
+        filter_watchlist_button.set_valign(gtk4::Align::Center);
+        filter_bar.append(&filter_watchlist_button);
+
         let filter_clear_button = Button::with_label(&t("button.clear_category"));
         filter_clear_button.add_css_class("flat-button");
         filter_clear_button.set_valign(gtk4::Align::Center);
@@ -631,6 +640,7 @@ impl MainWindow {
             filter_chip,
             filter_favorite_button,
             filter_watched_button,
+            filter_watchlist_button,
             continue_button,
             view_grid_button,
             view_list_button,
@@ -645,6 +655,7 @@ impl MainWindow {
             current_category_name: Rc::new(RefCell::new(None)),
             current_favorite_filter: Rc::new(RefCell::new(None)),
             current_watched_filter: Rc::new(RefCell::new(None)),
+            current_watchlist_filter: Rc::new(RefCell::new(None)),
             history_view,
             playback_bar,
             play_pause_button,
@@ -828,6 +839,27 @@ impl MainWindow {
                 this_wat.borrow().show_list();
             });
 
+        // Filtro de "Mi lista": activa/desactiva el filtro de in_watchlist.
+        let this_watch = this.clone();
+        this.borrow()
+            .filter_watchlist_button
+            .connect_clicked(move |_| {
+                let new_value = {
+                    let window = this_watch.borrow_mut();
+                    let f = window.current_watchlist_filter.borrow_mut();
+                    match *f {
+                        None => Some(true),
+                        _ => None,
+                    }
+                };
+                {
+                    let window = this_watch.borrow_mut();
+                    *window.current_watchlist_filter.borrow_mut() = new_value;
+                }
+                Self::load_media(&this_watch);
+                this_watch.borrow().show_list();
+            });
+
         // Nivel 2: píldora "Continuar viendo".
         let this_cont = this.clone();
         this.borrow().continue_button.connect_clicked(move |_| {
@@ -896,6 +928,7 @@ impl MainWindow {
                     let window = this_key.borrow_mut();
                     *window.current_favorite_filter.borrow_mut() = None;
                     *window.current_watched_filter.borrow_mut() = None;
+                    *window.current_watchlist_filter.borrow_mut() = None;
                     *window.current_category.borrow_mut() = None;
                     drop(window);
                     Self::load_media(&this_key);
@@ -1249,6 +1282,64 @@ impl MainWindow {
                 // Si la galería está filtrada por favoritos, al quitar el
                 // favorito el medio debe desaparecer de la lista.
                 if favorite_filter_active {
+                    Self::load_media(&this_clone);
+                    this_clone.borrow().show_list();
+                }
+            });
+
+        // Callback: añadir/quitar el medio de "Mi lista".
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_toggle_watchlist(move |new_state| {
+                let (media_id, season, watchlist_filter_active) = {
+                    let w = this_clone.borrow();
+                    (
+                        w.media_details.borrow().media_id(),
+                        w.media_details.borrow().season_selection(),
+                        w.current_watchlist_filter.borrow().is_some(),
+                    )
+                };
+                let db_path = this_clone.borrow().db_path.clone();
+                let mut conn = match open_db(&db_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Error abriendo BD para toggle watchlist: {}", e);
+                        return;
+                    }
+                };
+                let mut repo = MediaRepository::new(&mut conn);
+                if let Err(e) = repo.set_watchlist(media_id, new_state) {
+                    eprintln!("Error actualizando Mi lista: {}", e);
+                }
+                close_db(conn);
+
+                // Refrescar la ficha con el estado persistido.
+                let media = {
+                    let mut conn = match open_db(&db_path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Error abriendo BD para refrescar watchlist: {}", e);
+                            return;
+                        }
+                    };
+                    let mut repo = MediaRepository::new(&mut conn);
+                    let m = repo.find_by_id(media_id).ok().flatten();
+                    close_db(conn);
+                    m
+                };
+                if let Some(media) = media {
+                    this_clone
+                        .borrow()
+                        .media_details
+                        .borrow_mut()
+                        .set_media_with_season(&media, season);
+                }
+
+                // Si la galería está filtrada por "Mi lista", al quitar el
+                // medio debe desaparecer de la lista.
+                if watchlist_filter_active {
                     Self::load_media(&this_clone);
                     this_clone.borrow().show_list();
                 }
@@ -1650,7 +1741,7 @@ impl MainWindow {
     /// reemplaza el contenido de la galería; si es mayor, lo añade al final
     /// (paginación infinita).
     fn load_media_page(this: &MainWindowRef, offset: i64) {
-        let (db_path, category_id, favorite, watched, order_by) = {
+        let (db_path, category_id, favorite, watched, watchlist, order_by) = {
             let w = this.borrow();
             let order_by = match w.sort_combo.selected() {
                 1 => Some("year".to_string()),
@@ -1662,6 +1753,7 @@ impl MainWindow {
                 *w.current_category.borrow(),
                 *w.current_favorite_filter.borrow(),
                 *w.current_watched_filter.borrow(),
+                *w.current_watchlist_filter.borrow(),
                 order_by,
             )
         };
@@ -1682,6 +1774,7 @@ impl MainWindow {
                 order_by,
                 favorite,
                 watched,
+                watchlist,
             };
             match category_id {
                 Some(id) => repo.list_by_category(id, options),
@@ -1996,7 +2089,8 @@ impl MainWindow {
     fn show_list(&self) {
         let filtered = self.current_category.borrow().is_some()
             || self.current_favorite_filter.borrow().is_some()
-            || self.current_watched_filter.borrow().is_some();
+            || self.current_watched_filter.borrow().is_some()
+            || self.current_watchlist_filter.borrow().is_some();
         if self.media_count == 0 && !filtered {
             self.stack.set_visible_child_name("empty");
         } else {
@@ -2015,11 +2109,13 @@ impl MainWindow {
             w.search_entry.set_text("");
             let had_filter = w.current_category.borrow().is_some()
                 || w.current_favorite_filter.borrow().is_some()
-                || w.current_watched_filter.borrow().is_some();
+                || w.current_watched_filter.borrow().is_some()
+                || w.current_watchlist_filter.borrow().is_some();
             w.current_category.replace(None);
             w.current_category_name.replace(None);
             w.current_favorite_filter.replace(None);
             w.current_watched_filter.replace(None);
+            w.current_watchlist_filter.replace(None);
             w.history.borrow_mut().clear();
             w.update_filter_bar();
             had_filter
@@ -2074,6 +2170,7 @@ impl MainWindow {
                     limit: Some(500),
                     favorite: None,
                     watched: None,
+                    watchlist: None,
                 },
             )
             .unwrap_or_default()
@@ -2689,6 +2786,11 @@ impl MainWindow {
     /// Método público para tests E2E: botón de favorito del medio.
     pub fn favorite_button_for_test(&self) -> Button {
         self.media_details.borrow().favorite_button_for_test()
+    }
+
+    /// Método público para tests E2E: botón de "Mi lista" del medio.
+    pub fn watchlist_button_for_test(&self) -> Button {
+        self.media_details.borrow().watchlist_button_for_test()
     }
 
     pub fn widget(&self) -> &AdwApplicationWindow {

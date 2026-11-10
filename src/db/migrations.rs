@@ -275,6 +275,14 @@ const MEDIA_LANGUAGE_SQL: &str = r#"
 ALTER TABLE media ADD COLUMN language TEXT;
 "#;
 
+/// Marca de "Mi lista" (watchlist). Separada de `is_watched`, que indica que
+/// el medio ya se ha visto: un título puede estar en la lista de pendientes
+/// sin haberse visto y viceversa.
+const MEDIA_WATCHLIST_SQL: &str = r#"
+ALTER TABLE media ADD COLUMN in_watchlist INTEGER NOT NULL DEFAULT 0
+  CHECK (in_watchlist IN (0, 1));
+"#;
+
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -355,5 +363,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 16,
         name: "media-language",
         sql: MEDIA_LANGUAGE_SQL,
+    },
+    Migration {
+        version: 17,
+        name: "media-watchlist",
+        sql: MEDIA_WATCHLIST_SQL,
     },
 ];

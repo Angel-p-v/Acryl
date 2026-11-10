@@ -58,6 +58,8 @@ pub struct Media {
     pub categories_fetched_at: Option<String>,
     /// Idioma original detectado de los metadatos (código ISO, ej. "en", "es").
     pub language: Option<String>,
+    /// Marca de "Mi lista": el usuario quiere verlo más adelante.
+    pub in_watchlist: bool,
     /// Categorías asociadas al medio (cargadas por separado con `load_categories`).
     #[serde(skip)]
     pub categories: Vec<String>,
@@ -95,6 +97,8 @@ pub struct ListMediaOptions {
     pub favorite: Option<bool>,
     /// Filtrar solo vistos (true) o no vistos (false). None = sin filtro.
     pub watched: Option<bool>,
+    /// Filtrar solo los medios de "Mi lista" (true). None = sin filtro.
+    pub watchlist: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -105,6 +109,8 @@ pub struct SearchMediaOptions {
     pub favorite: Option<bool>,
     /// Filtrar solo vistos (true) o no vistos (false). None = sin filtro.
     pub watched: Option<bool>,
+    /// Filtrar solo los medios de "Mi lista" (true). None = sin filtro.
+    pub watchlist: Option<bool>,
 }
 
 pub struct MediaRepository<'a> {
@@ -171,7 +177,7 @@ impl<'a> MediaRepository<'a> {
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
                     metadata_fetched_at, parent_id, rating, vote_average,
-                    metadata_source_id, categories_fetched_at, language
+                    metadata_source_id, categories_fetched_at, language, in_watchlist
              FROM media WHERE id = ?1",
         )?;
         let row = stmt.query_row(params![id], map_media_row);
@@ -397,7 +403,7 @@ impl<'a> MediaRepository<'a> {
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
                     metadata_fetched_at, parent_id, rating, vote_average,
-                    metadata_source_id, categories_fetched_at, language
+                    metadata_source_id, categories_fetched_at, language, in_watchlist
              FROM media",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -418,6 +424,11 @@ impl<'a> MediaRepository<'a> {
         if let Some(watched) = options.watched {
             sql.push_str(" AND is_watched = ?");
             params_vec.push(Box::new(watched));
+        }
+
+        if let Some(watchlist) = options.watchlist {
+            sql.push_str(" AND in_watchlist = ?");
+            params_vec.push(Box::new(watchlist));
         }
 
         let order_clause = match options.order_by.as_deref().unwrap_or("title") {
@@ -469,7 +480,7 @@ impl<'a> MediaRepository<'a> {
                         m.created_at, m.updated_at,
                         m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
                         m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average,
-                        m.metadata_source_id, m.categories_fetched_at, m.language
+                        m.metadata_source_id, m.categories_fetched_at, m.language, m.in_watchlist
                  FROM media m
                  JOIN media_fts f ON f.rowid = m.id
                  WHERE media_fts MATCH ?1 AND m.parent_id IS NULL",
@@ -489,6 +500,11 @@ impl<'a> MediaRepository<'a> {
             if let Some(watched) = options.watched {
                 sql.push_str(" AND m.is_watched = ?");
                 params.push(Box::new(watched));
+            }
+
+            if let Some(watchlist) = options.watchlist {
+                sql.push_str(" AND m.in_watchlist = ?");
+                params.push(Box::new(watchlist));
             }
 
             sql.push_str(" ORDER BY bm25(media_fts), m.sort_title LIMIT ?");
@@ -511,7 +527,7 @@ impl<'a> MediaRepository<'a> {
                         m.created_at, m.updated_at,
                         m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
                         m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average,
-                        m.metadata_source_id, m.categories_fetched_at, m.language
+                        m.metadata_source_id, m.categories_fetched_at, m.language, m.in_watchlist
                  FROM media m
                  WHERE m.sort_title LIKE ?1 ESCAPE '\\' AND m.parent_id IS NULL",
             );
@@ -525,6 +541,11 @@ impl<'a> MediaRepository<'a> {
             if let Some(watched) = options.watched {
                 sql.push_str(" AND m.is_watched = ?");
                 params.push(Box::new(watched));
+            }
+
+            if let Some(watchlist) = options.watchlist {
+                sql.push_str(" AND m.in_watchlist = ?");
+                params.push(Box::new(watchlist));
             }
 
             if let Some(ref t) = options.r#type {
@@ -598,6 +619,33 @@ impl<'a> MediaRepository<'a> {
         Ok(value)
     }
 
+    /// Añade o quita un medio de "Mi lista" con el estado exacto indicado.
+    ///
+    /// Es independiente de `is_watched`: un título pendiente puede estar sin
+    /// ver y un título visto puede seguir en la lista.
+    pub fn set_watchlist(&mut self, id: i64, watchlist: bool) -> RusqliteResult<()> {
+        self.conn.execute(
+            "UPDATE media SET in_watchlist = ?2, updated_at = datetime('now') WHERE id = ?1",
+            params![id, i64::from(watchlist)],
+        )?;
+        Ok(())
+    }
+
+    /// Invierte la pertenencia de un medio a "Mi lista" y devuelve el nuevo
+    /// estado.
+    pub fn toggle_watchlist(&mut self, id: i64) -> RusqliteResult<bool> {
+        self.conn.execute(
+            "UPDATE media SET in_watchlist = NOT in_watchlist, updated_at = datetime('now') WHERE id = ?1",
+            params![id],
+        )?;
+        let value: bool = self.conn.query_row(
+            "SELECT in_watchlist FROM media WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+        Ok(value)
+    }
+
     /// Obtiene el historial de reproducción de un medio, ordenado del más
     /// reciente al más antiguo. Cada entrada es (fecha, posición, duración, archivo).
     pub fn get_playback_history(
@@ -656,7 +704,7 @@ impl<'a> MediaRepository<'a> {
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
                     metadata_fetched_at, parent_id, rating, vote_average,
-                    metadata_source_id, categories_fetched_at, language
+                    metadata_source_id, categories_fetched_at, language, in_watchlist
              FROM media WHERE parent_id = ?1 ORDER BY sort_title ASC",
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -789,7 +837,7 @@ impl<'a> MediaRepository<'a> {
                         m.created_at, m.updated_at,
                         m.is_favorite, m.is_watched, m.poster_path, m.banner_path, m.synopsis,
                         m.metadata_fetched_at, m.parent_id, m.rating, m.vote_average,
-                        m.metadata_source_id, m.categories_fetched_at, m.language
+                        m.metadata_source_id, m.categories_fetched_at, m.language, m.in_watchlist
              FROM media m
              JOIN media_categories mc ON mc.media_id = m.id
              WHERE mc.category_id = ?1 AND m.parent_id IS NULL",
@@ -809,6 +857,11 @@ impl<'a> MediaRepository<'a> {
         if let Some(watched) = options.watched {
             sql.push_str(" AND m.is_watched = ?");
             params.push(Box::new(watched));
+        }
+
+        if let Some(watchlist) = options.watchlist {
+            sql.push_str(" AND m.in_watchlist = ?");
+            params.push(Box::new(watchlist));
         }
 
         let order_clause = match options.order_by.as_deref().unwrap_or("title") {
@@ -983,7 +1036,7 @@ impl<'a> MediaRepository<'a> {
             "SELECT id, type, title, sort_title, year, folder_path, created_at, updated_at,
                     is_favorite, is_watched, poster_path, banner_path, synopsis,
                     metadata_fetched_at, parent_id, rating, vote_average,
-                    metadata_source_id, categories_fetched_at, language
+                    metadata_source_id, categories_fetched_at, language, in_watchlist
              FROM media
              WHERE parent_id IS NULL AND categories_fetched_at IS NULL
              ORDER BY sort_title ASC",
@@ -1410,6 +1463,7 @@ fn map_media_row(row: &rusqlite::Row<'_>) -> RusqliteResult<Media> {
         metadata_source_id: row.get(17)?,
         categories_fetched_at: row.get(18)?,
         language: row.get(19)?,
+        in_watchlist: row.get(20)?,
         categories: Vec::new(),
     })
 }
@@ -2269,5 +2323,73 @@ mod tests {
                 "https://img/poster.jpg".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn watchlist_se_persiste_y_filtra_la_lista() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path)
+             VALUES ('movie', 'Pendiente', 'pendiente', '/tmp/pendiente')",
+            [],
+        )
+        .unwrap();
+        let pendiente_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path)
+             VALUES ('movie', 'Vista', 'vista', '/tmp/vista')",
+            [],
+        )
+        .unwrap();
+        let vista_id = conn.last_insert_rowid();
+
+        let mut repo = MediaRepository::new(&mut conn);
+        assert!(!repo.find_by_id(pendiente_id).unwrap().unwrap().in_watchlist);
+
+        // Añadir a Mi lista no marca el medio como visto.
+        repo.set_watchlist(pendiente_id, true)
+            .expect("añadir a Mi lista");
+        let pendiente = repo.find_by_id(pendiente_id).unwrap().unwrap();
+        assert!(pendiente.in_watchlist);
+        assert!(!pendiente.is_watched);
+
+        // El filtro solo devuelve los medios de Mi lista.
+        let filtrados = repo
+            .list(ListMediaOptions {
+                watchlist: Some(true),
+                ..Default::default()
+            })
+            .expect("listar Mi lista");
+        assert_eq!(filtrados.len(), 1);
+        assert_eq!(filtrados[0].id, pendiente_id);
+
+        // La búsqueda también respeta el filtro.
+        let buscados = repo
+            .search(
+                "Vista",
+                SearchMediaOptions {
+                    watchlist: Some(true),
+                    ..Default::default()
+                },
+            )
+            .expect("buscar en Mi lista");
+        assert!(buscados.is_empty());
+
+        // Alternar devuelve el estado persistido.
+        assert!(!repo.toggle_watchlist(pendiente_id).expect("quitar"));
+        assert_eq!(
+            repo.list(ListMediaOptions {
+                watchlist: Some(true),
+                ..Default::default()
+            })
+            .unwrap()
+            .len(),
+            0
+        );
+
+        // El estado de visto sigue siendo independiente.
+        repo.set_watched(vista_id, true).expect("marcar vista");
+        assert!(!repo.find_by_id(vista_id).unwrap().unwrap().in_watchlist);
     }
 }

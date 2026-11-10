@@ -106,6 +106,7 @@ impl SearchBar {
                         limit: Some(20),
                         favorite: None,
                         watched: None,
+                        watchlist: None,
                     },
                 )
                 .unwrap_or_else(|e| {

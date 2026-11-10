@@ -193,6 +193,7 @@ fn busqueda_encuentra_medios_por_titulo() {
                     limit: Some(10),
                     favorite: None,
                     watched: None,
+                    watchlist: None,
                 },
             )
             .expect("buscar");
@@ -212,6 +213,7 @@ fn busqueda_encuentra_medios_por_titulo() {
                     limit: Some(10),
                     favorite: None,
                     watched: None,
+                    watchlist: None,
                 },
             )
             .expect("buscar");
@@ -349,6 +351,7 @@ fn biblioteca_carga_medios_desde_sqlite() {
                 order_by: None,
                 favorite: None,
                 watched: None,
+                watchlist: None,
             })
             .expect("listar medios");
         medios.len()
@@ -786,6 +789,85 @@ fn marcar_temporada_y_pelicula_como_vistas_persiste() {
         assert!(
             !movie.is_watched,
             "el segundo clic debe guardar el estado no visto"
+        );
+    }
+
+    drop(window);
+    drop(app);
+}
+
+#[test]
+fn anadir_pelicula_a_mi_lista_persiste_y_es_independiente_de_visto() {
+    if !gtk_can_run() {
+        return;
+    }
+
+    let _guard = EnvGuard::new(&[ACRYL_CONFIG_ENV]);
+    let (config, _config_dir, _data_dir) = temp_config();
+    let db_path = config.inner.db_path.clone();
+
+    let movie_id = {
+        let mut conn = open_db(&db_path).expect("abrir BD temporal");
+        let mut repo = MediaRepository::new(&mut conn);
+        repo.upsert(&MediaInput {
+            r#type: "movie".to_string(),
+            title: "Película pendiente".to_string(),
+            sort_title: "pelicula pendiente".to_string(),
+            year: Some(2024),
+            folder_path: "/media/pelicula-pendiente".to_string(),
+            parent_id: None,
+        })
+        .expect("insertar película")
+        .id
+    };
+
+    let app = Application::builder()
+        .application_id("com.angelpv.acryl.e2e.watchlist")
+        .build();
+    let window = run_gtk_or_skip(|| MainWindow::new(&app, config));
+    let window = match window {
+        Some(w) => w,
+        None => return,
+    };
+
+    assert!(
+        run_gtk_or_skip(|| window.borrow().show_details_for_test(movie_id, None)).unwrap_or(false),
+        "debe abrir la vista de detalles de la película"
+    );
+
+    let watchlist_button = run_gtk_or_skip(|| window.borrow().watchlist_button_for_test())
+        .expect("debe existir el botón de Mi lista");
+    run_gtk_or_skip(|| watchlist_button.emit_by_name::<()>("clicked", &[]));
+
+    {
+        let mut conn = open_db(&db_path).expect("abrir BD temporal");
+        let mut repo = MediaRepository::new(&mut conn);
+        let movie = repo
+            .find_by_id(movie_id)
+            .expect("buscar película")
+            .expect("la película existe");
+        assert!(movie.in_watchlist, "la película debe quedar en Mi lista");
+        assert!(
+            !movie.is_watched,
+            "añadir a Mi lista no debe marcarla como vista"
+        );
+    }
+
+    // Volver a pulsar el botón debe quitarla de Mi lista.
+    let watchlist_button = run_gtk_or_skip(|| window.borrow().watchlist_button_for_test())
+        .expect("debe existir el botón de Mi lista");
+    run_gtk_or_skip(|| watchlist_button.emit_by_name::<()>("clicked", &[]));
+
+    {
+        let mut conn = open_db(&db_path).expect("abrir BD temporal");
+        let mut repo = MediaRepository::new(&mut conn);
+        let movie = repo
+            .find_by_id(movie_id)
+            .expect("buscar película")
+            .expect("la película existe");
+        assert!(
+            !movie.in_watchlist,
+            "el segundo clic debe quitar la película de Mi lista"
         );
     }
 

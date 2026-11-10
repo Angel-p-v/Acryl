@@ -61,6 +61,7 @@ fn insercion_de_miles_de_medios_es_rapida() {
             order_by: None,
             favorite: None,
             watched: None,
+            watchlist: None,
         })
         .expect("listar todos");
     assert_eq!(todos.len(), N);
@@ -83,6 +84,7 @@ fn consulta_paginada_es_rapida_con_miles_de_medios() {
             order_by: None,
             favorite: None,
             watched: None,
+            watchlist: None,
         })
         .expect("listar página");
     let duracion = inicio.elapsed();
@@ -112,6 +114,7 @@ fn consulta_paginada_por_tipo_es_rapida() {
             order_by: None,
             favorite: None,
             watched: None,
+            watchlist: None,
         })
         .expect("listar películas");
     let duracion = inicio.elapsed();
@@ -142,6 +145,7 @@ fn busqueda_fts_con_miles_de_medios_es_rapida() {
                 limit: Some(50),
                 favorite: None,
                 watched: None,
+                watchlist: None,
             },
         )
         .expect("buscar");
@@ -175,6 +179,7 @@ fn paginacion_devuelve_medios_diferentes_en_cada_pagina() {
             order_by: None,
             favorite: None,
             watched: None,
+            watchlist: None,
         })
         .expect("listar página 1");
     let pagina2 = repo
@@ -185,6 +190,7 @@ fn paginacion_devuelve_medios_diferentes_en_cada_pagina() {
             order_by: None,
             favorite: None,
             watched: None,
+            watchlist: None,
         })
         .expect("listar página 2");
 

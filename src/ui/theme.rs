@@ -594,6 +594,12 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
             c.accent,
         ));
 
+        /* Botón de Mi lista activo */
+        css.push_str(&format!(
+            "button.watchlist-active {{ color: {}; }}\n",
+            c.accent,
+        ));
+
         /* Tarjeta de episodio marcada como visto */
         css.push_str(".episode-card.episode-watched { opacity: 0.55; }\n");
         css.push_str(".episode-card.episode-watched:hover { opacity: 0.75; }\n");
