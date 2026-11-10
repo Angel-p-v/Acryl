@@ -78,6 +78,10 @@ type SharedToggleMediaWatchedCallback = Rc<RefCell<Option<ToggleMediaWatchedCall
 type ToggleFavoriteCallback = Rc<dyn Fn(bool)>;
 type SharedToggleFavoriteCallback = Rc<RefCell<Option<ToggleFavoriteCallback>>>;
 
+/// Callback para añadir/quitar el medio de "Mi lista". Recibe el nuevo estado.
+type ToggleWatchlistCallback = Rc<dyn Fn(bool)>;
+type SharedToggleWatchlistCallback = Rc<RefCell<Option<ToggleWatchlistCallback>>>;
+
 /// Callback para calificar un medio. Recibe la puntuación (0 = sin calificar,
 /// Callback para calificar un medio. Recibe la puntuación (0 = sin calificar,
 /// 1-5 estrellas).
@@ -98,10 +102,13 @@ pub struct MediaDetails {
     main_button_label: String,
     synopsis_label: Label,
     tracks_button: Button,
+    collections_button: Button,
     favorite_button: Button,
+    watchlist_button: Button,
     watched_button: Button,
     media_watched: Rc<Cell<bool>>,
     media_favorite: Rc<Cell<bool>>,
+    media_watchlist: Rc<Cell<bool>>,
     media_rating: Rc<Cell<i32>>,
     rating_stars: Vec<Rc<Button>>,
     play_button: Button,
@@ -115,12 +122,14 @@ pub struct MediaDetails {
     selected_season: Rc<RefCell<Option<SeasonSelection>>>,
     suppress_season_change: Rc<Cell<bool>>,
     on_back: Option<Rc<dyn Fn()>>,
+    on_manage_collections: Option<Rc<dyn Fn()>>,
     on_play_episode: SharedPlayEpisodeCallback,
     on_edit_tracks: SharedEditTracksCallback,
     on_toggle_file_watched: SharedToggleFileWatchedCallback,
     on_toggle_season_watched: SharedToggleSeasonWatchedCallback,
     on_toggle_media_watched: SharedToggleMediaWatchedCallback,
     on_toggle_favorite: SharedToggleFavoriteCallback,
+    on_toggle_watchlist: SharedToggleWatchlistCallback,
     on_set_rating: SharedSetRatingCallback,
     on_choose_images: Option<ChooseImagesCallback>,
     /// Botones del menú de temporada del render actual, para tests E2E.
@@ -171,6 +180,11 @@ impl MediaDetails {
         tracks_button.set_tooltip_text(Some(&t("tooltip.tracks")));
         buttons_box.append(&tracks_button);
 
+        let collections_button = Button::with_label(&t("button.collections"));
+        collections_button.add_css_class("flat-button");
+        collections_button.set_tooltip_text(Some(&t("tooltip.collections")));
+        buttons_box.append(&collections_button);
+
         let favorite_button = Button::with_label(&t("button.favorite_add"));
         favorite_button.add_css_class("flat-button");
         favorite_button.add_css_class("favorite-button");
@@ -183,6 +197,13 @@ impl MediaDetails {
         watched_button.set_valign(gtk4::Align::Center);
         watched_button.set_tooltip_text(Some(&t("tooltip.mark_watched")));
         buttons_box.append(&watched_button);
+
+        let watchlist_button = Button::with_label(&t("button.watchlist_add"));
+        watchlist_button.add_css_class("flat-button");
+        watchlist_button.add_css_class("watchlist-button");
+        watchlist_button.set_valign(gtk4::Align::Center);
+        watchlist_button.set_tooltip_text(Some(&t("tooltip.watchlist_add")));
+        buttons_box.append(&watchlist_button);
 
         // Calificación con estrellas (1-5).
         let rating_label = Label::new(Some(&t("tooltip.rating")));
@@ -279,8 +300,10 @@ impl MediaDetails {
             Rc::new(RefCell::new(None));
         let on_toggle_media_watched: SharedToggleMediaWatchedCallback = Rc::new(RefCell::new(None));
         let on_toggle_favorite: SharedToggleFavoriteCallback = Rc::new(RefCell::new(None));
+        let on_toggle_watchlist: SharedToggleWatchlistCallback = Rc::new(RefCell::new(None));
         let media_watched = Rc::new(Cell::new(false));
         let media_favorite = Rc::new(Cell::new(false));
+        let media_watchlist = Rc::new(Cell::new(false));
         let season_actions: Rc<RefCell<Option<(Button, Button)>>> = Rc::new(RefCell::new(None));
 
         // Botón de marcar medio completo como visto/no visto.
@@ -329,6 +352,35 @@ impl MediaDetails {
                 favorite_button_cb.remove_css_class("favorite-active");
             }
             if let Some(cb) = on_toggle_favorite_cb.borrow().clone() {
+                cb(new_state);
+            }
+        });
+
+        // Botón de "Mi lista": alterna el estado local y la ventana principal
+        // persiste el cambio. Es independiente del estado de visto.
+        let watchlist_button_cb = watchlist_button.clone();
+        let media_watchlist_cb = media_watchlist.clone();
+        let on_toggle_watchlist_cb = on_toggle_watchlist.clone();
+        let watchlist_add_label = t("button.watchlist_add");
+        let watchlist_remove_label = t("button.watchlist_remove");
+        let watchlist_add_tooltip = t("tooltip.watchlist_add");
+        let watchlist_remove_tooltip = t("tooltip.watchlist_remove");
+        watchlist_button.connect_clicked(move |_| {
+            let new_state = !media_watchlist_cb.get();
+            media_watchlist_cb.set(new_state);
+            let (label, tooltip) = if new_state {
+                (&watchlist_remove_label, &watchlist_remove_tooltip)
+            } else {
+                (&watchlist_add_label, &watchlist_add_tooltip)
+            };
+            watchlist_button_cb.set_label(label);
+            watchlist_button_cb.set_tooltip_text(Some(tooltip));
+            if new_state {
+                watchlist_button_cb.add_css_class("watchlist-active");
+            } else {
+                watchlist_button_cb.remove_css_class("watchlist-active");
+            }
+            if let Some(cb) = on_toggle_watchlist_cb.borrow().clone() {
                 cb(new_state);
             }
         });
@@ -389,7 +441,9 @@ impl MediaDetails {
             main_button_label: t("button.play"),
             synopsis_label,
             tracks_button,
+            collections_button,
             favorite_button,
+            watchlist_button,
             play_button,
             back_button,
             vote_label,
@@ -397,6 +451,7 @@ impl MediaDetails {
             watched_button,
             media_watched,
             media_favorite,
+            media_watchlist,
             media_rating,
             rating_stars,
             season_dropdown,
@@ -406,12 +461,14 @@ impl MediaDetails {
             selected_season,
             suppress_season_change,
             on_back: None,
+            on_manage_collections: None,
             on_play_episode,
             on_edit_tracks,
             on_toggle_file_watched,
             on_toggle_season_watched,
             on_toggle_media_watched,
             on_toggle_favorite,
+            on_toggle_watchlist,
             on_set_rating,
             on_choose_images: None,
             season_actions,
@@ -501,6 +558,26 @@ impl MediaDetails {
             self.favorite_button.add_css_class("favorite-active");
         } else {
             self.favorite_button.remove_css_class("favorite-active");
+        }
+
+        self.media_watchlist.set(media.in_watchlist);
+        let watchlist_label = if media.in_watchlist {
+            self.t("button.watchlist_remove")
+        } else {
+            self.t("button.watchlist_add")
+        };
+        self.watchlist_button.set_label(&watchlist_label);
+        let watchlist_tooltip = if media.in_watchlist {
+            self.t("tooltip.watchlist_remove")
+        } else {
+            self.t("tooltip.watchlist_add")
+        };
+        self.watchlist_button
+            .set_tooltip_text(Some(&watchlist_tooltip));
+        if media.in_watchlist {
+            self.watchlist_button.add_css_class("watchlist-active");
+        } else {
+            self.watchlist_button.remove_css_class("watchlist-active");
         }
 
         // Actualizar estrellas de calificación.
@@ -723,6 +800,11 @@ impl MediaDetails {
         self.favorite_button.clone()
     }
 
+    /// Método público para tests: devuelve el botón de "Mi lista".
+    pub fn watchlist_button_for_test(&self) -> Button {
+        self.watchlist_button.clone()
+    }
+
     pub fn widget(&self) -> &Box {
         &self.box_
     }
@@ -769,6 +851,19 @@ impl MediaDetails {
         *self.on_edit_tracks.borrow_mut() = Some(cb);
     }
 
+    /// Registra el callback que abre el diálogo de colecciones del medio.
+    pub fn on_manage_collections<F>(&mut self, f: F)
+    where
+        F: Fn() + 'static,
+    {
+        let cb: Rc<dyn Fn()> = Rc::new(f);
+        let cb_clone = cb.clone();
+        self.collections_button.connect_clicked(move |_| {
+            cb_clone();
+        });
+        self.on_manage_collections = Some(cb);
+    }
+
     pub fn on_toggle_file_watched<F>(&mut self, f: F)
     where
         F: Fn(String, bool) + 'static,
@@ -799,6 +894,14 @@ impl MediaDetails {
     {
         let cb: Rc<dyn Fn(bool)> = Rc::new(f);
         *self.on_toggle_favorite.borrow_mut() = Some(cb);
+    }
+
+    pub fn on_toggle_watchlist<F>(&mut self, f: F)
+    where
+        F: Fn(bool) + 'static,
+    {
+        let cb: Rc<dyn Fn(bool)> = Rc::new(f);
+        *self.on_toggle_watchlist.borrow_mut() = Some(cb);
     }
 
     pub fn on_set_rating<F>(&mut self, f: F)

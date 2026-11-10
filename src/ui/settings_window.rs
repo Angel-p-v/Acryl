@@ -144,6 +144,18 @@ impl FolderManager {
         }
     }
 
+    /// Reconstruye la lista de carpetas a partir de la configuración actual.
+    /// Se usa tras importar un archivo de configuración.
+    fn reload_folders(&self) {
+        while let Some(child) = self.folders_list.first_child() {
+            self.folders_list.remove(&child);
+        }
+        let folders = self.config.borrow().media_folders.clone();
+        for folder in &folders {
+            self.append_folder_row(folder);
+        }
+    }
+
     /// Añade una carpeta a la configuración, la guarda y lanza el indexado.
     /// Devuelve `true` si la carpeta se añadió correctamente.
     fn add_folder(&self, input: &str) -> bool {
@@ -464,6 +476,14 @@ pub struct SettingsView {
     restore_button: Button,
     #[allow(dead_code)]
     data_status: Label,
+    config_title: Label,
+    config_label: Label,
+    export_config_button: Button,
+    import_config_button: Button,
+    maintenance_title: Label,
+    maintenance_label: Label,
+    clean_cache_button: Button,
+    vacuum_button: Button,
     theme_title: Label,
     theme_combo: DropDown,
     auto_play_next_switch: Switch,
@@ -556,6 +576,7 @@ fn normalize_default_track_key(key: Option<&str>) -> Option<String> {
 /// Combina un Entry (para escribir/filtrar), un Popover y un ListBox
 /// dentro de un ScrolledWindow. Escribir en el Entry filtra las opciones
 /// del ListBox (oculta las que no coinciden con el texto escrito).
+#[derive(Clone)]
 struct TrackSelector {
     entry: Entry,
     /// Todas las opciones disponibles: (clave, etiqueta mostrada).
@@ -805,6 +826,47 @@ impl TrackSelector {
 }
 
 impl SettingsView {
+    /// Aplica una configuración importada a los widgets de la vista.
+    ///
+    /// Se usa desde el callback del diálogo de importación, donde todavía no
+    /// existe `&self`. No persiste nada: el archivo ya lo hizo
+    /// `Config::import_config_from`. Los cambios de idioma y de biblioteca se
+    /// notifican a través de `FolderManager`.
+    #[allow(clippy::too_many_arguments)]
+    fn apply_config_to_widgets(
+        config: &Rc<RefCell<AppConfig>>,
+        folder_manager: &FolderManager,
+        language_combo: &DropDown,
+        theme_combo: &DropDown,
+        auto_play_next_switch: &Switch,
+        audio_selector: &TrackSelector,
+        subtitle_selector: &TrackSelector,
+        imported: &AppConfig,
+    ) {
+        *config.borrow_mut() = imported.clone();
+
+        language_combo.set_selected(if imported.language == "es" { 0 } else { 1 });
+        theme_combo.set_selected(if imported.theme == "light" { 1 } else { 0 });
+        auto_play_next_switch.set_active(imported.auto_play_next_episode);
+
+        let audio_key = normalize_default_track_key(imported.default_tracks.audio.as_deref());
+        let subtitle_key = normalize_default_track_key(imported.default_tracks.subtitle.as_deref());
+        audio_selector.select_key(audio_key.as_deref());
+        subtitle_selector.select_key(subtitle_key.as_deref());
+
+        folder_manager.reload_folders();
+
+        let mode = if imported.theme == "light" {
+            crate::ui::theme::ThemeMode::Light
+        } else {
+            crate::ui::theme::ThemeMode::Dark
+        };
+        crate::ui::theme::set_theme_mode(mode);
+
+        folder_manager.notify_config_changed();
+        folder_manager.notify_library_changed();
+    }
+
     /// Crea una nueva vista de ajustes.
     pub fn new<P: IsA<gtk4::Window>>(
         config: &AppConfig,
@@ -1115,6 +1177,87 @@ impl SettingsView {
         data_section.append(&auto_play_next_row);
 
         content.append(&data_section);
+
+        // --- Sección: Configuración (exportar / importar YAML) ---
+        let config_section = Box::new(Orientation::Vertical, 10);
+        config_section.set_hexpand(true);
+        config_section.set_margin_top(20);
+        config_section.set_margin_bottom(20);
+
+        let config_title = Label::new(Some(&t("settings.config.title")));
+        config_title.set_halign(gtk4::Align::Start);
+        config_title.add_css_class("subheading");
+        config_section.append(&config_title);
+
+        let config_label = Label::new(Some(&t("settings.config.description")));
+        config_label.set_halign(gtk4::Align::Start);
+        config_label.set_wrap(true);
+        config_section.append(&config_label);
+
+        let config_row = Box::new(Orientation::Horizontal, 10);
+        config_row.set_hexpand(true);
+
+        let export_config_button = Button::with_label(&t("button.export_config"));
+        export_config_button.set_halign(gtk4::Align::Start);
+        config_row.append(&export_config_button);
+
+        let import_config_button = Button::with_label(&t("button.import_config"));
+        import_config_button.set_halign(gtk4::Align::Start);
+        config_row.append(&import_config_button);
+
+        config_section.append(&config_row);
+
+        let config_status = Label::new(None);
+        config_status.set_halign(gtk4::Align::Start);
+        config_status.set_wrap(true);
+        config_status.set_visible(false);
+        config_status.add_css_class("dim-label");
+        config_section.append(&config_status);
+
+        content.append(&config_section);
+
+        // --- Sección: Mantenimiento ---
+        let maintenance_section = Box::new(Orientation::Vertical, 10);
+        maintenance_section.set_hexpand(true);
+        maintenance_section.set_margin_top(20);
+        maintenance_section.set_margin_bottom(20);
+
+        let maintenance_title = Label::new(Some(&t("settings.maintenance.title")));
+        maintenance_title.set_halign(gtk4::Align::Start);
+        maintenance_title.add_css_class("subheading");
+        maintenance_section.append(&maintenance_title);
+
+        let maintenance_label = Label::new(Some(&t("settings.maintenance.description")));
+        maintenance_label.set_halign(gtk4::Align::Start);
+        maintenance_label.set_wrap(true);
+        maintenance_section.append(&maintenance_label);
+
+        let maintenance_row = Box::new(Orientation::Horizontal, 10);
+        maintenance_row.set_hexpand(true);
+
+        let clean_cache_button = Button::with_label(&t("button.clean_cache"));
+        clean_cache_button.set_halign(gtk4::Align::Start);
+        maintenance_row.append(&clean_cache_button);
+
+        let vacuum_button = Button::with_label(&t("button.vacuum_db"));
+        vacuum_button.set_halign(gtk4::Align::Start);
+        maintenance_row.append(&vacuum_button);
+
+        let maintenance_spinner = Spinner::new();
+        maintenance_spinner.set_visible(false);
+        maintenance_spinner.set_valign(gtk4::Align::Center);
+        maintenance_row.append(&maintenance_spinner);
+
+        maintenance_section.append(&maintenance_row);
+
+        let maintenance_status = Label::new(None);
+        maintenance_status.set_halign(gtk4::Align::Start);
+        maintenance_status.set_wrap(true);
+        maintenance_status.set_visible(false);
+        maintenance_status.add_css_class("dim-label");
+        maintenance_section.append(&maintenance_status);
+
+        content.append(&maintenance_section);
 
         // --- Sección: Acerca de ---
         let about_section = Box::new(Orientation::Vertical, 10);
@@ -1429,6 +1572,377 @@ impl SettingsView {
             );
         });
 
+        // Exportar la configuración activa a un archivo YAML.
+        let config_export = config_rc.clone();
+        let config_path_export = config_path.to_path_buf();
+        let window_export = parent.upcast_ref::<gtk4::Window>().clone();
+        let translations_export = translations.clone();
+        let config_status_export = config_status.clone();
+        export_config_button.connect_clicked(move |_| {
+            let dialog = gtk4::FileDialog::new();
+            dialog.set_title(&translations_export.borrow().t("dialog.export_config.title"));
+            dialog.set_initial_name(Some("acryl-config.yaml"));
+
+            let filter = gtk4::FileFilter::new();
+            filter.set_name(Some(
+                &translations_export.borrow().t("dialog.config_filter"),
+            ));
+            filter.add_pattern("*.yaml");
+            filter.add_pattern("*.yml");
+            let filters = gio::ListStore::new::<gtk4::FileFilter>();
+            filters.append(&filter);
+            dialog.set_filters(Some(&filters));
+            dialog.set_default_filter(Some(&filter));
+
+            let config = config_export.clone();
+            let config_path = config_path_export.clone();
+            let window = window_export.clone();
+            let window_for_dialog = window.clone();
+            let translations = translations_export.clone();
+            let status = config_status_export.clone();
+            dialog.save(
+                Some(&window_for_dialog),
+                None::<&gio::Cancellable>,
+                move |result| match result {
+                    Ok(file) => {
+                        let Some(path) = file.path() else {
+                            return;
+                        };
+                        let config = crate::config::Config {
+                            path: config_path,
+                            inner: config.borrow().clone(),
+                        };
+                        match config.export_config_to(&path) {
+                            Ok(()) => {
+                                let message = translations
+                                    .borrow()
+                                    .t("status.config_exported_format")
+                                    .replacen("{}", &path.display().to_string(), 1);
+                                status.set_label(&message);
+                                status.set_visible(true);
+                            }
+                            Err(error) => {
+                                eprintln!("No se pudo exportar la configuración: {}", error);
+                                let title = translations.borrow().t("error.export_config.title");
+                                show_alert(&window, &title, &error.to_string());
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        if !error.matches(gio::IOErrorEnum::Cancelled) {
+                            eprintln!(
+                                "No se pudo elegir el destino de la configuración: {}",
+                                error
+                            );
+                        }
+                    }
+                },
+            );
+        });
+
+        // Importar configuración desde un archivo YAML, con confirmación.
+        let config_import = config_rc.clone();
+        let config_path_import = config_path.to_path_buf();
+        let window_import = parent.upcast_ref::<gtk4::Window>().clone();
+        let translations_import = translations.clone();
+        let config_status_import = config_status.clone();
+        let folder_manager_import = folder_manager.clone();
+        let language_combo_import = language_combo.clone();
+        let theme_combo_import = theme_combo.clone();
+        let auto_play_next_import = auto_play_next_switch.clone();
+        let audio_selector_import = default_audio_selector.clone();
+        let subtitle_selector_import = default_subtitle_selector.clone();
+        import_config_button.connect_clicked(move |_| {
+            let dialog = gtk4::FileDialog::new();
+            dialog.set_title(&translations_import.borrow().t("dialog.import_config.title"));
+
+            let filter = gtk4::FileFilter::new();
+            filter.set_name(Some(
+                &translations_import.borrow().t("dialog.config_filter"),
+            ));
+            filter.add_pattern("*.yaml");
+            filter.add_pattern("*.yml");
+            let filters = gio::ListStore::new::<gtk4::FileFilter>();
+            filters.append(&filter);
+            dialog.set_filters(Some(&filters));
+            dialog.set_default_filter(Some(&filter));
+
+            let config = config_import.clone();
+            let config_path = config_path_import.clone();
+            let window = window_import.clone();
+            let window_for_dialog = window.clone();
+            let translations = translations_import.clone();
+            let status = config_status_import.clone();
+            let folder_manager = folder_manager_import.clone();
+            let language_combo = language_combo_import.clone();
+            let theme_combo = theme_combo_import.clone();
+            let auto_play_next = auto_play_next_import.clone();
+            let audio_selector = audio_selector_import.clone();
+            let subtitle_selector = subtitle_selector_import.clone();
+            dialog.open(
+                Some(&window_for_dialog),
+                None::<&gio::Cancellable>,
+                move |result| match result {
+                    Ok(file) => {
+                        let Some(path) = file.path() else {
+                            return;
+                        };
+                        let title = translations
+                            .borrow()
+                            .t("dialog.import_config.confirm.title");
+                        let detail = translations
+                            .borrow()
+                            .t("dialog.import_config.confirm.detail");
+                        let cancel = translations.borrow().t("button.cancel");
+                        let import = translations
+                            .borrow()
+                            .t("dialog.import_config.confirm.import");
+                        let confirm = gtk4::AlertDialog::builder()
+                            .modal(true)
+                            .message(&title)
+                            .detail(&detail)
+                            .buttons([cancel.as_str(), import.as_str()])
+                            .cancel_button(0)
+                            .default_button(0)
+                            .build();
+
+                        let config = config.clone();
+                        let config_path = config_path.clone();
+                        let window = window.clone();
+                        let translations = translations.clone();
+                        let status = status.clone();
+                        let folder_manager = folder_manager.clone();
+                        let language_combo = language_combo.clone();
+                        let theme_combo = theme_combo.clone();
+                        let auto_play_next = auto_play_next.clone();
+                        let audio_selector = audio_selector.clone();
+                        let subtitle_selector = subtitle_selector.clone();
+                        let window_for_choose = window.clone();
+                        confirm.choose(
+                            Some(&window_for_choose),
+                            None::<&gio::Cancellable>,
+                            move |response| {
+                                if !matches!(response, Ok(1)) {
+                                    return;
+                                }
+                                let mut config_file = crate::config::Config {
+                                    path: config_path.clone(),
+                                    inner: config.borrow().clone(),
+                                };
+                                match config_file.import_config_from(&path) {
+                                    Ok(imported) => {
+                                        SettingsView::apply_config_to_widgets(
+                                            &config,
+                                            &folder_manager,
+                                            &language_combo,
+                                            &theme_combo,
+                                            &auto_play_next,
+                                            &audio_selector,
+                                            &subtitle_selector,
+                                            &imported,
+                                        );
+                                        status.set_label(
+                                            &translations.borrow().t("status.config_imported"),
+                                        );
+                                        status.set_visible(true);
+                                    }
+                                    Err(error) => {
+                                        eprintln!(
+                                            "No se pudo importar la configuración: {}",
+                                            error
+                                        );
+                                        let title =
+                                            translations.borrow().t("error.import_config.title");
+                                        show_alert(&window, &title, &error.to_string());
+                                    }
+                                }
+                            },
+                        );
+                    }
+                    Err(error) => {
+                        if !error.matches(gio::IOErrorEnum::Cancelled) {
+                            eprintln!("No se pudo elegir el archivo de configuración: {}", error);
+                        }
+                    }
+                },
+            );
+        });
+
+        // Mantenimiento: limpiar pósters huérfanos de la caché.
+        let folder_manager_cache = folder_manager.clone();
+        let metadata_spinner_cache = metadata_spinner.clone();
+        let window_cache = parent.upcast_ref::<gtk4::Window>().clone();
+        let translations_cache = translations.clone();
+        let maintenance_status_cache = maintenance_status.clone();
+        let maintenance_spinner_cache = maintenance_spinner.clone();
+        let clean_cache_button_cache = clean_cache_button.clone();
+        let vacuum_button_cache = vacuum_button.clone();
+        clean_cache_button.connect_clicked(move |_| {
+            if folder_manager_cache.indexing.get() || metadata_spinner_cache.is_visible() {
+                let title = translations_cache
+                    .borrow()
+                    .t("error.maintenance_busy.title");
+                let detail = translations_cache
+                    .borrow()
+                    .t("error.maintenance_busy.detail");
+                show_alert(&window_cache, &title, &detail);
+                return;
+            }
+
+            maintenance_spinner_cache.set_spinning(true);
+            maintenance_spinner_cache.set_visible(true);
+            clean_cache_button_cache.set_sensitive(false);
+            vacuum_button_cache.set_sensitive(false);
+            maintenance_status_cache
+                .set_label(&translations_cache.borrow().t("status.cleaning_cache"));
+            maintenance_status_cache.set_visible(true);
+
+            let db_path = folder_manager_cache.db_path.clone();
+            let (sender, receiver) = mpsc::channel::<Result<usize, String>>();
+            std::thread::spawn(move || {
+                let result = (|| -> Result<usize, String> {
+                    let mut conn = open_db(&db_path).map_err(|error| error.to_string())?;
+                    let mut repo = MediaRepository::new(&mut conn);
+                    let urls = repo
+                        .list_referenced_image_urls()
+                        .map_err(|error| error.to_string())?;
+                    close_db(conn);
+                    let referenced: Vec<&str> = urls.iter().map(String::as_str).collect();
+                    crate::core::poster_service::clean_orphaned_default(&referenced)
+                        .map_err(|error| error.to_string())
+                })();
+                let _ = sender.send(result);
+            });
+
+            let translations = translations_cache.clone();
+            let status = maintenance_status_cache.clone();
+            let spinner = maintenance_spinner_cache.clone();
+            let clean_button = clean_cache_button_cache.clone();
+            let vacuum_button = vacuum_button_cache.clone();
+            let window = window_cache.clone();
+            glib::timeout_add_local(Duration::from_millis(150), move || {
+                match receiver.try_recv() {
+                    Ok(Ok(removed)) => {
+                        spinner.set_spinning(false);
+                        spinner.set_visible(false);
+                        clean_button.set_sensitive(true);
+                        vacuum_button.set_sensitive(true);
+                        let message = translations
+                            .borrow()
+                            .t("status.cache_cleaned_format")
+                            .replacen("{}", &removed.to_string(), 1);
+                        status.set_label(&message);
+                        status.set_visible(true);
+                        glib::ControlFlow::Break
+                    }
+                    Ok(Err(error)) => {
+                        spinner.set_spinning(false);
+                        spinner.set_visible(false);
+                        clean_button.set_sensitive(true);
+                        vacuum_button.set_sensitive(true);
+                        let title = translations.borrow().t("error.clean_cache.title");
+                        show_alert(&window, &title, &error);
+                        glib::ControlFlow::Break
+                    }
+                    Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(TryRecvError::Disconnected) => {
+                        spinner.set_spinning(false);
+                        spinner.set_visible(false);
+                        clean_button.set_sensitive(true);
+                        vacuum_button.set_sensitive(true);
+                        let title = translations.borrow().t("error.clean_cache.title");
+                        show_alert(
+                            &window,
+                            &title,
+                            &translations.borrow().t("error.maintenance_interrupted"),
+                        );
+                        glib::ControlFlow::Break
+                    }
+                }
+            });
+        });
+
+        // Mantenimiento: compactar la base de datos (VACUUM + ANALYZE).
+        let folder_manager_vacuum = folder_manager.clone();
+        let metadata_spinner_vacuum = metadata_spinner.clone();
+        let window_vacuum = parent.upcast_ref::<gtk4::Window>().clone();
+        let translations_vacuum = translations.clone();
+        let maintenance_status_vacuum = maintenance_status.clone();
+        let maintenance_spinner_vacuum = maintenance_spinner.clone();
+        let clean_cache_button_vacuum = clean_cache_button.clone();
+        let vacuum_button_vacuum = vacuum_button.clone();
+        vacuum_button.connect_clicked(move |_| {
+            if folder_manager_vacuum.indexing.get() || metadata_spinner_vacuum.is_visible() {
+                let title = translations_vacuum
+                    .borrow()
+                    .t("error.maintenance_busy.title");
+                let detail = translations_vacuum
+                    .borrow()
+                    .t("error.maintenance_busy.detail");
+                show_alert(&window_vacuum, &title, &detail);
+                return;
+            }
+
+            maintenance_spinner_vacuum.set_spinning(true);
+            maintenance_spinner_vacuum.set_visible(true);
+            clean_cache_button_vacuum.set_sensitive(false);
+            vacuum_button_vacuum.set_sensitive(false);
+            maintenance_status_vacuum
+                .set_label(&translations_vacuum.borrow().t("status.vacuuming"));
+            maintenance_status_vacuum.set_visible(true);
+
+            let db_path = folder_manager_vacuum.db_path.clone();
+            let (sender, receiver) = mpsc::channel::<Result<(), String>>();
+            std::thread::spawn(move || {
+                let result = crate::db::connection::vacuum_database(&db_path)
+                    .map_err(|error| error.to_string());
+                let _ = sender.send(result);
+            });
+
+            let translations = translations_vacuum.clone();
+            let status = maintenance_status_vacuum.clone();
+            let spinner = maintenance_spinner_vacuum.clone();
+            let clean_button = clean_cache_button_vacuum.clone();
+            let vacuum_button = vacuum_button_vacuum.clone();
+            let window = window_vacuum.clone();
+            glib::timeout_add_local(Duration::from_millis(150), move || {
+                match receiver.try_recv() {
+                    Ok(Ok(())) => {
+                        spinner.set_spinning(false);
+                        spinner.set_visible(false);
+                        clean_button.set_sensitive(true);
+                        vacuum_button.set_sensitive(true);
+                        status.set_label(&translations.borrow().t("status.vacuum_done"));
+                        status.set_visible(true);
+                        glib::ControlFlow::Break
+                    }
+                    Ok(Err(error)) => {
+                        spinner.set_spinning(false);
+                        spinner.set_visible(false);
+                        clean_button.set_sensitive(true);
+                        vacuum_button.set_sensitive(true);
+                        let title = translations.borrow().t("error.vacuum_db.title");
+                        show_alert(&window, &title, &error);
+                        glib::ControlFlow::Break
+                    }
+                    Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(TryRecvError::Disconnected) => {
+                        spinner.set_spinning(false);
+                        spinner.set_visible(false);
+                        clean_button.set_sensitive(true);
+                        vacuum_button.set_sensitive(true);
+                        let title = translations.borrow().t("error.vacuum_db.title");
+                        show_alert(
+                            &window,
+                            &title,
+                            &translations.borrow().t("error.maintenance_interrupted"),
+                        );
+                        glib::ControlFlow::Break
+                    }
+                }
+            });
+        });
+
         // Reindexar todas las carpetas configuradas.
         let manager_reindex = folder_manager.clone();
         reindex_button.connect_clicked(move |_| {
@@ -1462,6 +1976,14 @@ impl SettingsView {
             backup_button,
             restore_button,
             data_status,
+            config_title,
+            config_label,
+            export_config_button,
+            import_config_button,
+            maintenance_title,
+            maintenance_label,
+            clean_cache_button,
+            vacuum_button,
             theme_title,
             theme_combo,
             auto_play_next_switch,
@@ -1518,6 +2040,19 @@ impl SettingsView {
         self.data_label.set_label(&t("settings.data.description"));
         self.backup_button.set_label(&t("button.backup_db"));
         self.restore_button.set_label(&t("button.restore_db"));
+        self.config_title.set_label(&t("settings.config.title"));
+        self.config_label
+            .set_label(&t("settings.config.description"));
+        self.export_config_button
+            .set_label(&t("button.export_config"));
+        self.import_config_button
+            .set_label(&t("button.import_config"));
+        self.maintenance_title
+            .set_label(&t("settings.maintenance.title"));
+        self.maintenance_label
+            .set_label(&t("settings.maintenance.description"));
+        self.clean_cache_button.set_label(&t("button.clean_cache"));
+        self.vacuum_button.set_label(&t("button.vacuum_db"));
         self.theme_title.set_label(&t("settings.theme.title"));
 
         // Actualizar las opciones del desplegable de tema conservando la

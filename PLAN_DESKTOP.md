@@ -458,20 +458,27 @@ Estado: en ejecución (rama `feat/cobertura-area-3-5-6-reproduccion-ui-docs`).
 - `clean_orphaned(dir, referenced_urls)` elimina del caché las imágenes ya no referenciadas por ningún medio (póster/banner de `media` e imagen de episodio de `media_files`). El llamador recopila las URLs desde el repositorio, manteniendo al servicio independiente de la capa de BD.
 - Se conserva `clean_cache(max_age_days)` por antigüedad.
 
-### 18.4. Área 6 — Configuración y ajustes (parcial)
+### 18.4. Área 6 — Configuración y ajustes (implementado)
 - Implementado: `playback_completion_threshold_seconds` en `AppConfig` (por defecto 300 s). Para películas se aplica el doble, preservando el comportamiento histórico (300 s episodios/anime, 600 s películas).
-- Pendiente: validación explícita de rutas de carpetas en la UI de configuración, exportar/importar configuración YAML y base de datos SQLite (backup/restore).
+- Implementado: validación de carpetas al importar configuración, exportación/importación YAML y copia/restauración de la base de datos. La importación conserva la ruta de la base activa.
+- Implementado: mantenimiento desde Ajustes con limpieza de pósters huérfanos y `VACUUM` + `ANALYZE`; ambas tareas se ejecutan fuera del hilo de GTK.
 
-### 18.5. Reproducción y mpv (parcial)
+### 18.5. Reproducción y mpv (implementado)
 - Implementado: umbral de completado configurable (`should_complete_playback` acepta `threshold_seconds`; `play_with_resume_with_mode` lo recibe desde la configuración).
-- Pendiente: selección de pistas desde el track dialog con persistencia por archivo (ya existe el diálogo), control de sesión mpv (pausar/reanudar desde la app vía IPC socket ya implementado en `MpvPlayer`).
+- Implementado: selección de pistas desde el track dialog con persistencia por archivo.
+- Implementado: control de la sesión mpv desde Acryl (pausa, ±10 s, volumen y cierre) mediante el socket IPC, incluida la reproducción externa sin `--idle`.
 
-### 18.6. UI y experiencia
-- Pendiente: filtro por favoritos y visto/no visto, paginado/carga incremental, atajos de teclado y navegación accesible, tema claro/oscuro.
+### 18.6. UI y experiencia (implementado)
+- Implementado: filtros por favoritos, visto/no visto y «Mi lista», paginación/carga incremental, atajos de teclado, tema claro/oscuro y colecciones de usuario.
+- Implementado: exportación/importación de configuración y sección de mantenimiento en Ajustes.
 
 ### 18.7. Documentación y operaciones (parcial)
 - Implementado: `diagnostic/acryl-check.sh` verifica explícitamente GTK4, Libadwaita, gdk-pixbuf2, mpv y ffprobe como dependencias del sistema.
-- Pendiente: actualizar `README.md` y añadir ADR si procede.
+- Pendiente: actualizar capturas y añadir ADR si procede.
+
+### 18.8. Subtítulos automáticos (pendiente de decisión de producto)
+- La descarga automática de subtítulos requiere un proveedor externo con credenciales (por ejemplo, OpenSubtitles) y una decisión sobre el tratamiento de la API key.
+- No se implementa una integración de red sin credenciales ni pruebas reproducibles; queda documentado como siguiente tarea.
 
 ---
 
