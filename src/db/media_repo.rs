@@ -847,6 +847,31 @@ impl<'a> MediaRepository<'a> {
         Ok(rows)
     }
 
+    /// Devuelve las URLs de todas las imágenes referenciadas por la
+    /// biblioteca: pósters y banners de `media` e imágenes de episodio de
+    /// `media_files`.
+    ///
+    /// Se usa para limpiar de la caché de pósters los archivos que ya no
+    /// pertenecen a ningún medio. Solo se incluyen valores no vacíos.
+    pub fn list_referenced_image_urls(&mut self) -> RusqliteResult<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT poster_path FROM media
+             WHERE poster_path IS NOT NULL AND poster_path <> ''
+             UNION
+             SELECT banner_path FROM media
+             WHERE banner_path IS NOT NULL AND banner_path <> ''
+             UNION
+             SELECT episode_image_path FROM media_files
+             WHERE episode_image_path IS NOT NULL AND episode_image_path <> ''
+             ORDER BY 1",
+        )?;
+        let rows: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
+    }
+
     pub fn list_files_by_media(
         &mut self,
         media_id: i64,
@@ -2205,5 +2230,44 @@ mod tests {
             .expect("buscar series");
         assert_eq!(series.len(), 1);
         assert_eq!(series[0].title, "Serie A");
+    }
+
+    #[test]
+    fn list_referenced_image_urls_incluye_posters_banners_e_imagenes_de_episodio() {
+        let (db_path, _dir) = temp_db();
+        let mut conn = open_db(&db_path).expect("abrir BD");
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path, poster_path, banner_path)
+             VALUES ('series', 'Serie', 'serie', '/tmp/serie', 'https://img/poster.jpg', 'https://img/banner.jpg')",
+            [],
+        )
+        .unwrap();
+        let media_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO media_files (media_id, file_path, episode_image_path)
+             VALUES (?1, '/tmp/serie/ep1.mkv', 'https://img/ep1.jpg')",
+            rusqlite::params![media_id],
+        )
+        .unwrap();
+        // Valores vacíos y NULL no deben aparecer.
+        conn.execute(
+            "INSERT INTO media (type, title, sort_title, folder_path, poster_path)
+             VALUES ('movie', 'Película', 'pelicula', '/tmp/peli', '')",
+            [],
+        )
+        .unwrap();
+
+        let mut repo = MediaRepository::new(&mut conn);
+        let urls = repo
+            .list_referenced_image_urls()
+            .expect("listar URLs referenciadas");
+        assert_eq!(
+            urls,
+            vec![
+                "https://img/banner.jpg".to_string(),
+                "https://img/ep1.jpg".to_string(),
+                "https://img/poster.jpg".to_string(),
+            ]
+        );
     }
 }

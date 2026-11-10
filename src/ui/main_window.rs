@@ -952,14 +952,24 @@ impl MainWindow {
             Self::refresh_views(&this_save);
         });
 
-        // Callback: cambios inmediatos de carpetas (ya persistidos por la vista).
+        // Callback: cambios inmediatos de configuración (ya persistidos por la
+        // vista). Se usa al añadir/eliminar carpetas y al importar un YAML:
+        // aplica el idioma en caliente si cambió y actualiza el estado.
         let this_clone = this.clone();
         this.borrow_mut()
             .settings_view
             .on_config_changed(move |new_config| {
-                let w = this_clone.borrow();
-                *w.config.borrow_mut() = new_config;
-                Self::update_library_status(&w);
+                let previous_language = this_clone.borrow().config.borrow().language.clone();
+                let language = new_config.language.clone();
+                {
+                    let w = this_clone.borrow();
+                    *w.config.borrow_mut() = new_config;
+                    Self::update_library_status(&w);
+                }
+                if language != previous_language {
+                    let mut w = this_clone.borrow_mut();
+                    let _ = w.set_language(&language);
+                }
             });
 
         // Callback: la indexación terminó -> recargar la galería y asegurar

@@ -136,20 +136,29 @@ impl Config {
 
     /// Importa configuración desde un archivo YAML en `path`, la valida y la
     /// guarda como la configuración activa. Devuelve el `AppConfig` importado.
+    ///
+    /// La ruta de la base de datos activa se conserva: la importación solo
+    /// reemplaza las preferencias (carpetas, idioma, tema, pistas...), no la
+    /// ubicación de la biblioteca que la aplicación tiene abierta.
     pub fn import_config_from(
         &mut self,
         path: &Path,
     ) -> Result<AppConfig, Box<dyn std::error::Error>> {
         let contents = fs::read_to_string(path)?;
-        let inner: AppConfig = serde_yaml::from_str(&contents)?;
-        // Validar que las carpetas de medios existan y sean legibles.
+        let mut inner: AppConfig = serde_yaml::from_str(&contents)?;
+        // Validar que las carpetas de medios existan, sean directorios y se
+        // puedan leer. Una carpeta sin permisos haría fallar el indexado más
+        // tarde con un error menos claro.
         for folder in &inner.media_folders {
-            if Path::new(folder).exists() && Path::new(folder).is_dir() {
-                // OK
-            } else {
+            let folder_path = Path::new(folder);
+            if !folder_path.is_dir() {
                 return Err(format!("carpeta de medios no válida: {}", folder).into());
             }
+            if fs::read_dir(folder_path).is_err() {
+                return Err(format!("carpeta de medios no legible: {}", folder).into());
+            }
         }
+        inner.db_path = self.inner.db_path.clone();
         self.inner = inner;
         self.save()?;
         Ok(self.inner.clone())
@@ -320,6 +329,9 @@ playback_completion_threshold_seconds: 600
         assert_eq!(imported.language, "en");
         assert_eq!(imported.default_player, "mpv");
         assert_eq!(imported.playback_completion_threshold_seconds, 600);
+        // La ubicación de la base activa no se reemplaza al importar.
+        assert_eq!(imported.db_path, config.inner().db_path);
+        assert!(imported.db_path.ends_with("acryl.db"));
         // La config activa se actualizó.
         assert_eq!(config.inner().language, "en");
         drop(config);
