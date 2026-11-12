@@ -41,7 +41,7 @@ jobs:
             xvfb
       - name: Cachear binarios de cargo (cargo-audit, cargo-tarpaulin)
         id: cache-cargo-bin
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/bin
           key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/ci.yml') }}
