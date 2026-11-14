@@ -116,19 +116,50 @@ pub fn build_mpv_args_with_tracks(
 
 /// Construye los argumentos de mpv con IPC para un modo de ventana y pistas
 /// resueltas concretas.
+///
+/// `--idle=yes` mantiene mpv vivo entre archivos para que el socket IPC siga
+/// disponible durante el seguimiento de la reproducción.
 pub fn build_mpv_args_for_playback(
     file_path: &str,
     socket_path: &str,
     tracks: &ResolvedTracks,
     window_mode: PlayerWindowMode,
 ) -> Vec<String> {
+    build_mpv_args_with_ipc(file_path, socket_path, tracks, window_mode, true, false)
+}
+
+/// Argumentos para una reproducción externa con socket IPC pero sin `--idle`:
+/// mpv debe cerrarse al terminar el archivo, como en el reproductor
+/// independiente. Incluye `--` para separar opciones de la ruta.
+pub fn build_mpv_args_for_external_playback(
+    file_path: &str,
+    socket_path: &str,
+    tracks: &ResolvedTracks,
+    window_mode: PlayerWindowMode,
+) -> Vec<String> {
+    build_mpv_args_with_ipc(file_path, socket_path, tracks, window_mode, false, true)
+}
+
+fn build_mpv_args_with_ipc(
+    file_path: &str,
+    socket_path: &str,
+    tracks: &ResolvedTracks,
+    window_mode: PlayerWindowMode,
+    idle: bool,
+    separator: bool,
+) -> Vec<String> {
     let mut args = vec![
         "--force-window=immediate".to_string(),
         format!("--input-ipc-server={}", socket_path),
-        "--idle=yes".to_string(),
     ];
+    if idle {
+        args.push("--idle=yes".to_string());
+    }
     append_window_args(&mut args, window_mode);
     append_track_args(&mut args, tracks);
+    if separator {
+        args.push("--".to_string());
+    }
     args.push(file_path.to_string());
     args
 }
@@ -216,9 +247,15 @@ fn append_track_args(args: &mut Vec<String>, tracks: &ResolvedTracks) {
 pub struct PlaybackSession {
     finished: Receiver<bool>,
     completed: Cell<bool>,
+    socket_path: Option<String>,
 }
 
 impl PlaybackSession {
+    /// Ruta del socket IPC de mpv, si esta sesión admite control remoto.
+    pub fn socket_path(&self) -> Option<&str> {
+        self.socket_path.as_deref()
+    }
+
     /// Indica si mpv ya terminó. Pensado para consultarse desde un timeout de
     /// GLib; devuelve `true` también si el hilo terminó sin enviar la señal.
     pub fn finished(&self) -> bool {
@@ -237,6 +274,52 @@ impl PlaybackSession {
     /// `finished()` devuelva `true`.
     pub fn completed(&self) -> bool {
         self.completed.get()
+    }
+
+    /// Envía un comando al socket IPC de esta sesión.
+    fn send(&self, command_json: &str) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        let socket = self
+            .socket_path
+            .as_deref()
+            .ok_or("la reproducción no tiene socket IPC")?;
+        mpv_request(socket, command_json)
+    }
+
+    /// Alterna pausa/reproducción y devuelve el nuevo estado (`true` = pausado).
+    pub fn toggle_pause(&self) -> Result<bool, Box<dyn std::error::Error>> {
+        self.send(&mpv_cmd_toggle_pause())?;
+        self.pause_state()
+    }
+
+    /// Devuelve si mpv está pausado.
+    pub fn pause_state(&self) -> Result<bool, Box<dyn std::error::Error>> {
+        let response = self
+            .send(r#"{"command":["get_property","pause"]}"#)?
+            .ok_or("mpv no devolvió respuesta")?;
+        let value: Value = serde_json::from_str(&response)?;
+        value
+            .get("data")
+            .and_then(|data| data.as_bool())
+            .ok_or_else(|| "mpv no devolvió el estado de pausa".into())
+    }
+
+    /// Ajusta el volumen de mpv (0-100).
+    pub fn set_volume(&self, volume: f64) -> Result<(), Box<dyn std::error::Error>> {
+        self.send(&mpv_cmd_set_volume(volume.clamp(0.0, 100.0)))?;
+        Ok(())
+    }
+
+    /// Salta `seconds` segundos hacia delante (positivo) o hacia atrás
+    /// (negativo) respecto a la posición actual.
+    pub fn seek_relative(&self, seconds: f64) -> Result<(), Box<dyn std::error::Error>> {
+        self.send(&mpv_cmd_seek_relative(seconds))?;
+        Ok(())
+    }
+
+    /// Pide a mpv que se cierre.
+    pub fn stop(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.send(r#"{"command":["quit"]}"#)?;
+        Ok(())
     }
 }
 
@@ -646,15 +729,25 @@ pub fn play_external_with_mode(
         });
     }
 
-    let mut child = spawn_mpv(&build_mpv_launch_args_for_playback(
+    // Socket IPC propio para poder controlar esta reproducción desde Acryl
+    // (pausa, volumen y saltos) sin compartirlo con otra instancia de mpv.
+    let socket_path = format!(
+        "/tmp/acryl-mpv-{}.socket",
+        NEXT_SOCKET_ID.fetch_add(1, Ordering::Relaxed)
+    );
+
+    let mut child = spawn_mpv(&build_mpv_args_for_external_playback(
         file_path,
+        &socket_path,
         &resolution.tracks,
         window_mode,
     ))?;
 
     let (finished_sender, finished_receiver) = mpsc::channel::<bool>();
+    let socket_for_thread = socket_path.clone();
     std::thread::spawn(move || {
         let _ = child.wait();
+        let _ = std::fs::remove_file(&socket_for_thread);
         let _ = finished_sender.send(false);
     });
 
@@ -667,6 +760,7 @@ pub fn play_external_with_mode(
     Ok(PlaybackStart::Started(PlaybackSession {
         finished: finished_receiver,
         completed: Cell::new(false),
+        socket_path: Some(socket_path),
     }))
 }
 
@@ -929,6 +1023,7 @@ pub fn play_with_resume_with_mode(
     Ok(PlaybackStart::Started(PlaybackSession {
         finished: finished_receiver,
         completed: Cell::new(false),
+        socket_path: Some(socket_path),
     }))
 }
 
@@ -985,6 +1080,11 @@ fn mpv_cmd_set_volume(volume: f64) -> String {
 /// Construye el comando JSON para establecer la posición de tiempo (segundos).
 fn mpv_cmd_set_time_pos(seconds: f64) -> String {
     format!(r#"{{"command":["set_property","time-pos",{}]}}"#, seconds)
+}
+
+/// Construye el comando JSON para saltar segundos respecto a la posición actual.
+fn mpv_cmd_seek_relative(seconds: f64) -> String {
+    format!(r#"{{"command":["seek",{},"relative"]}}"#, seconds)
 }
 
 /// Construye el comando JSON para obtener la duración.
@@ -1356,6 +1456,39 @@ mod tests {
     }
 
     #[test]
+    fn external_playback_usa_ipc_sin_idle_y_separa_la_ruta() {
+        let tracks = ResolvedTracks {
+            selection: TrackSelection::default(),
+            external_subtitles: Vec::new(),
+        };
+        let args = build_mpv_args_for_external_playback(
+            "/ruta/video.mkv",
+            "/tmp/acryl-ext.sock",
+            &tracks,
+            PlayerWindowMode::Fullscreen,
+        );
+        assert!(args.contains(&"--input-ipc-server=/tmp/acryl-ext.sock".to_string()));
+        assert!(!args.contains(&"--idle=yes".to_string()));
+        assert_eq!(args.last().map(String::as_str), Some("/ruta/video.mkv"));
+        assert_eq!(args[args.len() - 2], "--");
+    }
+
+    #[test]
+    fn playback_session_sin_socket_no_permite_control_remoto() {
+        let (_sender, receiver) = mpsc::channel();
+        let session = PlaybackSession {
+            finished: receiver,
+            completed: Cell::new(false),
+            socket_path: None,
+        };
+        assert!(session.socket_path().is_none());
+        assert!(session.toggle_pause().is_err());
+        assert!(session.set_volume(50.0).is_err());
+        assert!(session.seek_relative(-10.0).is_err());
+        assert!(session.stop().is_err());
+    }
+
+    #[test]
     fn launch_mpv_falla_limpiamente_si_el_archivo_no_existe() {
         let resultado = launch_mpv("/ruta/que/no/existe.mp4");
         assert!(resultado.is_err());
@@ -1370,6 +1503,16 @@ mod tests {
         assert_eq!(arr.len(), 2);
         assert_eq!(arr[0], "cycle");
         assert_eq!(arr[1], "pause");
+    }
+
+    #[test]
+    fn mpv_cmd_seek_relative_genera_json_correcto() {
+        let cmd = mpv_cmd_seek_relative(-10.0);
+        let v: Value = serde_json::from_str(&cmd).unwrap();
+        let arr = v.get("command").and_then(|c| c.as_array()).unwrap();
+        assert_eq!(arr[0], "seek");
+        assert_eq!(arr[1], -10.0);
+        assert_eq!(arr[2], "relative");
     }
 
     #[test]

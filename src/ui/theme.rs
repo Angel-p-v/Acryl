@@ -426,6 +426,12 @@ fn install_theme_css_inner(c: &ThemeColors, mode: ThemeMode) {
                 c.surface, c.border,
             ));
 
+        /* Barra de control de la reproducción activa. */
+        css.push_str(&format!(
+            ".playback-bar {{ background-color: {}; border-bottom: 1px solid {}; border-radius: {}; padding: 4px 12px; }}\n",
+            c.surface, c.border, radius::SMALL,
+        ));
+
         /* Chip removible de filtro activo */
         css.push_str(&format!(
                 ".filter-chip {{ background-color: {}; border: 1px solid {}; color: {}; border-radius: 999px; padding: 6px 16px; min-height: 32px; font-weight: 600; }}\n",

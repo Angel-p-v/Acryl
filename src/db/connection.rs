@@ -35,6 +35,9 @@ pub fn open_db(db_path: &str) -> RusqliteResult<Connection> {
 /// en una conexión dedicada y se cierra inmediatamente.
 pub fn vacuum_database(db_path: &str) -> RusqliteResult<()> {
     let conn = Connection::open(db_path)?;
+    // El vigilador de carpetas o la sincronización de metadatos pueden tener
+    // conexiones breves abiertas. Esperar en lugar de fallar de inmediato.
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.execute_batch("VACUUM; ANALYZE;")?;
     Ok(())
 }

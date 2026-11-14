@@ -50,8 +50,13 @@ Todo se ejecuta localmente en tu máquina: la base de datos SQLite, el índice d
 | 🌐 **Idiomas** | Interfaz disponible en español e inglés |
 | 📦 **Instalación** | Clona el repositorio y ejecuta `./scripts/install.sh` |
 | ❤️ **Favoritos** | Marca medios como favoritos desde la ficha de detalles y filtra la biblioteca por favoritos. |
+| ✅ **Mi lista** | Guarda títulos pendientes de ver, independientes del estado de visto, y fíltralos desde la biblioteca. |
+| 🗂️ **Colecciones** | Crea colecciones propias, añade medios desde Detalles y filtra la galería por colección. |
+| 🎛️ **Controles de mpv** | Pausa, reanuda, salta ±10 s y ajusta el volumen desde Acryl mientras mpv reproduce, mediante su socket IPC. |
 | 🔀 **Selector de orden** | Ordena la galería por título, año o tipo desde la barra superior. |
 | 💾 **Copia de seguridad** | Guarda y restaura una copia de la base de datos (favoritos, progreso e historial) desde Ajustes. |
+| ⚙️ **Configuración portable** | Exporta e importa las preferencias en YAML entre equipos sin cambiar la base de datos activa. |
+| 🧹 **Mantenimiento** | Limpia pósters huérfanos de la caché y compacta la base de datos desde Ajustes. |
 | ☀️ **Tema claro** | Elige entre tema oscuro y claro desde Ajustes; se aplica al guardar los ajustes. |
 
 ---
@@ -282,6 +287,22 @@ Una vez iniciada la aplicación:
    vídeo no se incluyen.
 16. **Tema claro**: En Ajustes, sección «Datos», elige «Oscuro» o «Claro» y pulsa
    Guardar. El tema se aplica al instante (incluidos diálogos y pósters).
+17. **Mi lista**: En Detalles, pulsa «＋ Mi lista» para guardar un título pendiente
+   de ver. Es independiente de «Visto»: puedes tener algo visto y seguir en la
+   lista, o pendiente sin haberlo visto. El botón «Mi lista» de la barra de
+   filtros muestra solo esos títulos.
+18. **Colecciones**: Pulsa «Colecciones» en la barra superior para crear una
+   colección, filtrar por ella o eliminarla. Desde Detalles, el botón
+   «Colecciones» permite añadir o quitar ese medio de cada colección.
+19. **Controles de reproducción**: Mientras mpv está abierto, Acryl muestra una
+   barra con pausa/reanudar, retroceso y avance de 10 segundos y volumen. Los
+   comandos se envían a mpv por su socket IPC y la barra se oculta al cerrarlo.
+20. **Exportar e importar configuración**: En Ajustes, sección «Configuración»,
+   guarda las preferencias en YAML o impórtalas desde otro equipo. La ruta de la
+   base de datos activa se conserva y las carpetas importadas se validan.
+21. **Mantenimiento**: En Ajustes, sección «Mantenimiento», limpia de la caché
+   los pósters que ya no pertenecen a ningún medio o compacta la base de datos
+   con `VACUUM` + `ANALYZE`.
 
 ### Pistas de audio y subtítulos
 

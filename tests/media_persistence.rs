@@ -214,6 +214,7 @@ fn upsert_y_list_media() {
             order_by: None,
             favorite: None,
             watched: None,
+            watchlist: None,
         })
         .expect("list all")
     };
@@ -228,6 +229,7 @@ fn upsert_y_list_media() {
             order_by: None,
             favorite: None,
             watched: None,
+            watchlist: None,
         })
         .expect("list movies")
     };
@@ -243,6 +245,7 @@ fn upsert_y_list_media() {
             order_by: None,
             favorite: None,
             watched: None,
+            watchlist: None,
         })
         .expect("list series")
     };
@@ -292,6 +295,7 @@ fn upsert_es_idempotente_por_folder_path() {
             order_by: None,
             favorite: None,
             watched: None,
+            watchlist: None,
         })
         .expect("list")
     };
@@ -741,6 +745,7 @@ fn busqueda_encuentra_medios_recien_insertados() {
                 limit: Some(10),
                 favorite: None,
                 watched: None,
+                watchlist: None,
             },
         )
         .expect("buscar media");
@@ -780,6 +785,7 @@ fn busqueda_usa_like_cuando_el_indice_fts_esta_vacio() {
                 limit: Some(10),
                 favorite: None,
                 watched: None,
+                watchlist: None,
             },
         )
         .expect("buscar media con fallback LIKE");
@@ -831,6 +837,7 @@ fn migracion_repara_triggers_fts_de_una_bd_existente() {
                 limit: Some(10),
                 favorite: None,
                 watched: None,
+                watchlist: None,
             },
         )
         .expect("buscar medio antiguo");
@@ -1259,6 +1266,7 @@ fn overwrite_metadata_reemplaza_campos_y_actualiza_fts() {
                 limit: Some(10),
                 favorite: None,
                 watched: None,
+                watchlist: None,
             },
         )
         .expect("buscar por el título nuevo");
@@ -1273,6 +1281,7 @@ fn overwrite_metadata_reemplaza_campos_y_actualiza_fts() {
                 limit: Some(10),
                 favorite: None,
                 watched: None,
+                watchlist: None,
             },
         )
         .expect("buscar por el título antiguo");
@@ -1408,6 +1417,7 @@ fn filtrado_por_categoria_devuelve_solo_medios_asociados() {
                 order_by: None,
                 favorite: None,
                 watched: None,
+                watchlist: None,
             },
         )
         .expect("filtrar por categoría")
@@ -1427,6 +1437,7 @@ fn filtrado_por_categoria_devuelve_solo_medios_asociados() {
                 order_by: None,
                 favorite: None,
                 watched: None,
+                watchlist: None,
             },
         )
         .expect("filtrar por categoría")

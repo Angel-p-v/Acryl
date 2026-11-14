@@ -10,6 +10,11 @@ mantiene este archivo a partir de los commits convencionales.
 
 ### Features
 
+* **settings:** exportar e importar la configuración YAML desde Ajustes, conservando la ruta de la base de datos activa y validando las carpetas importadas; el idioma se aplica en caliente.
+* **settings:** añadir mantenimiento de la caché con limpieza de pósters huérfanos y compactación de la base de datos (`VACUUM` + `ANALYZE`) fuera del hilo de GTK.
+* **player:** controlar la sesión de mpv desde Acryl con pausa/reanudar, saltos de ±10 s y volumen mediante su socket IPC; la barra se oculta al cerrar mpv.
+* **library:** añadir «Mi lista» (watchlist) independiente del estado de visto, con botón en Detalles y filtro en la biblioteca.
+* **library:** añadir colecciones de usuario para agrupar medios, con creación, asignación desde Detalles, filtro en la galería y eliminación.
 * **history:** mostrar el progreso real de visionado (barra y porcentaje) en cada tarjeta del historial, guardado periódicamente durante la reproducción para no perder el avance si mpv se cierra abruptamente, y estado «Visto» al completar una película o episodio. Al pulsar una tarjeta se abre la ficha y se reanuda el episodio o la película desde la posición guardada; pulsar solo sobre el nombre (que se resalta al pasar el cursor) abre la ficha sin reproducir.
 * **ui:** añadir el diálogo «Acerca de» con créditos del autor, copyright, licencia MIT, enlaces al repositorio, incidencias y soporte, e información de depuración con las versiones de Acryl, GTK, Libadwaita y el sistema.
 * **settings:** mostrar una sección «Acerca de» con encabezado, descripción y botón con icono, traducida al cambiar de idioma en caliente.

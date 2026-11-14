@@ -1844,6 +1844,7 @@ mod tests {
             order_by: None,
             favorite: None,
             watched: None,
+            watchlist: None,
         })
         .expect("listar medios")
         .into_iter()

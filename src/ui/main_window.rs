@@ -13,8 +13,8 @@ use crate::ui::poster_selector::{ImageChoice, PosterSelector};
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
 use gtk4::{
-    Box, Button, CenterBox, DropDown, FlowBox, Label, Orientation, Revealer, ScrolledWindow,
-    SearchEntry, Spinner, Stack, gio, glib,
+    Box, Button, CenterBox, DropDown, Entry, FlowBox, Label, ListBox, ListBoxRow, Orientation,
+    Revealer, Scale, ScrolledWindow, SearchEntry, Spinner, Stack, gio, glib,
 };
 use libadwaita::prelude::*;
 use libadwaita::{ApplicationWindow as AdwApplicationWindow, StatusPage, Toast, ToastOverlay};
@@ -74,6 +74,7 @@ pub struct MainWindow {
     window: AdwApplicationWindow,
     stack: Stack,
     categories_button: Button,
+    collections_button: Button,
     history_button: Button,
     media_list: MediaList,
     media_details: Rc<RefCell<MediaDetails>>,
@@ -137,15 +138,28 @@ pub struct MainWindow {
     current_category: Rc<RefCell<Option<i64>>>,
     /// Nombre de la categoría activa, para mostrarlo en la interfaz.
     current_category_name: Rc<RefCell<Option<String>>>,
+    /// Colección activa como filtro de la biblioteca (`None` = sin filtro).
+    current_collection: Rc<RefCell<Option<i64>>>,
+    /// Nombre de la colección activa, para mostrarlo en la interfaz.
+    current_collection_name: Rc<RefCell<Option<String>>>,
     /// Filtro de favoritos activo (None = sin filtro).
     current_favorite_filter: Rc<RefCell<Option<bool>>>,
     /// Filtro de visto/no visto activo (None = sin filtro).
     current_watched_filter: Rc<RefCell<Option<bool>>>,
     /// Vista de historial de reproducción.
     history_view: HistoryView,
+    /// Barra de control de la reproducción activa (pausa, saltos y volumen).
+    playback_bar: Box,
+    play_pause_button: Button,
+    /// Sesión de mpv activa, compartida con el temporizador que detecta su fin.
+    active_playback: Rc<RefCell<Option<crate::core::player::PlaybackSession>>>,
 }
 
 pub type MainWindowRef = Rc<RefCell<MainWindow>>;
+
+/// Callback de refresco del diálogo de colecciones, compartido para poder
+/// reconstruir la lista tras crear o eliminar una colección.
+type CollectionsRefresh = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 
 impl MainWindow {
     pub fn new(app: &gtk4::Application, config: crate::Config) -> MainWindowRef {
@@ -265,6 +279,12 @@ impl MainWindow {
         categories_button.set_valign(gtk4::Align::Center);
         right_section.append(&categories_button);
 
+        // Botón "Colecciones": abre el selector de colecciones para filtrar.
+        let collections_button = Button::with_label(&t("button.collections"));
+        collections_button.add_css_class("nav-button");
+        collections_button.set_valign(gtk4::Align::Center);
+        right_section.append(&collections_button);
+
         // Botón "Historial": abre el historial de reproducciones.
         let history_button = Button::with_label(&t("button.history"));
         history_button.add_css_class("nav-button");
@@ -341,6 +361,95 @@ impl MainWindow {
         // top_bar_level2 va fuera del revealer para que siempre sea accesible
         // cuando hay filtros, pero la barra principal puede ocultarse.
         content.append(&top_bar_revealer);
+
+        // --- Barra de control de la reproducción activa ---
+        // Se muestra mientras haya una sesión de mpv abierta y permite
+        // pausar, retroceder/avanzar 10 s y cambiar el volumen sin cambiar de
+        // ventana. Los comandos viajan por el socket IPC de la sesión.
+        let active_playback: Rc<RefCell<Option<crate::core::player::PlaybackSession>>> =
+            Rc::new(RefCell::new(None));
+
+        let playback_bar = Box::new(Orientation::Horizontal, 8);
+        playback_bar.add_css_class("playback-bar");
+        playback_bar.set_halign(gtk4::Align::Fill);
+        playback_bar.set_valign(gtk4::Align::Center);
+        playback_bar.set_margin_start(24);
+        playback_bar.set_margin_end(24);
+        playback_bar.set_margin_top(6);
+        playback_bar.set_margin_bottom(6);
+        playback_bar.set_visible(false);
+
+        let play_pause_button = Button::with_label("⏸");
+        play_pause_button.add_css_class("flat-button");
+        play_pause_button.set_valign(gtk4::Align::Center);
+        play_pause_button.set_tooltip_text(Some(&t("tooltip.playback_pause")));
+        playback_bar.append(&play_pause_button);
+
+        let seek_back_button = Button::with_label("⏪ 10 s");
+        seek_back_button.add_css_class("flat-button");
+        seek_back_button.set_valign(gtk4::Align::Center);
+        seek_back_button.set_tooltip_text(Some(&t("tooltip.playback_back")));
+        playback_bar.append(&seek_back_button);
+
+        let seek_forward_button = Button::with_label("10 s ⏩");
+        seek_forward_button.add_css_class("flat-button");
+        seek_forward_button.set_valign(gtk4::Align::Center);
+        seek_forward_button.set_tooltip_text(Some(&t("tooltip.playback_forward")));
+        playback_bar.append(&seek_forward_button);
+
+        let volume_label = Label::new(Some("🔊"));
+        volume_label.set_valign(gtk4::Align::Center);
+        playback_bar.append(&volume_label);
+
+        let volume_scale = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
+        volume_scale.set_value(100.0);
+        volume_scale.set_draw_value(false);
+        volume_scale.set_size_request(140, -1);
+        volume_scale.set_valign(gtk4::Align::Center);
+        volume_scale.set_tooltip_text(Some(&t("tooltip.playback_volume")));
+        playback_bar.append(&volume_scale);
+
+        content.append(&playback_bar);
+
+        let active_playback_toggle = active_playback.clone();
+        let play_pause_for_click = play_pause_button.clone();
+        play_pause_button.connect_clicked(move |_| {
+            let session = active_playback_toggle.borrow();
+            let Some(session) = session.as_ref() else {
+                return;
+            };
+            match session.toggle_pause() {
+                Ok(paused) => play_pause_for_click.set_label(if paused { "▶" } else { "⏸" }),
+                Err(error) => eprintln!("No se pudo cambiar la pausa de mpv: {}", error),
+            }
+        });
+
+        let active_playback_back = active_playback.clone();
+        seek_back_button.connect_clicked(move |_| {
+            if let Some(session) = active_playback_back.borrow().as_ref()
+                && let Err(error) = session.seek_relative(-10.0)
+            {
+                eprintln!("No se pudo retroceder en mpv: {}", error);
+            }
+        });
+
+        let active_playback_forward = active_playback.clone();
+        seek_forward_button.connect_clicked(move |_| {
+            if let Some(session) = active_playback_forward.borrow().as_ref()
+                && let Err(error) = session.seek_relative(10.0)
+            {
+                eprintln!("No se pudo avanzar en mpv: {}", error);
+            }
+        });
+
+        let active_playback_volume = active_playback.clone();
+        volume_scale.connect_value_changed(move |scale| {
+            if let Some(session) = active_playback_volume.borrow().as_ref()
+                && let Err(error) = session.set_volume(scale.value())
+            {
+                eprintln!("No se pudo ajustar el volumen de mpv: {}", error);
+            }
+        });
 
         let stack = Stack::new();
         stack.set_hexpand(true);
@@ -512,6 +621,7 @@ impl MainWindow {
             window,
             stack,
             categories_button,
+            collections_button,
             history_button,
             media_list,
             media_details,
@@ -549,9 +659,14 @@ impl MainWindow {
             history: RefCell::new(Vec::new()),
             current_category: Rc::new(RefCell::new(None)),
             current_category_name: Rc::new(RefCell::new(None)),
+            current_collection: Rc::new(RefCell::new(None)),
+            current_collection_name: Rc::new(RefCell::new(None)),
             current_favorite_filter: Rc::new(RefCell::new(None)),
             current_watched_filter: Rc::new(RefCell::new(None)),
             history_view,
+            playback_bar,
+            play_pause_button,
+            active_playback,
         }));
 
         // Inicializar el contexto del historial para poder recargar al cambiar idioma.
@@ -854,6 +969,12 @@ impl MainWindow {
             Self::populate_categories_page(&this_cat);
         });
 
+        // Botón "Colecciones": abre el diálogo para filtrar por colección.
+        let this_col = this.clone();
+        this.borrow().collections_button.connect_clicked(move |_| {
+            Self::show_collections_dialog(&this_col, None);
+        });
+
         // Callbacks: ambos botones "Ver todo" retiran el filtro activo.
         let this_clear = this.clone();
         this.borrow_mut()
@@ -952,14 +1073,24 @@ impl MainWindow {
             Self::refresh_views(&this_save);
         });
 
-        // Callback: cambios inmediatos de carpetas (ya persistidos por la vista).
+        // Callback: cambios inmediatos de configuración (ya persistidos por la
+        // vista). Se usa al añadir/eliminar carpetas y al importar un YAML:
+        // aplica el idioma en caliente si cambió y actualiza el estado.
         let this_clone = this.clone();
         this.borrow_mut()
             .settings_view
             .on_config_changed(move |new_config| {
-                let w = this_clone.borrow();
-                *w.config.borrow_mut() = new_config;
-                Self::update_library_status(&w);
+                let previous_language = this_clone.borrow().config.borrow().language.clone();
+                let language = new_config.language.clone();
+                {
+                    let w = this_clone.borrow();
+                    *w.config.borrow_mut() = new_config;
+                    Self::update_library_status(&w);
+                }
+                if language != previous_language {
+                    let mut w = this_clone.borrow_mut();
+                    let _ = w.set_language(&language);
+                }
             });
 
         // Callback: la indexación terminó -> recargar la galería y asegurar
@@ -1145,6 +1276,16 @@ impl MainWindow {
                     Self::load_media(&this_clone);
                     this_clone.borrow().show_list();
                 }
+            });
+
+        // Callback: abrir el diálogo de colecciones para el medio actual.
+        let this_clone = this.clone();
+        this.borrow_mut()
+            .media_details
+            .borrow_mut()
+            .on_manage_collections(move || {
+                let media_id = this_clone.borrow().media_details.borrow().media_id();
+                Self::show_collections_dialog(&this_clone, Some(media_id));
             });
 
         // Callback: calificar el medio con estrellas (1-5).
@@ -1543,7 +1684,7 @@ impl MainWindow {
     /// reemplaza el contenido de la galería; si es mayor, lo añade al final
     /// (paginación infinita).
     fn load_media_page(this: &MainWindowRef, offset: i64) {
-        let (db_path, category_id, favorite, watched, order_by) = {
+        let (db_path, category_id, collection_id, favorite, watched, order_by) = {
             let w = this.borrow();
             let order_by = match w.sort_combo.selected() {
                 1 => Some("year".to_string()),
@@ -1553,6 +1694,7 @@ impl MainWindow {
             (
                 w.db_path.clone(),
                 *w.current_category.borrow(),
+                *w.current_collection.borrow(),
                 *w.current_favorite_filter.borrow(),
                 *w.current_watched_filter.borrow(),
                 order_by,
@@ -1578,7 +1720,10 @@ impl MainWindow {
             };
             match category_id {
                 Some(id) => repo.list_by_category(id, options),
-                None => repo.list(options),
+                None => match collection_id {
+                    Some(id) => repo.list_by_collection(id, options),
+                    None => repo.list(options),
+                },
             }
             .unwrap_or_default()
         };
@@ -1613,20 +1758,26 @@ impl MainWindow {
         Self::load_media_page(this, offset);
     }
 
-    /// Refresca la barra que indica la categoría activa y el botón «Ver todo».
+    /// Refresca la barra que indica la categoría o colección activa y el
+    /// botón «Ver todo».
     fn update_filter_bar(&self) {
-        let name = self.current_category_name.borrow().clone();
-        match name {
-            Some(name) => {
-                let text = self.t("categories.filter_format").replacen("{}", &name, 1);
-                self.filter_label.set_label(&text);
-                self.filter_bar.set_visible(true);
-            }
-            None => self.filter_bar.set_visible(false),
+        let category = self.current_category_name.borrow().clone();
+        let collection = self.current_collection_name.borrow().clone();
+        if let Some(name) = category {
+            let text = self.t("categories.filter_format").replacen("{}", &name, 1);
+            self.filter_label.set_label(&text);
+            self.filter_bar.set_visible(true);
+        } else if let Some(name) = collection {
+            let text = self.t("collections.filter_format").replacen("{}", &name, 1);
+            self.filter_label.set_label(&text);
+            self.filter_bar.set_visible(true);
+        } else {
+            self.filter_bar.set_visible(false);
         }
 
-        self.clear_category_button
-            .set_visible(self.current_category.borrow().is_some());
+        self.clear_category_button.set_visible(
+            self.current_category.borrow().is_some() || self.current_collection.borrow().is_some(),
+        );
     }
 
     /// Muestra una notificación temporal (AdwToast) en la parte inferior de la
@@ -1888,6 +2039,7 @@ impl MainWindow {
     /// en "empty" aunque media_count sea 0 temporalmente.
     fn show_list(&self) {
         let filtered = self.current_category.borrow().is_some()
+            || self.current_collection.borrow().is_some()
             || self.current_favorite_filter.borrow().is_some()
             || self.current_watched_filter.borrow().is_some();
         if self.media_count == 0 && !filtered {
@@ -1907,10 +2059,13 @@ impl MainWindow {
             let w = this.borrow();
             w.search_entry.set_text("");
             let had_filter = w.current_category.borrow().is_some()
+                || w.current_collection.borrow().is_some()
                 || w.current_favorite_filter.borrow().is_some()
                 || w.current_watched_filter.borrow().is_some();
             w.current_category.replace(None);
             w.current_category_name.replace(None);
+            w.current_collection.replace(None);
+            w.current_collection_name.replace(None);
             w.current_favorite_filter.replace(None);
             w.current_watched_filter.replace(None);
             w.history.borrow_mut().clear();
@@ -1983,6 +2138,8 @@ impl MainWindow {
                 Some((id, name)) => {
                     w.current_category.replace(Some(id));
                     w.current_category_name.replace(Some(name));
+                    w.current_collection.replace(None);
+                    w.current_collection_name.replace(None);
                 }
                 None => {
                     w.current_category.replace(None);
@@ -1996,9 +2153,17 @@ impl MainWindow {
         this.borrow().show_list();
     }
 
-    /// Retira el filtro de categoría activo.
+    /// Retira el filtro de categoría o colección activo.
     fn clear_category_filter(this: &MainWindowRef) {
-        Self::set_category_filter(this, None);
+        {
+            let w = this.borrow();
+            w.current_category.replace(None);
+            w.current_category_name.replace(None);
+            w.current_collection.replace(None);
+            w.current_collection_name.replace(None);
+        }
+        Self::load_media(this);
+        this.borrow().show_list();
     }
 
     /// Rellena la página de categorías con las categorías reales de la BD,
@@ -2082,6 +2247,445 @@ impl MainWindow {
         drop(w);
     }
 
+    /// Muestra el diálogo de colecciones.
+    ///
+    /// Con `media_id = None` permite filtrar la biblioteca por una colección,
+    /// crear nuevas y eliminarlas. Con `media_id = Some(id)` permite marcar o
+    /// desmarcar ese medio en cada colección.
+    fn show_collections_dialog(this: &MainWindowRef, media_id: Option<i64>) {
+        let (db_path, translations, parent) = {
+            let w = this.borrow();
+            (w.db_path.clone(), w.translations.clone(), w.window.clone())
+        };
+
+        let dialog = gtk4::Window::builder()
+            .title(translations.borrow().t("collections.title"))
+            .transient_for(&parent)
+            .modal(true)
+            .default_width(440)
+            .default_height(480)
+            .build();
+
+        let content = Box::new(Orientation::Vertical, 12);
+        content.set_margin_top(16);
+        content.set_margin_bottom(16);
+        content.set_margin_start(16);
+        content.set_margin_end(16);
+
+        dialog.set_child(Some(&content));
+
+        match media_id {
+            Some(media_id) => {
+                Self::show_collections_manage_mode(
+                    &dialog,
+                    &content,
+                    media_id,
+                    &db_path,
+                    &translations,
+                    this,
+                );
+            }
+            None => {
+                Self::show_collections_filter_mode(
+                    &dialog,
+                    &content,
+                    &db_path,
+                    &translations,
+                    this,
+                );
+            }
+        }
+
+        dialog.present();
+    }
+
+    /// Modo de gestión: asignar el medio (`media_id`) a una colección existente
+    /// o a una que se cree. El usuario selecciona una colección de la lista y
+    /// pulsa «Añadir», o «Volver» para cerrar sin hacer nada.
+    fn show_collections_manage_mode(
+        dialog: &gtk4::Window,
+        content: &Box,
+        media_id: i64,
+        db_path: &str,
+        translations: &Rc<RefCell<crate::ui::i18n::Translations>>,
+        this: &MainWindowRef,
+    ) {
+        let scrolled = ScrolledWindow::new();
+        scrolled.set_vexpand(true);
+        let list = ListBox::new();
+        list.set_selection_mode(gtk4::SelectionMode::Single);
+        list.add_css_class("boxed-list");
+        scrolled.set_child(Some(&list));
+        content.append(&scrolled);
+
+        let add_button = Button::with_label(&translations.borrow().t("collections.add_selected"));
+        add_button.add_css_class("flat-button");
+
+        let cancel_button = Button::with_label(&translations.borrow().t("collections.cancel"));
+        cancel_button.add_css_class("flat-button");
+
+        let button_row = Box::new(Orientation::Horizontal, 8);
+        button_row.set_halign(gtk4::Align::End);
+        button_row.append(&add_button);
+        button_row.append(&cancel_button);
+        content.append(&button_row);
+
+        // Fila de creación de colección (solo visible en modo gestionar).
+        let create_row = Box::new(Orientation::Horizontal, 8);
+        let entry = Entry::new();
+        entry.set_placeholder_text(Some(
+            &translations.borrow().t("collections.new_placeholder"),
+        ));
+        entry.set_hexpand(true);
+        create_row.append(&entry);
+        let create_button = Button::with_label(&translations.borrow().t("collections.create"));
+        create_row.append(&create_button);
+        content.append(&create_row);
+
+        let db_path_owned = db_path.to_string();
+        let translations_owned = translations.clone();
+        let this_owned = this.clone();
+        let collection_ids: Rc<RefCell<Vec<i64>>> = Rc::new(RefCell::new(Vec::new()));
+
+        let refresh_slot: CollectionsRefresh = Rc::new(RefCell::new(None));
+        let list_for_refresh = list.clone();
+        let translations_for_refresh = translations_owned.clone();
+        let db_path_for_refresh_a = db_path_owned.clone();
+        let db_path_for_refresh_b = db_path_owned.clone();
+        let this_for_refresh = this_owned.clone();
+        let collection_ids_for_refresh = collection_ids.clone();
+        let refresh_fn: Rc<dyn Fn()> = Rc::new(move || {
+            while let Some(child) = list_for_refresh.first_child() {
+                list_for_refresh.remove(&child);
+            }
+
+            let mut conn = match open_db(&db_path_for_refresh_a) {
+                Ok(c) => c,
+                Err(error) => {
+                    eprintln!("Error abriendo BD para colecciones: {}", error);
+                    return;
+                }
+            };
+            let (collections, assigned) = {
+                let mut repo = MediaRepository::new(&mut conn);
+                let collections = repo.list_collections().unwrap_or_default();
+                let assigned = repo
+                    .collections_for_media(media_id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|collection| collection.id)
+                    .collect::<Vec<_>>();
+                (collections, assigned)
+            };
+            close_db(conn);
+
+            *collection_ids_for_refresh.borrow_mut() = collections.iter().map(|c| c.id).collect();
+
+            if collections.is_empty() {
+                let empty = Label::new(Some(
+                    &translations_for_refresh.borrow().t("collections.empty"),
+                ));
+                empty.set_halign(gtk4::Align::Start);
+                empty.add_css_class("dim-label");
+                list_for_refresh.append(&empty);
+                return;
+            }
+
+            for collection in collections {
+                let row = ListBoxRow::new();
+                let row_box = Box::new(Orientation::Horizontal, 8);
+                let label_text = format!("{} ({})", collection.name, collection.media_count);
+                let label = Label::new(Some(&label_text));
+                label.set_halign(gtk4::Align::Start);
+                label.set_hexpand(true);
+                row_box.append(&label);
+
+                if assigned.contains(&collection.id) {
+                    row.add_css_class("selected");
+                }
+
+                row.set_child(Some(&row_box));
+                list_for_refresh.append(&row);
+            }
+        });
+        *refresh_slot.borrow_mut() = Some(refresh_fn.clone());
+        refresh_fn();
+
+        // Crear colección y añadir el medio a ella.
+        let entry_create = entry.clone();
+        let db_path_create = db_path_owned.clone();
+        let refresh_create = refresh_slot.clone();
+        let translations_create = translations_owned.clone();
+        create_button.connect_clicked(move |_| {
+            let name = entry_create.text().to_string();
+            let mut conn = match open_db(&db_path_create) {
+                Ok(c) => c,
+                Err(error) => {
+                    eprintln!("Error abriendo BD para crear colección: {}", error);
+                    return;
+                }
+            };
+            let mut repo = MediaRepository::new(&mut conn);
+            match repo.get_or_create_collection(&name) {
+                Ok(Some(collection_id)) => {
+                    if let Err(error) = repo.add_media_to_collection(collection_id, media_id) {
+                        eprintln!("Error añadiendo medio a colección: {}", error);
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => eprintln!("Error creando colección: {}", error),
+            }
+            close_db(conn);
+            entry_create.set_text("");
+            if let Some(refresh) = refresh_create.borrow().as_ref() {
+                refresh();
+            }
+            let _ = translations_create;
+        });
+
+        // Añadir el medio a la colección seleccionada y cerrar.
+        let add_button_click = add_button.clone();
+        let db_path_add = db_path_for_refresh_b.clone();
+        let list_for_add = list.clone();
+        let collection_ids_for_add = collection_ids.clone();
+        let dialog_add = dialog.clone();
+        add_button.connect_clicked(move |_| {
+            let selected_idx = match list_for_add.selected_row() {
+                Some(row) => row.index() as usize,
+                None => return,
+            };
+            let collection_id = match collection_ids_for_add.borrow().get(selected_idx) {
+                Some(id) => *id,
+                None => return,
+            };
+            let mut conn = match open_db(&db_path_add) {
+                Ok(c) => c,
+                Err(error) => {
+                    eprintln!("Error abriendo BD para añadir a colección: {}", error);
+                    return;
+                }
+            };
+            let mut repo = MediaRepository::new(&mut conn);
+            if let Err(error) = repo.add_media_to_collection(collection_id, media_id) {
+                eprintln!("Error añadiendo medio a colección: {}", error);
+            }
+            close_db(conn);
+            dialog_add.close();
+        });
+
+        // Volver sin hacer nada.
+        let dialog_cancel = dialog.clone();
+        cancel_button.connect_clicked(move |_| {
+            dialog_cancel.close();
+        });
+
+        let _ = add_button_click;
+        let _ = this_for_refresh;
+    }
+
+    /// Modo de filtro: elegir una colección para filtrar la biblioteca, crear
+    /// nuevas o eliminarlas. Mantiene el comportamiento previo.
+    fn show_collections_filter_mode(
+        dialog: &gtk4::Window,
+        content: &Box,
+        db_path: &str,
+        translations: &Rc<RefCell<crate::ui::i18n::Translations>>,
+        this: &MainWindowRef,
+    ) {
+        let scrolled = ScrolledWindow::new();
+        scrolled.set_vexpand(true);
+        let list = ListBox::new();
+        list.set_selection_mode(gtk4::SelectionMode::None);
+        list.add_css_class("boxed-list");
+        scrolled.set_child(Some(&list));
+        content.append(&scrolled);
+
+        // Fila de creación de colección.
+        let create_row = Box::new(Orientation::Horizontal, 8);
+        let entry = Entry::new();
+        entry.set_placeholder_text(Some(
+            &translations.borrow().t("collections.new_placeholder"),
+        ));
+        entry.set_hexpand(true);
+        create_row.append(&entry);
+        let create_button = Button::with_label(&translations.borrow().t("collections.create"));
+        create_row.append(&create_button);
+        content.append(&create_row);
+
+        let this_for_refresh = this.clone();
+        let translations_for_refresh = translations.clone();
+        let db_path_for_refresh = db_path.to_string();
+        let db_path_for_refresh_clone = db_path_for_refresh.clone();
+        let dialog_for_refresh = dialog.clone();
+
+        let refresh_slot: CollectionsRefresh = Rc::new(RefCell::new(None));
+        let refresh_weak = Rc::downgrade(&refresh_slot);
+        let list_for_refresh = list.clone();
+        let refresh_fn: Rc<dyn Fn()> = Rc::new(move || {
+            while let Some(child) = list_for_refresh.first_child() {
+                list_for_refresh.remove(&child);
+            }
+
+            let mut conn = match open_db(&db_path_for_refresh) {
+                Ok(c) => c,
+                Err(error) => {
+                    eprintln!("Error abriendo BD para colecciones: {}", error);
+                    return;
+                }
+            };
+            let collections = {
+                let mut repo = MediaRepository::new(&mut conn);
+                repo.list_collections().unwrap_or_default()
+            };
+            close_db(conn);
+
+            if collections.is_empty() {
+                let empty = Label::new(Some(
+                    &translations_for_refresh.borrow().t("collections.empty"),
+                ));
+                empty.set_halign(gtk4::Align::Start);
+                empty.add_css_class("dim-label");
+                list_for_refresh.append(&empty);
+                return;
+            }
+
+            for collection in collections {
+                let row = ListBoxRow::new();
+                let row_box = Box::new(Orientation::Horizontal, 8);
+                let label_text = format!("{} ({})", collection.name, collection.media_count);
+
+                let filter_button = Button::with_label(&label_text);
+                filter_button.add_css_class("flat-button");
+                filter_button.set_halign(gtk4::Align::Start);
+                filter_button.set_hexpand(true);
+                {
+                    let w = this_for_refresh.borrow();
+                    if *w.current_collection.borrow() == Some(collection.id) {
+                        filter_button.add_css_class("active");
+                    }
+                }
+                let this = this_for_refresh.clone();
+                let dialog = dialog_for_refresh.clone();
+                let collection_id = collection.id;
+                let collection_name = collection.name.clone();
+                filter_button.connect_clicked(move |_| {
+                    {
+                        let w = this.borrow();
+                        w.current_category.replace(None);
+                        w.current_category_name.replace(None);
+                        w.current_collection.replace(Some(collection_id));
+                        w.current_collection_name
+                            .replace(Some(collection_name.clone()));
+                    }
+                    Self::load_media(&this);
+                    this.borrow().show_list();
+                    dialog.close();
+                });
+                row_box.append(&filter_button);
+
+                let delete_button = Button::with_label("🗑");
+                delete_button.add_css_class("flat-button");
+                delete_button.set_tooltip_text(Some(
+                    &translations_for_refresh.borrow().t("collections.delete"),
+                ));
+                let db_path = db_path_for_refresh.clone();
+                let refresh_inner = refresh_weak.clone();
+                let dialog_confirm = dialog_for_refresh.clone();
+                let translations_confirm = translations_for_refresh.clone();
+                let collection_id = collection.id;
+                delete_button.connect_clicked(move |_| {
+                    let title = translations_confirm
+                        .borrow()
+                        .t("collections.delete_confirm.title");
+                    let detail = translations_confirm
+                        .borrow()
+                        .t("collections.delete_confirm.detail");
+                    let cancel = translations_confirm.borrow().t("button.cancel");
+                    let delete = translations_confirm
+                        .borrow()
+                        .t("collections.delete_confirm.delete");
+                    let confirm = gtk4::AlertDialog::builder()
+                        .modal(true)
+                        .message(&title)
+                        .detail(&detail)
+                        .buttons([cancel.as_str(), delete.as_str()])
+                        .cancel_button(0)
+                        .default_button(0)
+                        .build();
+                    let db_path = db_path.clone();
+                    let refresh_inner = refresh_inner.clone();
+                    confirm.choose(
+                        Some(&dialog_confirm),
+                        None::<&gio::Cancellable>,
+                        move |response| {
+                            if !matches!(response, Ok(1)) {
+                                return;
+                            }
+                            let mut conn = match open_db(&db_path) {
+                                Ok(c) => c,
+                                Err(error) => {
+                                    eprintln!("Error abriendo BD para borrar colección: {}", error);
+                                    return;
+                                }
+                            };
+                            let mut repo = MediaRepository::new(&mut conn);
+                            if let Err(error) = repo.delete_collection(collection_id) {
+                                eprintln!("Error borrando colección: {}", error);
+                            }
+                            close_db(conn);
+                            if let Some(slot) = refresh_inner.upgrade()
+                                && let Some(refresh) = slot.borrow().as_ref()
+                            {
+                                refresh();
+                            }
+                        },
+                    );
+                });
+                row_box.append(&delete_button);
+
+                row.set_child(Some(&row_box));
+                list_for_refresh.append(&row);
+            }
+        });
+        *refresh_slot.borrow_mut() = Some(refresh_fn.clone());
+        refresh_fn();
+
+        let entry_create = entry.clone();
+        let db_path_create = db_path_for_refresh_clone.clone();
+        let refresh_create = refresh_slot.clone();
+        create_button.connect_clicked(move |_| {
+            let name = entry_create.text().to_string();
+            let mut conn = match open_db(&db_path_create) {
+                Ok(c) => c,
+                Err(error) => {
+                    eprintln!("Error abriendo BD para crear colección: {}", error);
+                    return;
+                }
+            };
+            let mut repo = MediaRepository::new(&mut conn);
+            match repo.get_or_create_collection(&name) {
+                Ok(Some(_collection_id)) => {
+                    // Modo filtro: solo se crea la colección, no se asigna ningún medio.
+                }
+                Ok(None) => {}
+                Err(error) => eprintln!("Error creando colección: {}", error),
+            }
+            close_db(conn);
+            entry_create.set_text("");
+            if let Some(refresh) = refresh_create.borrow().as_ref() {
+                refresh();
+            }
+        });
+
+        let close_button = Button::with_label(&translations.borrow().t("collections.close"));
+        close_button.set_halign(gtk4::Align::End);
+        content.append(&close_button);
+        let dialog_close = dialog.clone();
+        close_button.connect_clicked(move |_| dialog_close.close());
+
+        let _ = refresh_weak;
+    }
+
     /// Reproduce un archivo de vídeo en mpv. Cuando la reproducción termina,
     /// si `auto_play_next_episode` está activado y el medio es una serie o
     /// anime, busca y reproduce el siguiente episodio no visto tras una breve
@@ -2090,6 +2694,16 @@ impl MainWindow {
         this: &MainWindowRef,
         file_path: &str,
     ) -> Result<(), std::boxed::Box<dyn std::error::Error>> {
+        // Si ya había una reproducción activa, cerrarla antes de abrir otra
+        // para que los controles apunten siempre a la sesión correcta.
+        {
+            let w = this.borrow();
+            if let Some(previous) = w.active_playback.borrow_mut().take() {
+                let _ = previous.stop();
+                w.playback_bar.set_visible(false);
+            }
+        }
+
         let w = this.borrow();
         let media_id = {
             let mut conn = open_db(&w.db_path)?;
@@ -2126,15 +2740,40 @@ impl MainWindow {
 
         match playback_start {
             crate::core::player::PlaybackStart::Started(session) => {
+                let session_rc = {
+                    let w = this.borrow();
+                    *w.active_playback.borrow_mut() = Some(session);
+                    w.playback_bar.set_visible(true);
+                    w.play_pause_button.set_label("⏸");
+                    w.active_playback.clone()
+                };
+
                 // Al cerrar mpv se reafirma el estado original para deshacer
                 // cualquier reubicación que el compositor haya aplicado mientras
                 // estaba abierto.
                 let window_for_restore = window.clone();
                 let this_for_next = this.clone();
+                let this_for_ui = this.clone();
                 let media_id_for_next = media_id;
                 glib::timeout_add_local(Duration::from_millis(250), move || {
-                    if !session.finished() {
+                    let finished = session_rc
+                        .borrow()
+                        .as_ref()
+                        .map(|session| session.finished())
+                        .unwrap_or(true);
+                    if !finished {
                         return glib::ControlFlow::Continue;
+                    }
+                    let completed = session_rc
+                        .borrow()
+                        .as_ref()
+                        .map(|session| session.completed())
+                        .unwrap_or(false);
+                    *session_rc.borrow_mut() = None;
+                    {
+                        let w = this_for_ui.borrow();
+                        w.playback_bar.set_visible(false);
+                        w.play_pause_button.set_label("⏸");
                     }
                     restore_window_mode(&window_for_restore, window_mode);
 
@@ -2142,7 +2781,7 @@ impl MainWindow {
                     // se completó (faltaban menos del umbral para terminar),
                     // no si el usuario cerró mpv antes.
                     if auto_play_next
-                        && session.completed()
+                        && completed
                         && let Some(media_id) = media_id_for_next
                     {
                         Self::schedule_next_episode(&this_for_next, media_id, db_path.clone());
