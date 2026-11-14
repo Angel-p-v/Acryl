@@ -2369,6 +2369,8 @@ impl MainWindow {
         content.set_margin_start(16);
         content.set_margin_end(16);
 
+        dialog.set_child(Some(&content));
+
         match media_id {
             Some(media_id) => {
                 Self::show_collections_manage_mode(
