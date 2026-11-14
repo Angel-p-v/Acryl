@@ -13,8 +13,8 @@ use crate::ui::poster_selector::{ImageChoice, PosterSelector};
 use crate::ui::settings_window::SettingsView;
 use gtk4::prelude::*;
 use gtk4::{
-    Box, Button, CenterBox, CheckButton, DropDown, Entry, FlowBox, Label, ListBox, ListBoxRow,
-    Orientation, Revealer, Scale, ScrolledWindow, SearchEntry, Spinner, Stack, gio, glib,
+    Box, Button, CenterBox, DropDown, Entry, FlowBox, Label, ListBox, ListBoxRow, Orientation,
+    Revealer, Scale, ScrolledWindow, SearchEntry, Spinner, Stack, gio, glib,
 };
 use libadwaita::prelude::*;
 use libadwaita::{ApplicationWindow as AdwApplicationWindow, StatusPage, Toast, ToastOverlay};
@@ -2369,6 +2369,63 @@ impl MainWindow {
         content.set_margin_start(16);
         content.set_margin_end(16);
 
+        match media_id {
+            Some(media_id) => {
+                Self::show_collections_manage_mode(
+                    &dialog,
+                    &content,
+                    media_id,
+                    &db_path,
+                    &translations,
+                    this,
+                );
+            }
+            None => {
+                Self::show_collections_filter_mode(
+                    &dialog,
+                    &content,
+                    &db_path,
+                    &translations,
+                    this,
+                );
+            }
+        }
+
+        dialog.present();
+    }
+
+    /// Modo de gestión: asignar el medio (`media_id`) a una colección existente
+    /// o a una que se cree. El usuario selecciona una colección de la lista y
+    /// pulsa «Añadir», o «Volver» para cerrar sin hacer nada.
+    fn show_collections_manage_mode(
+        dialog: &gtk4::Window,
+        content: &Box,
+        media_id: i64,
+        db_path: &str,
+        translations: &Rc<RefCell<crate::ui::i18n::Translations>>,
+        this: &MainWindowRef,
+    ) {
+        let scrolled = ScrolledWindow::new();
+        scrolled.set_vexpand(true);
+        let list = ListBox::new();
+        list.set_selection_mode(gtk4::SelectionMode::Single);
+        list.add_css_class("boxed-list");
+        scrolled.set_child(Some(&list));
+        content.append(&scrolled);
+
+        let add_button = Button::with_label(&translations.borrow().t("collections.add_selected"));
+        add_button.add_css_class("flat-button");
+
+        let cancel_button = Button::with_label(&translations.borrow().t("collections.cancel"));
+        cancel_button.add_css_class("flat-button");
+
+        let button_row = Box::new(Orientation::Horizontal, 8);
+        button_row.set_halign(gtk4::Align::End);
+        button_row.append(&add_button);
+        button_row.append(&cancel_button);
+        content.append(&button_row);
+
+        // Fila de creación de colección (solo visible en modo gestionar).
         let create_row = Box::new(Orientation::Horizontal, 8);
         let entry = Entry::new();
         entry.set_placeholder_text(Some(
@@ -2380,6 +2437,156 @@ impl MainWindow {
         create_row.append(&create_button);
         content.append(&create_row);
 
+        let db_path_owned = db_path.to_string();
+        let translations_owned = translations.clone();
+        let this_owned = this.clone();
+        let collection_ids: Rc<RefCell<Vec<i64>>> = Rc::new(RefCell::new(Vec::new()));
+
+        let refresh_slot: CollectionsRefresh = Rc::new(RefCell::new(None));
+        let list_for_refresh = list.clone();
+        let translations_for_refresh = translations_owned.clone();
+        let db_path_for_refresh_a = db_path_owned.clone();
+        let db_path_for_refresh_b = db_path_owned.clone();
+        let this_for_refresh = this_owned.clone();
+        let collection_ids_for_refresh = collection_ids.clone();
+        let refresh_fn: Rc<dyn Fn()> = Rc::new(move || {
+            while let Some(child) = list_for_refresh.first_child() {
+                list_for_refresh.remove(&child);
+            }
+
+            let mut conn = match open_db(&db_path_for_refresh_a) {
+                Ok(c) => c,
+                Err(error) => {
+                    eprintln!("Error abriendo BD para colecciones: {}", error);
+                    return;
+                }
+            };
+            let (collections, assigned) = {
+                let mut repo = MediaRepository::new(&mut conn);
+                let collections = repo.list_collections().unwrap_or_default();
+                let assigned = repo
+                    .collections_for_media(media_id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|collection| collection.id)
+                    .collect::<Vec<_>>();
+                (collections, assigned)
+            };
+            close_db(conn);
+
+            *collection_ids_for_refresh.borrow_mut() = collections.iter().map(|c| c.id).collect();
+
+            if collections.is_empty() {
+                let empty = Label::new(Some(
+                    &translations_for_refresh.borrow().t("collections.empty"),
+                ));
+                empty.set_halign(gtk4::Align::Start);
+                empty.add_css_class("dim-label");
+                list_for_refresh.append(&empty);
+                return;
+            }
+
+            for collection in collections {
+                let row = ListBoxRow::new();
+                let row_box = Box::new(Orientation::Horizontal, 8);
+                let label_text = format!("{} ({})", collection.name, collection.media_count);
+                let label = Label::new(Some(&label_text));
+                label.set_halign(gtk4::Align::Start);
+                label.set_hexpand(true);
+                row_box.append(&label);
+
+                if assigned.contains(&collection.id) {
+                    row.add_css_class("selected");
+                }
+
+                row.set_child(Some(&row_box));
+                list_for_refresh.append(&row);
+            }
+        });
+        *refresh_slot.borrow_mut() = Some(refresh_fn.clone());
+        refresh_fn();
+
+        // Crear colección y añadir el medio a ella.
+        let entry_create = entry.clone();
+        let db_path_create = db_path_owned.clone();
+        let refresh_create = refresh_slot.clone();
+        let translations_create = translations_owned.clone();
+        create_button.connect_clicked(move |_| {
+            let name = entry_create.text().to_string();
+            let mut conn = match open_db(&db_path_create) {
+                Ok(c) => c,
+                Err(error) => {
+                    eprintln!("Error abriendo BD para crear colección: {}", error);
+                    return;
+                }
+            };
+            let mut repo = MediaRepository::new(&mut conn);
+            match repo.get_or_create_collection(&name) {
+                Ok(Some(collection_id)) => {
+                    if let Err(error) = repo.add_media_to_collection(collection_id, media_id) {
+                        eprintln!("Error añadiendo medio a colección: {}", error);
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => eprintln!("Error creando colección: {}", error),
+            }
+            close_db(conn);
+            entry_create.set_text("");
+            if let Some(refresh) = refresh_create.borrow().as_ref() {
+                refresh();
+            }
+            let _ = translations_create;
+        });
+
+        // Añadir el medio a la colección seleccionada y cerrar.
+        let add_button_click = add_button.clone();
+        let db_path_add = db_path_for_refresh_b.clone();
+        let list_for_add = list.clone();
+        let collection_ids_for_add = collection_ids.clone();
+        let dialog_add = dialog.clone();
+        add_button.connect_clicked(move |_| {
+            let selected_idx = match list_for_add.selected_row() {
+                Some(row) => row.index() as usize,
+                None => return,
+            };
+            let collection_id = match collection_ids_for_add.borrow().get(selected_idx) {
+                Some(id) => *id,
+                None => return,
+            };
+            let mut conn = match open_db(&db_path_add) {
+                Ok(c) => c,
+                Err(error) => {
+                    eprintln!("Error abriendo BD para añadir a colección: {}", error);
+                    return;
+                }
+            };
+            let mut repo = MediaRepository::new(&mut conn);
+            if let Err(error) = repo.add_media_to_collection(collection_id, media_id) {
+                eprintln!("Error añadiendo medio a colección: {}", error);
+            }
+            close_db(conn);
+            dialog_add.close();
+        });
+
+        // Volver sin hacer nada.
+        let dialog_cancel = dialog.clone();
+        cancel_button.connect_clicked(move |_| {
+            dialog_cancel.close();
+        });
+
+        let _ = add_button_click;
+        let _ = this_for_refresh;
+    }
+
+    /// Modo de filtro: elegir una colección para filtrar la biblioteca, crear
+    /// nuevas o eliminarlas. Mantiene el comportamiento previo.
+    fn show_collections_filter_mode(
+        dialog: &gtk4::Window,
+        content: &Box,
+        db_path: &str,
+        translations: &Rc<RefCell<crate::ui::i18n::Translations>>,
+        this: &MainWindowRef,
+    ) {
         let scrolled = ScrolledWindow::new();
         scrolled.set_vexpand(true);
         let list = ListBox::new();
@@ -2388,18 +2595,27 @@ impl MainWindow {
         scrolled.set_child(Some(&list));
         content.append(&scrolled);
 
-        let close_button = Button::with_label(&translations.borrow().t("collections.close"));
-        close_button.set_halign(gtk4::Align::End);
-        content.append(&close_button);
-        dialog.set_child(Some(&content));
+        // Fila de creación de colección.
+        let create_row = Box::new(Orientation::Horizontal, 8);
+        let entry = Entry::new();
+        entry.set_placeholder_text(Some(
+            &translations.borrow().t("collections.new_placeholder"),
+        ));
+        entry.set_hexpand(true);
+        create_row.append(&entry);
+        let create_button = Button::with_label(&translations.borrow().t("collections.create"));
+        create_row.append(&create_button);
+        content.append(&create_row);
+
+        let this_for_refresh = this.clone();
+        let translations_for_refresh = translations.clone();
+        let db_path_for_refresh = db_path.to_string();
+        let db_path_for_refresh_clone = db_path_for_refresh.clone();
+        let dialog_for_refresh = dialog.clone();
 
         let refresh_slot: CollectionsRefresh = Rc::new(RefCell::new(None));
         let refresh_weak = Rc::downgrade(&refresh_slot);
         let list_for_refresh = list.clone();
-        let dialog_for_refresh = dialog.clone();
-        let this_for_refresh = this.clone();
-        let translations_for_refresh = translations.clone();
-        let db_path_for_refresh = db_path.clone();
         let refresh_fn: Rc<dyn Fn()> = Rc::new(move || {
             while let Some(child) = list_for_refresh.first_child() {
                 list_for_refresh.remove(&child);
@@ -2412,19 +2628,9 @@ impl MainWindow {
                     return;
                 }
             };
-            let (collections, assigned) = {
+            let collections = {
                 let mut repo = MediaRepository::new(&mut conn);
-                let collections = repo.list_collections().unwrap_or_default();
-                let assigned = match media_id {
-                    Some(id) => repo
-                        .collections_for_media(id)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|collection| collection.id)
-                        .collect::<Vec<_>>(),
-                    None => Vec::new(),
-                };
-                (collections, assigned)
+                repo.list_collections().unwrap_or_default()
             };
             close_db(conn);
 
@@ -2443,124 +2649,94 @@ impl MainWindow {
                 let row_box = Box::new(Orientation::Horizontal, 8);
                 let label_text = format!("{} ({})", collection.name, collection.media_count);
 
-                if let Some(media_id) = media_id {
-                    let check = CheckButton::with_label(&label_text);
-                    check.set_active(assigned.contains(&collection.id));
-                    let db_path = db_path_for_refresh.clone();
-                    let collection_id = collection.id;
-                    check.connect_toggled(move |check| {
-                        let mut conn = match open_db(&db_path) {
-                            Ok(c) => c,
-                            Err(error) => {
-                                eprintln!("Error abriendo BD para colección: {}", error);
+                let filter_button = Button::with_label(&label_text);
+                filter_button.add_css_class("flat-button");
+                filter_button.set_halign(gtk4::Align::Start);
+                filter_button.set_hexpand(true);
+                {
+                    let w = this_for_refresh.borrow();
+                    if *w.current_collection.borrow() == Some(collection.id) {
+                        filter_button.add_css_class("active");
+                    }
+                }
+                let this = this_for_refresh.clone();
+                let dialog = dialog_for_refresh.clone();
+                let collection_id = collection.id;
+                let collection_name = collection.name.clone();
+                filter_button.connect_clicked(move |_| {
+                    {
+                        let w = this.borrow();
+                        w.current_category.replace(None);
+                        w.current_category_name.replace(None);
+                        w.current_collection.replace(Some(collection_id));
+                        w.current_collection_name
+                            .replace(Some(collection_name.clone()));
+                    }
+                    Self::load_media(&this);
+                    this.borrow().show_list();
+                    dialog.close();
+                });
+                row_box.append(&filter_button);
+
+                let delete_button = Button::with_label("🗑");
+                delete_button.add_css_class("flat-button");
+                delete_button.set_tooltip_text(Some(
+                    &translations_for_refresh.borrow().t("collections.delete"),
+                ));
+                let db_path = db_path_for_refresh.clone();
+                let refresh_inner = refresh_weak.clone();
+                let dialog_confirm = dialog_for_refresh.clone();
+                let translations_confirm = translations_for_refresh.clone();
+                let collection_id = collection.id;
+                delete_button.connect_clicked(move |_| {
+                    let title = translations_confirm
+                        .borrow()
+                        .t("collections.delete_confirm.title");
+                    let detail = translations_confirm
+                        .borrow()
+                        .t("collections.delete_confirm.detail");
+                    let cancel = translations_confirm.borrow().t("button.cancel");
+                    let delete = translations_confirm
+                        .borrow()
+                        .t("collections.delete_confirm.delete");
+                    let confirm = gtk4::AlertDialog::builder()
+                        .modal(true)
+                        .message(&title)
+                        .detail(&detail)
+                        .buttons([cancel.as_str(), delete.as_str()])
+                        .cancel_button(0)
+                        .default_button(0)
+                        .build();
+                    let db_path = db_path.clone();
+                    let refresh_inner = refresh_inner.clone();
+                    confirm.choose(
+                        Some(&dialog_confirm),
+                        None::<&gio::Cancellable>,
+                        move |response| {
+                            if !matches!(response, Ok(1)) {
                                 return;
                             }
-                        };
-                        let mut repo = MediaRepository::new(&mut conn);
-                        let result = if check.is_active() {
-                            repo.add_media_to_collection(collection_id, media_id)
-                        } else {
-                            repo.remove_media_from_collection(collection_id, media_id)
-                        };
-                        if let Err(error) = result {
-                            eprintln!("Error actualizando colección: {}", error);
-                        }
-                        close_db(conn);
-                    });
-                    row_box.append(&check);
-                } else {
-                    let filter_button = Button::with_label(&label_text);
-                    filter_button.add_css_class("flat-button");
-                    filter_button.set_halign(gtk4::Align::Start);
-                    filter_button.set_hexpand(true);
-                    {
-                        let w = this_for_refresh.borrow();
-                        if *w.current_collection.borrow() == Some(collection.id) {
-                            filter_button.add_css_class("active");
-                        }
-                    }
-                    let this = this_for_refresh.clone();
-                    let dialog = dialog_for_refresh.clone();
-                    let collection_id = collection.id;
-                    let collection_name = collection.name.clone();
-                    filter_button.connect_clicked(move |_| {
-                        {
-                            let w = this.borrow();
-                            w.current_category.replace(None);
-                            w.current_category_name.replace(None);
-                            w.current_collection.replace(Some(collection_id));
-                            w.current_collection_name
-                                .replace(Some(collection_name.clone()));
-                        }
-                        Self::load_media(&this);
-                        this.borrow().show_list();
-                        dialog.close();
-                    });
-                    row_box.append(&filter_button);
-
-                    let delete_button = Button::with_label("🗑");
-                    delete_button.add_css_class("flat-button");
-                    delete_button.set_tooltip_text(Some(
-                        &translations_for_refresh.borrow().t("collections.delete"),
-                    ));
-                    let db_path = db_path_for_refresh.clone();
-                    let refresh_inner = refresh_weak.clone();
-                    let dialog_confirm = dialog_for_refresh.clone();
-                    let translations_confirm = translations_for_refresh.clone();
-                    let collection_id = collection.id;
-                    delete_button.connect_clicked(move |_| {
-                        let title = translations_confirm
-                            .borrow()
-                            .t("collections.delete_confirm.title");
-                        let detail = translations_confirm
-                            .borrow()
-                            .t("collections.delete_confirm.detail");
-                        let cancel = translations_confirm.borrow().t("button.cancel");
-                        let delete = translations_confirm
-                            .borrow()
-                            .t("collections.delete_confirm.delete");
-                        let confirm = gtk4::AlertDialog::builder()
-                            .modal(true)
-                            .message(&title)
-                            .detail(&detail)
-                            .buttons([cancel.as_str(), delete.as_str()])
-                            .cancel_button(0)
-                            .default_button(0)
-                            .build();
-                        let db_path = db_path.clone();
-                        let refresh_inner = refresh_inner.clone();
-                        confirm.choose(
-                            Some(&dialog_confirm),
-                            None::<&gio::Cancellable>,
-                            move |response| {
-                                if !matches!(response, Ok(1)) {
+                            let mut conn = match open_db(&db_path) {
+                                Ok(c) => c,
+                                Err(error) => {
+                                    eprintln!("Error abriendo BD para borrar colección: {}", error);
                                     return;
                                 }
-                                let mut conn = match open_db(&db_path) {
-                                    Ok(c) => c,
-                                    Err(error) => {
-                                        eprintln!(
-                                            "Error abriendo BD para borrar colección: {}",
-                                            error
-                                        );
-                                        return;
-                                    }
-                                };
-                                let mut repo = MediaRepository::new(&mut conn);
-                                if let Err(error) = repo.delete_collection(collection_id) {
-                                    eprintln!("Error borrando colección: {}", error);
-                                }
-                                close_db(conn);
-                                if let Some(slot) = refresh_inner.upgrade()
-                                    && let Some(refresh) = slot.borrow().as_ref()
-                                {
-                                    refresh();
-                                }
-                            },
-                        );
-                    });
-                    row_box.append(&delete_button);
-                }
+                            };
+                            let mut repo = MediaRepository::new(&mut conn);
+                            if let Err(error) = repo.delete_collection(collection_id) {
+                                eprintln!("Error borrando colección: {}", error);
+                            }
+                            close_db(conn);
+                            if let Some(slot) = refresh_inner.upgrade()
+                                && let Some(refresh) = slot.borrow().as_ref()
+                            {
+                                refresh();
+                            }
+                        },
+                    );
+                });
+                row_box.append(&delete_button);
 
                 row.set_child(Some(&row_box));
                 list_for_refresh.append(&row);
@@ -2570,7 +2746,7 @@ impl MainWindow {
         refresh_fn();
 
         let entry_create = entry.clone();
-        let db_path_create = db_path.clone();
+        let db_path_create = db_path_for_refresh_clone.clone();
         let refresh_create = refresh_slot.clone();
         create_button.connect_clicked(move |_| {
             let name = entry_create.text().to_string();
@@ -2583,12 +2759,8 @@ impl MainWindow {
             };
             let mut repo = MediaRepository::new(&mut conn);
             match repo.get_or_create_collection(&name) {
-                Ok(Some(collection_id)) => {
-                    if let Some(media_id) = media_id
-                        && let Err(error) = repo.add_media_to_collection(collection_id, media_id)
-                    {
-                        eprintln!("Error añadiendo medio a colección: {}", error);
-                    }
+                Ok(Some(_collection_id)) => {
+                    // Modo filtro: solo se crea la colección, no se asigna ningún medio.
                 }
                 Ok(None) => {}
                 Err(error) => eprintln!("Error creando colección: {}", error),
@@ -2600,10 +2772,13 @@ impl MainWindow {
             }
         });
 
+        let close_button = Button::with_label(&translations.borrow().t("collections.close"));
+        close_button.set_halign(gtk4::Align::End);
+        content.append(&close_button);
         let dialog_close = dialog.clone();
         close_button.connect_clicked(move |_| dialog_close.close());
 
-        dialog.present();
+        let _ = refresh_weak;
     }
 
     /// Reproduce un archivo de vídeo en mpv. Cuando la reproducción termina,

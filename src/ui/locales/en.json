@@ -81,6 +81,8 @@
   "collections.create": "Create",
   "collections.empty": "No collections yet. Create one above.",
   "collections.close": "Close",
+  "collections.add_selected": "Add to selected collection",
+  "collections.cancel": "Cancel",
   "collections.delete": "Delete collection",
   "collections.delete_confirm.title": "Delete the collection?",
   "collections.delete_confirm.detail": "The collection will be deleted, but the media stays in your library.",

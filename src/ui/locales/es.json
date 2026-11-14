@@ -81,6 +81,8 @@
   "collections.create": "Crear",
   "collections.empty": "Aún no hay colecciones. Crea una arriba.",
   "collections.close": "Cerrar",
+  "collections.add_selected": "Añadir a la colección seleccionada",
+  "collections.cancel": "Volver",
   "collections.delete": "Eliminar colección",
   "collections.delete_confirm.title": "¿Eliminar la colección?",
   "collections.delete_confirm.detail": "Se eliminará la colección, pero los medios seguirán en la biblioteca.",
